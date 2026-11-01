@@ -424,7 +424,20 @@ app.get('/api/businesses/:id/workspace', (req: Request, res: Response) => {
   const bookings = db.prepare('SELECT * FROM bookings WHERE business_id = ? ORDER BY created_at DESC').all(businessId);
   const customers = db.prepare('SELECT * FROM customers WHERE business_id = ? ORDER BY total_spent DESC').all(businessId);
   const employees = db.prepare('SELECT * FROM employees WHERE business_id = ? ORDER BY created_at ASC').all(businessId);
-  const payments = db.prepare('SELECT * FROM payments WHERE business_id = ? ORDER BY created_at DESC').all(businessId);
+  const payments = db.prepare(`
+    SELECT p.*,
+      snap.payment_method_id,
+      snap.method_name AS payment_method_name,
+      snap.account_name AS payment_account_name,
+      snap.account_number AS payment_account_number
+    FROM payments p
+    LEFT JOIN payment_instruction_snapshots snap ON snap.payment_id = p.id
+    WHERE p.business_id = ?
+    ORDER BY p.created_at DESC
+  `).all(businessId);
+  const paymentMethods = db.prepare(
+    'SELECT * FROM business_payment_methods WHERE business_id = ? ORDER BY sort_order ASC, created_at DESC'
+  ).all(businessId);
   const promotions = db.prepare('SELECT * FROM promotions WHERE business_id = ? ORDER BY expires_at DESC').all(businessId);
   const campaigns = db.prepare('SELECT * FROM campaigns WHERE business_id = ? ORDER BY created_at DESC').all(businessId);
   const expenses = db.prepare('SELECT * FROM expenses WHERE business_id = ? ORDER BY incurred_date DESC').all(businessId);
@@ -448,12 +461,83 @@ app.get('/api/businesses/:id/workspace', (req: Request, res: Response) => {
     customers,
     employees,
     payments,
+    paymentMethods,
     promotions,
     campaigns,
     expenses,
     cannedReplies,
     activeAddons,
   });
+});
+
+// Business-owned manual payment instructions (soft-disable only; historical orders keep snapshots)
+app.post('/api/businesses/:id/payment-methods', (req: Request, res: Response) => {
+  const access = verifyTenantAccess(req.user, req.params.id, 'orders.manage');
+  if (!access.allowed) {
+    res.status(403).json({ error: access.error });
+    return;
+  }
+
+  const methodName = String(req.body.method_name || '').trim();
+  const accountName = String(req.body.account_name || '').trim();
+  const accountNumber = String(req.body.account_number || '').trim();
+  if (!methodName || !accountName || !accountNumber) {
+    res.status(400).json({ error: 'Payment method name, account holder name, and account number are required.' });
+    return;
+  }
+  if (methodName.length > 80 || accountName.length > 120 || accountNumber.length > 80) {
+    res.status(400).json({ error: 'Payment details exceed the allowed length.' });
+    return;
+  }
+
+  const id = 'pm_' + crypto.randomBytes(6).toString('hex');
+  const now = new Date().toISOString();
+  const nextOrder = db.prepare('SELECT COALESCE(MAX(sort_order), 0) + 1 AS nextOrder FROM business_payment_methods WHERE business_id = ?').get(req.params.id) as any;
+  db.prepare(`
+    INSERT INTO business_payment_methods (id, business_id, method_name, account_name, account_number, is_active, sort_order, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?)
+  `).run(id, req.params.id, methodName, accountName, accountNumber, Number(nextOrder?.nextOrder || 1), now, now);
+
+  const methods = db.prepare('SELECT * FROM business_payment_methods WHERE business_id = ? ORDER BY sort_order ASC, created_at DESC').all(req.params.id);
+  res.status(201).json({ paymentMethods: methods, createdId: id });
+});
+
+app.patch('/api/businesses/:id/payment-methods/:methodId', (req: Request, res: Response) => {
+  const access = verifyTenantAccess(req.user, req.params.id, 'orders.manage');
+  if (!access.allowed) {
+    res.status(403).json({ error: access.error });
+    return;
+  }
+
+  const existing = db.prepare(
+    'SELECT * FROM business_payment_methods WHERE id = ? AND business_id = ?'
+  ).get(req.params.methodId, req.params.id) as any;
+  if (!existing) {
+    res.status(404).json({ error: 'Payment method not found for this business.' });
+    return;
+  }
+
+  const methodName = req.body.method_name !== undefined ? String(req.body.method_name).trim() : existing.method_name;
+  const accountName = req.body.account_name !== undefined ? String(req.body.account_name).trim() : existing.account_name;
+  const accountNumber = req.body.account_number !== undefined ? String(req.body.account_number).trim() : existing.account_number;
+  const isActive = req.body.is_active !== undefined ? (req.body.is_active ? 1 : 0) : existing.is_active;
+  if (!methodName || !accountName || !accountNumber) {
+    res.status(400).json({ error: 'Payment method name, account holder name, and account number cannot be empty.' });
+    return;
+  }
+  if (methodName.length > 80 || accountName.length > 120 || accountNumber.length > 80) {
+    res.status(400).json({ error: 'Payment details exceed the allowed length.' });
+    return;
+  }
+
+  db.prepare(`
+    UPDATE business_payment_methods
+    SET method_name = ?, account_name = ?, account_number = ?, is_active = ?, updated_at = ?
+    WHERE id = ? AND business_id = ?
+  `).run(methodName, accountName, accountNumber, isActive, new Date().toISOString(), req.params.methodId, req.params.id);
+
+  const methods = db.prepare('SELECT * FROM business_payment_methods WHERE business_id = ? ORDER BY sort_order ASC, created_at DESC').all(req.params.id);
+  res.json({ paymentMethods: methods });
 });
 
 // Update Business Settings & Telegram Integration
@@ -1798,6 +1882,9 @@ app.get('/api/storefront/:slug', (req: Request, res: Response) => {
   const branches = db.prepare('SELECT * FROM business_branches WHERE business_id = ?').all(business.id);
   const promotions = db.prepare('SELECT code, name, discount_type, discount_value, min_order_amount FROM promotions WHERE business_id = ? AND active = 1').all(business.id);
   const faqs = db.prepare('SELECT title, content FROM canned_replies WHERE business_id = ? AND is_faq = 1').all(business.id);
+  const paymentMethods = db.prepare(
+    'SELECT id, method_name, account_name, account_number FROM business_payment_methods WHERE business_id = ? AND is_active = 1 ORDER BY sort_order ASC, created_at ASC'
+  ).all(business.id);
 
   res.json({
     business: {
@@ -1825,6 +1912,7 @@ app.get('/api/storefront/:slug', (req: Request, res: Response) => {
     branches,
     promotions,
     faqs,
+    paymentMethods,
   });
 });
 
