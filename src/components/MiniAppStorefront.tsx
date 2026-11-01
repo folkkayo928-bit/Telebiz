@@ -130,7 +130,7 @@ export const MiniAppStorefront: React.FC<StorefrontProps> = ({
 
   const sessionId = 'sess_' + slug;
 
-  const recordFunnelEvent = async (eventType: string, pageName = activeTab, productId?: string) => {
+  const recordFunnelEvent = async (eventType: string, pageName = activeTab, productId?: string, sourceOverride?: 'telegram' | 'web') => {
     try {
       await fetch('/api/storefront/' + slug + '/event', {
         method: 'POST',
@@ -139,8 +139,8 @@ export const MiniAppStorefront: React.FC<StorefrontProps> = ({
           event_type: eventType,
           page_name: pageName,
           product_id: productId || null,
-          source: channelSource,
-          device_type: channelSource === 'telegram' ? 'mobile_tg' : 'desktop_web',
+          source: sourceOverride || channelSource,
+          device_type: (sourceOverride || channelSource) === 'telegram' ? 'mobile_tg' : 'desktop_web',
           session_id: sessionId,
         }),
       });
@@ -171,16 +171,12 @@ export const MiniAppStorefront: React.FC<StorefrontProps> = ({
   };
 
   useEffect(() => {
+    const telegramWebApp = typeof window !== 'undefined' && Boolean((window as any).Telegram?.WebApp?.initData);
+    const detectedSource = telegramWebApp ? 'telegram' : 'web';
+    setChannelSource(detectedSource);
     loadStorefront();
-    recordFunnelEvent('app_visit', 'home');
-  }, [slug]);
-
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const telegramWebApp = Boolean((window as any).Telegram?.WebApp?.initData);
-      setChannelSource(telegramWebApp ? 'telegram' : 'web');
-    }
-  }, [mode]);
+    recordFunnelEvent('app_visit', 'home', undefined, detectedSource);
+  }, [slug, mode]);
 
   if (loading) {
     return (
