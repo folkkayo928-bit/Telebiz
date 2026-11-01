@@ -22,3 +22,164 @@
     font-variant-numeric: tabular-nums;
   }
 }
+
+
+/* TeleBiz business workspace visual system */
+.telebiz-app {
+  min-height: 100vh;
+  background: #f5f7fb;
+}
+
+.telebiz-topbar {
+  min-height: 68px;
+  border-bottom: 1px solid #e8edf4;
+  background: rgba(255, 255, 255, 0.94);
+  backdrop-filter: blur(16px);
+}
+
+.telebiz-contextbar {
+  position: sticky;
+  top: 68px;
+  z-index: 30;
+  border-bottom: 1px solid #e8edf4;
+  background: rgba(249, 250, 252, 0.96);
+  backdrop-filter: blur(14px);
+}
+
+.telebiz-sidebar {
+  border-right: 1px solid #e8edf4;
+  background: #f8f9fc;
+}
+
+.telebiz-owner-main {
+  min-width: 0;
+}
+
+.telebiz-page-intro {
+  padding: 0.1rem 0 0.35rem;
+}
+
+.telebiz-owner-main .rounded-xl.border,
+.telebiz-owner-main .rounded-2xl.border {
+  border-color: #e8edf4;
+  border-radius: 1.15rem;
+  box-shadow: 0 3px 14px rgba(15, 23, 42, 0.035);
+}
+
+.telebiz-owner-main input:not([type="checkbox"]):not([type="radio"]),
+.telebiz-owner-main select,
+.telebiz-owner-main textarea,
+.telebiz-contextbar select {
+  border-radius: 0.8rem;
+  transition: border-color 160ms ease, box-shadow 160ms ease, background-color 160ms ease;
+}
+
+.telebiz-owner-main input:focus,
+.telebiz-owner-main select:focus,
+.telebiz-owner-main textarea:focus,
+.telebiz-contextbar select:focus {
+  outline: none;
+  border-color: #818cf8;
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.12);
+}
+
+.telebiz-owner-main table thead {
+  background: #f8fafc;
+}
+
+.telebiz-owner-main table th {
+  color: #64748b;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.055em;
+  text-transform: uppercase;
+}
+
+.telebiz-owner-main table tbody tr {
+  transition: background-color 140ms ease;
+}
+
+.telebiz-owner-main table tbody tr:hover {
+  background-color: #f8faff;
+}
+
+.telebiz-owner-main button {
+  transition: background-color 150ms ease, border-color 150ms ease, color 150ms ease, box-shadow 150ms ease, transform 150ms ease;
+}
+
+.telebiz-owner-main button:focus-visible,
+.telebiz-sidebar button:focus-visible,
+.telebiz-mobile-nav button:focus-visible {
+  outline: 3px solid rgba(99, 102, 241, 0.35);
+  outline-offset: 2px;
+}
+
+.telebiz-side-link {
+  min-height: 42px;
+}
+
+.telebiz-mobile-nav {
+  padding-bottom: max(0.55rem, env(safe-area-inset-bottom));
+}
+
+.telebiz-mobile-more {
+  max-height: min(65vh, 520px);
+  overflow-y: auto;
+}
+
+.dark .telebiz-app {
+  background: #080d18;
+}
+
+.dark .telebiz-topbar {
+  border-color: #1e293b;
+  background: rgba(10, 15, 27, 0.94);
+}
+
+.dark .telebiz-contextbar {
+  border-color: #1e293b;
+  background: rgba(12, 18, 31, 0.96);
+}
+
+.dark .telebiz-sidebar {
+  border-color: #1e293b;
+  background: #0b1220;
+}
+
+.dark .telebiz-owner-main .rounded-xl.border,
+.dark .telebiz-owner-main .rounded-2xl.border {
+  border-color: #263449;
+  box-shadow: 0 3px 18px rgba(0, 0, 0, 0.14);
+}
+
+.dark .telebiz-owner-main table thead {
+  background: #111b2c;
+}
+
+.dark .telebiz-owner-main table tbody tr:hover {
+  background-color: rgba(30, 41, 59, 0.48);
+}
+
+@media (max-width: 1023px) {
+  .telebiz-contextbar {
+    top: 68px;
+  }
+
+  .telebiz-workspace {
+    display: block;
+  }
+
+  .telebiz-owner-main {
+    max-width: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .telebiz-owner-main *,
+  .telebiz-mobile-nav *,
+  .telebiz-sidebar * {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
+}

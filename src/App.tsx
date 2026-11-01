@@ -6,6 +6,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   LayoutDashboard,
+  Building2,
+  MoreHorizontal,
   Layers,
   Package,
   ShoppingCart,
@@ -52,6 +54,7 @@ export default function App() {
   const [supportThreads, setSupportThreads] = useState<any[]>([]);
   const [marketplaceAddons, setMarketplaceAddons] = useState<any[]>([]);
   const [activeModule, setActiveModule] = useState<ActiveModule>('overview');
+  const [mobileMoreOpen, setMobileMoreOpen] = useState(false);
   const [lang, setLang] = useState<LanguageCode>('en');
   const [loading, setLoading] = useState(true);
 
@@ -593,175 +596,126 @@ export default function App() {
 
   const activeBusiness = workspace?.business || businesses[0];
   const activeConversation = supportThreads.find((c) => c.id === selectedConvId) || supportThreads[0];
+  const moduleMeta: Record<ActiveModule, { title: string; description: string }> = {
+    overview: { title: 'Business overview', description: 'A clear view of your business performance and daily activity.' },
+    builder: { title: 'Your mini app', description: 'Create, customize and publish your Telegram and web storefront.' },
+    commerce: { title: 'Products & services', description: 'Keep your catalog, inventory and bookable services organized.' },
+    orders: { title: 'Orders & payments', description: 'Review orders, manage fulfillment and verify incoming payments.' },
+    support: { title: 'Customer support', description: 'Keep customer conversations, replies and order context together.' },
+    analytics: { title: 'Business analytics', description: 'Understand visits, customer behavior and sales conversion.' },
+    team: { title: 'Team & operations', description: 'Manage staff access, branches and business expenses.' },
+    marketing: { title: 'Marketing & customers', description: 'Build customer relationships with promotions, loyalty and campaigns.' },
+    telegram: { title: 'Channels & connections', description: 'Connect your Telegram bot, optionally link a channel, and manage web access.' },
+    subscriptions: { title: 'Plans & add-ons', description: 'Manage your platform plan and activate optional services.' },
+    superadmin: { title: 'Platform administration', description: 'Manage the businesses and services across TeleBiz.' },
+  };
 
   return (
-    <div className="min-h-screen flex flex-col bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100">
-      {/* STRICT TOP BAR CONTRACT: 3 Zones separated by gap-8 */}
-      <header className="flex items-center justify-between gap-8 px-6 py-3.5 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 sticky top-0 z-30">
-        {/* Zone 1: Single text element wordmark */}
+    <div className="telebiz-app min-h-screen flex flex-col bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100">
+      <header className="telebiz-topbar sticky top-0 z-40 flex items-center justify-between gap-4 px-4 py-3 sm:px-6 lg:px-8">
         <a
           href="#overview"
-          onClick={(e) => {
-            e.preventDefault();
-            setActiveModule('overview');
-          }}
-          className="text-lg font-display font-bold tracking-tight text-slate-900 dark:text-white whitespace-nowrap shrink-0"
+          onClick={(e) => { e.preventDefault(); setActiveModule('overview'); setMobileMoreOpen(false); }}
+          className="flex min-w-0 items-center gap-3"
+          aria-label="TeleBiz workspace home"
         >
-          {t.platformTitle}
+          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-slate-950 text-white shadow-sm dark:bg-indigo-500">
+            <Building2 className="h-5 w-5" />
+          </span>
+          <span className="min-w-0">
+            <span className="block truncate text-base font-bold tracking-tight text-slate-950 dark:text-white">{t.platformTitle}</span>
+            <span className="hidden text-[10px] font-medium uppercase tracking-[0.16em] text-slate-400 sm:block">Business workspace</span>
+          </span>
         </a>
 
-        {/* Zone 2: 5 clean single-line text navigation links */}
-        <nav className="hidden md:flex items-center gap-6 text-sm font-medium text-slate-600 dark:text-slate-300">
-          <a
-            href="#overview"
-            onClick={(e) => {
-              e.preventDefault();
-              setActiveModule('overview');
-            }}
-            className={`hover:text-slate-900 dark:hover:text-white transition-colors whitespace-nowrap shrink-0 ${
-              activeModule === 'overview' ? 'text-slate-900 dark:text-white underline underline-offset-4' : ''
-            }`}
-          >
-            {t.overview}
-          </a>
-          <a
-            href="#builder"
-            onClick={(e) => {
-              e.preventDefault();
-              setActiveModule('builder');
-            }}
-            className={`hover:text-slate-900 dark:hover:text-white transition-colors whitespace-nowrap shrink-0 ${
-              activeModule === 'builder' ? 'text-slate-900 dark:text-white underline underline-offset-4' : ''
-            }`}
-          >
-            {t.builder}
-          </a>
-          <a
-            href="#orders"
-            onClick={(e) => {
-              e.preventDefault();
-              setActiveModule('orders');
-            }}
-            className={`hover:text-slate-900 dark:hover:text-white transition-colors whitespace-nowrap shrink-0 ${
-              activeModule === 'orders' ? 'text-slate-900 dark:text-white underline underline-offset-4' : ''
-            }`}
-          >
-            {t.ordersPayments}
-          </a>
-          <a
-            href="#support"
-            onClick={(e) => {
-              e.preventDefault();
-              setActiveModule('support');
-            }}
-            className={`hover:text-slate-900 dark:hover:text-white transition-colors whitespace-nowrap shrink-0 ${
-              activeModule === 'support' ? 'text-slate-900 dark:text-white underline underline-offset-4' : ''
-            }`}
-          >
-            {t.supportInbox}
-          </a>
-          <a
-            href="#analytics"
-            onClick={(e) => {
-              e.preventDefault();
-              setActiveModule('analytics');
-            }}
-            className={`hover:text-slate-900 dark:hover:text-white transition-colors whitespace-nowrap shrink-0 ${
-              activeModule === 'analytics' ? 'text-slate-900 dark:text-white underline underline-offset-4' : ''
-            }`}
-          >
-            {t.analytics}
-          </a>
-        </nav>
+        <div className="hidden min-w-0 flex-1 items-center justify-center lg:flex">
+          <div className="flex max-w-md items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-4 py-2 text-xs text-slate-500 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-400">
+            <span className="h-2 w-2 rounded-full bg-emerald-500" />
+            <span className="font-medium text-slate-700 dark:text-slate-200">{activeBusiness?.name || 'Select a business'}</span>
+            <span className="text-slate-300 dark:text-slate-700">/</span>
+            <span className="truncate">Business management</span>
+          </div>
+        </div>
 
-        {/* Zone 3: 1 primary action */}
-        <div className="flex items-center gap-3 shrink-0">
+        <div className="flex shrink-0 items-center gap-2 sm:gap-3">
+          <span className="hidden text-right sm:block">
+            <span className="block max-w-32 truncate text-xs font-semibold text-slate-800 dark:text-slate-100">{currentUser?.name || 'Workspace user'}</span>
+            <span className="block text-[10px] text-slate-400">{currentUser?.platform_role === 'super_admin' ? 'Platform administrator' : 'Business workspace'}</span>
+          </span>
           <button
             type="button"
             onClick={() => setFullStorefrontOpen((prev) => !prev)}
-            className="px-4 py-2 text-xs font-semibold text-white bg-sky-600 rounded-lg hover:bg-sky-500 transition-colors whitespace-nowrap shrink-0"
+            className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-3.5 py-2.5 text-xs font-semibold text-white shadow-sm transition hover:bg-indigo-500 sm:px-4"
           >
-            {fullStorefrontOpen ? 'Back to Operating Console' : t.liveStorefront}
+            <ExternalLink className="h-3.5 w-3.5" />
+            <span className="hidden sm:inline">{fullStorefrontOpen ? 'Back to workspace' : 'Preview store'}</span>
+            <span className="sm:hidden">{fullStorefrontOpen ? 'Back' : 'Preview'}</span>
           </button>
         </div>
       </header>
 
-      {/* Workspace Context Bar (Tenant Switcher, Role Switcher, Language Switcher) */}
-      <div className="px-6 py-2.5 bg-slate-100/80 dark:bg-slate-900/60 border-b border-slate-200 dark:border-slate-800 flex flex-wrap items-center justify-between gap-3 text-xs">
-        <div className="flex flex-wrap items-center gap-3">
-          <div className="flex items-center gap-1.5">
-            <span className="text-slate-500 font-medium">Active Business Tenant:</span>
+      <div className="telebiz-contextbar flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-6 lg:px-8">
+        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2.5">
+          <div className="min-w-0 flex-1 sm:max-w-sm">
+            <label htmlFor="active-business-select" className="mb-1 block text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">Active business</label>
             <select
+              id="active-business-select"
               value={selectedBusinessId}
               onChange={(e) => setSelectedBusinessId(e.target.value)}
-              className="px-2.5 py-1 rounded-md border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 font-semibold text-slate-900 dark:text-white"
+              className="telebiz-select w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-xs font-semibold text-slate-800 outline-none transition focus:border-indigo-400 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
             >
               {businesses.map((b: any) => (
-                <option key={b.id} value={b.id}>
-                  {b.name} ({b.category} · {b.creation_method})
-                </option>
+                <option key={b.id} value={b.id}>{b.name} · {b.category}</option>
               ))}
             </select>
           </div>
-
           <button
             type="button"
             onClick={() => setNewBizModalOpen(true)}
-            className="px-2.5 py-1 rounded-md bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 font-medium hover:bg-slate-50 flex items-center gap-1 whitespace-nowrap"
+            className="mt-4 inline-flex shrink-0 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-xs font-semibold text-slate-700 shadow-sm transition hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-indigo-950/40"
           >
-            <Plus className="w-3.5 h-3.5" />
-            {t.createNewBusiness}
+            <Plus className="h-4 w-4" />
+            <span className="hidden sm:inline">{t.createNewBusiness}</span>
+            <span className="sm:hidden">New</span>
           </button>
         </div>
 
-        <div className="flex flex-wrap items-center gap-3">
-          {/* Role & Account Switcher for Testing Multi-Tenant Isolation & Super Admin */}
-          <div className="flex items-center gap-1.5">
-            <span className="text-slate-500">Session Identity:</span>
-            <select
-              value={currentUser?.id || ''}
-              onChange={(e) => handleSwitchDemoAccount(e.target.value)}
-              className="px-2.5 py-1 rounded-md border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 font-medium"
-            >
-              {availableAccounts.map((acc: any) => (
-                <option key={acc.id} value={acc.id}>
-                  {acc.name} ({acc.platform_role === 'super_admin' ? 'Platform Super Admin' : 'Business Owner'})
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <button
-            type="button"
-            onClick={() => setAuthModalOpen(true)}
-            className="text-slate-600 dark:text-slate-300 hover:underline font-medium"
-          >
-            Sign In / Register
-          </button>
-
-          {/* Multilingual Interface Switcher (English, Amharic, Afaan Oromoo) */}
-          <div className="flex items-center gap-1 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-md p-0.5">
+        <div className="flex items-center justify-between gap-3 sm:justify-end">
+          {activeBusiness && (
+            <span className="hidden items-center gap-2 rounded-full bg-emerald-50 px-3 py-2 text-[11px] font-semibold text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300 md:inline-flex">
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+              {String(activeBusiness.status || 'active').replace(/_/g, ' ')}
+            </span>
+          )}
+          <div className="flex items-center gap-1 rounded-xl border border-slate-200 bg-white p-1 dark:border-slate-800 dark:bg-slate-900" aria-label="Language">
             {(['en', 'am', 'om'] as LanguageCode[]).map((code) => (
               <button
                 key={code}
                 type="button"
                 onClick={() => handleLanguageChange(code)}
-                className={`px-2 py-0.5 rounded text-[11px] font-medium transition-colors whitespace-nowrap ${
+                className={'rounded-lg px-2.5 py-1.5 text-[10px] font-semibold transition ' + (
                   lang === code
-                    ? 'bg-slate-900 text-white dark:bg-sky-600'
-                    : 'text-slate-600 dark:text-slate-300 hover:text-slate-900'
-                }`}
+                    ? 'bg-slate-950 text-white dark:bg-indigo-500'
+                    : 'text-slate-500 hover:bg-slate-100 hover:text-slate-900 dark:hover:bg-slate-800 dark:hover:text-white'
+                )}
               >
                 {LANGUAGE_LABELS[code]}
               </button>
             ))}
           </div>
+          <button
+            type="button"
+            onClick={() => setAuthModalOpen(true)}
+            className="text-xs font-semibold text-slate-500 transition hover:text-indigo-600 dark:text-slate-400 dark:hover:text-indigo-300"
+          >
+            {currentUser?.name ? 'Account' : 'Sign in'}
+          </button>
         </div>
       </div>
 
       {/* Status Notification Banner */}
       {statusBanner && (
-        <div className="px-6 py-2 bg-sky-900 text-white text-xs flex items-center justify-between">
+        <div className="mx-4 my-3 flex items-center justify-between rounded-xl border border-indigo-100 bg-indigo-50 px-4 py-3 text-xs text-indigo-900 sm:mx-6 lg:mx-8 dark:border-indigo-900/60 dark:bg-indigo-950/40 dark:text-indigo-200">
           <span>{statusBanner}</span>
           <button type="button" onClick={() => setStatusBanner('')} className="underline ml-4">
             Dismiss
@@ -781,88 +735,90 @@ export default function App() {
         </div>
       ) : (
         /* Main Operating Platform Layout: Sidebar (256px) + Main Content Viewport */
-        <div className="flex-1 flex flex-col lg:flex-row">
-          {/* Sidebar Navigation */}
-          <aside className="w-full lg:w-64 shrink-0 bg-white dark:bg-slate-900 border-b lg:border-b-0 lg:border-r border-slate-200 dark:border-slate-800 p-4 flex flex-col justify-between gap-6">
-            <div className="space-y-1">
-              <div className="px-3 py-1.5 text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
-                Business Operating Modules
+        <div className="telebiz-workspace flex-1 flex min-h-0">
+          {/* Desktop business navigation */}
+          <aside className="telebiz-sidebar hidden w-[248px] shrink-0 flex-col justify-between gap-6 px-4 py-6 lg:sticky lg:top-[134px] lg:flex lg:h-[calc(100vh-134px)] lg:overflow-y-auto">
+            <div className="space-y-5">
+              <div className="px-3">
+                <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-400">Workspace</p>
+                <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Manage your business</p>
               </div>
-              {[
-                { id: 'overview', label: t.overview, icon: LayoutDashboard },
-                { id: 'builder', label: t.builder, icon: Layers },
-                { id: 'commerce', label: t.commerce, icon: Package },
-                { id: 'orders', label: t.ordersPayments, icon: ShoppingCart },
-                { id: 'support', label: t.supportInbox, icon: MessageSquare },
-                { id: 'analytics', label: t.analytics, icon: BarChart3 },
-                { id: 'team', label: t.teamBranches, icon: Users },
-                { id: 'marketing', label: t.marketing, icon: Megaphone },
-                { id: 'telegram', label: t.telegramSetup, icon: Send },
-                { id: 'subscriptions', label: t.subscriptions, icon: CreditCard },
-              ].map((item) => {
-                const Icon = item.icon;
-                const active = activeModule === item.id;
-                return (
-                  <button
-                    key={item.id}
-                    type="button"
-                    onClick={() => setActiveModule(item.id as ActiveModule)}
-                    className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium transition-colors whitespace-nowrap ${
-                      active
-                        ? 'bg-slate-900 text-white dark:bg-sky-600'
-                        : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
-                    }`}
-                  >
-                    <Icon className="w-4 h-4 shrink-0" />
-                    <span className="truncate">{item.label}</span>
-                  </button>
-                );
-              })}
+              <div className="space-y-1.5">
+                {[
+                  { id: 'overview', label: t.overview, icon: LayoutDashboard },
+                  { id: 'builder', label: t.builder, icon: Layers },
+                  { id: 'commerce', label: t.commerce, icon: Package },
+                  { id: 'orders', label: t.ordersPayments, icon: ShoppingCart },
+                  { id: 'support', label: t.supportInbox, icon: MessageSquare },
+                  { id: 'analytics', label: t.analytics, icon: BarChart3 },
+                  { id: 'team', label: t.teamBranches, icon: Users },
+                  { id: 'marketing', label: t.marketing, icon: Megaphone },
+                  { id: 'telegram', label: t.telegramSetup, icon: Send },
+                  { id: 'subscriptions', label: t.subscriptions, icon: CreditCard },
+                ].map((item) => {
+                  const Icon = item.icon;
+                  const active = activeModule === item.id;
+                  return (
+                    <button
+                      key={item.id}
+                      type="button"
+                      onClick={() => { setActiveModule(item.id as ActiveModule); setMobileMoreOpen(false); }}
+                      aria-current={active ? 'page' : undefined}
+                      className={'telebiz-side-link flex w-full items-center gap-3 rounded-xl px-3.5 py-3 text-left text-xs font-semibold transition ' + (
+                        active
+                          ? 'bg-slate-950 text-white shadow-sm dark:bg-indigo-500'
+                          : 'text-slate-600 hover:bg-white hover:text-slate-950 dark:text-slate-300 dark:hover:bg-slate-900 dark:hover:text-white'
+                      )}
+                    >
+                      <Icon className="h-4 w-4 shrink-0" />
+                      <span className="min-w-0 flex-1 truncate">{item.label}</span>
+                      {active && <span className="h-1.5 w-1.5 rounded-full bg-indigo-300" />}
+                    </button>
+                  );
+                })}
+              </div>
 
-              <div className="pt-4 mt-4 border-t border-slate-200 dark:border-slate-800">
-                <div className="px-3 py-1.5 text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
-                  Platform Governance
+              {currentUser?.platform_role === 'super_admin' && (
+                <div className="border-t border-slate-200 pt-4 dark:border-slate-800">
+                  <p className="px-3 pb-2 text-[10px] font-bold uppercase tracking-[0.16em] text-slate-400">Platform</p>
+                  <button
+                    type="button"
+                    onClick={() => setActiveModule('superadmin')}
+                    aria-current={activeModule === 'superadmin' ? 'page' : undefined}
+                    className={'flex w-full items-center gap-3 rounded-xl px-3.5 py-3 text-left text-xs font-semibold transition ' + (
+                      activeModule === 'superadmin'
+                        ? 'bg-indigo-600 text-white shadow-sm'
+                        : 'text-indigo-700 hover:bg-indigo-50 dark:text-indigo-300 dark:hover:bg-indigo-950/40'
+                    )}
+                  >
+                    <ShieldAlert className="h-4 w-4 shrink-0" />
+                    <span>Super admin console</span>
+                  </button>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (currentUser?.platform_role !== 'super_admin') {
-                      handleSwitchDemoAccount('usr_superadmin');
-                    }
-                    setActiveModule('superadmin');
-                  }}
-                  className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-semibold transition-colors whitespace-nowrap ${
-                    activeModule === 'superadmin'
-                      ? 'bg-amber-600 text-white'
-                      : 'text-amber-800 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-950/40'
-                  }`}
-                >
-                  <ShieldAlert className="w-4 h-4 shrink-0" />
-                  <span className="truncate">{t.superAdmin}</span>
-                </button>
-              </div>
+              )}
             </div>
 
-            {/* Tenant Isolation & Subscription Summary Footer */}
             {activeBusiness && (
-              <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 space-y-1.5 text-xs">
-                <div className="font-semibold text-slate-900 dark:text-white truncate">{activeBusiness.name}</div>
-                <div className="text-[11px] text-slate-500">
-                  Plan: <span className="uppercase font-semibold">{activeBusiness.plan_id}</span> ·{' '}
-                  <span>{activeBusiness.subscription_status}</span>
+              <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+                <div className="flex items-center gap-2.5">
+                  <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-indigo-50 text-sm font-bold text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300">
+                    {String(activeBusiness.name || 'B').slice(0, 1).toUpperCase()}
+                  </span>
+                  <div className="min-w-0">
+                    <p className="truncate text-xs font-semibold text-slate-900 dark:text-white">{activeBusiness.name}</p>
+                    <p className="mt-0.5 truncate text-[10px] text-slate-500">{activeBusiness.plan_id || 'Free'} plan</p>
+                  </div>
                 </div>
-                <div className="text-[11px] text-slate-500 truncate">
-                  Bot: <span className="font-mono">{activeBusiness.telegram_bot_username || 'Not linked'}</span>
-                </div>
-                <div className="text-[11px] text-slate-500">
-                  Viewer Role: <span className="font-mono uppercase">{workspace?.viewerRole || 'owner'}</span>
+                <div className="mt-3 flex items-center justify-between border-t border-slate-100 pt-3 text-[10px] dark:border-slate-800">
+                  <span className="text-slate-500">Status</span>
+                  <span className="font-semibold capitalize text-emerald-600">{String(activeBusiness.status || 'active').replace(/_/g, ' ')}</span>
                 </div>
               </div>
             )}
           </aside>
 
           {/* Main Workspace Content Area */}
-          <main className="flex-1 p-6 max-w-[1440px] w-full mx-auto space-y-6">
+          <main className="telebiz-owner-main mx-auto w-full max-w-[1480px] flex-1 space-y-6 px-4 pb-28 pt-5 sm:px-6 lg:px-8 lg:pb-8 lg:pt-7">
             {/* Grace Period / Subscription Alert if applicable */}
             {activeBusiness?.subscription_status === 'grace_period' && (
               <div className="p-4 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/60 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
@@ -884,17 +840,33 @@ export default function App() {
               </div>
             )}
 
+            {activeModule !== 'overview' && activeModule !== 'superadmin' && (
+              <section className="telebiz-page-intro flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
+                <div className="min-w-0">
+                  <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-indigo-600 dark:text-indigo-300">Business workspace</p>
+                  <h1 className="mt-1.5 text-2xl font-bold tracking-tight text-slate-950 dark:text-white sm:text-3xl">{moduleMeta[activeModule].title}</h1>
+                  <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500 dark:text-slate-400">{moduleMeta[activeModule].description}</p>
+                </div>
+                {activeBusiness && (
+                  <div className="hidden shrink-0 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-xs font-semibold text-slate-600 shadow-sm dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300 sm:flex">
+                    <Building2 className="h-4 w-4 text-indigo-500" />
+                    {activeBusiness.name}
+                  </div>
+                )}
+              </section>
+            )}
+
             {/* MODULE 1: EXECUTIVE OVERVIEW DASHBOARD */}
             {activeModule === 'overview' && analyticsData && workspace && (
               <div className="space-y-6">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                   <div>
-                    <h1 className="text-2xl font-display font-bold text-slate-900 dark:text-white">
+                    <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-indigo-600 dark:text-indigo-300">Business overview</p>
+                    <h1 className="mt-1 text-2xl font-bold tracking-tight text-slate-950 dark:text-white">
                       {activeBusiness.name}
                     </h1>
-                    <p className="text-xs text-slate-500 mt-0.5">
-                      Category: {activeBusiness.category} · Creation Method: {activeBusiness.creation_method} · Live Mini App v
-                      {activeBusiness.mini_app_version}
+                    <p className="mt-1.5 text-xs text-slate-500">
+                      {activeBusiness.category} · {String(activeBusiness.creation_method || '').replace(/_/g, ' ')} · Mini app v{activeBusiness.mini_app_version}
                     </p>
                   </div>
                   <div className="flex items-center gap-2">
@@ -909,7 +881,7 @@ export default function App() {
                     <button
                       type="button"
                       onClick={() => setActiveModule('builder')}
-                      className="px-4 py-2 rounded-lg bg-slate-900 dark:bg-white text-white dark:text-slate-900 text-xs font-semibold"
+                      className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2.5 text-xs font-semibold text-white shadow-sm transition hover:bg-indigo-500"
                     >
                       Customize Mini App
                     </button>
@@ -2322,6 +2294,67 @@ export default function App() {
             )}
           </main>
         </div>
+      )}
+
+      {!fullStorefrontOpen && (
+        <>
+          {mobileMoreOpen && (
+            <div className="telebiz-mobile-more fixed inset-x-3 bottom-[82px] z-50 rounded-2xl border border-slate-200 bg-white p-2 shadow-2xl shadow-slate-950/15 dark:border-slate-700 dark:bg-slate-900 lg:hidden">
+              <p className="px-3 py-2 text-[10px] font-bold uppercase tracking-[0.16em] text-slate-400">More workspace tools</p>
+              {[
+                { id: 'commerce', label: t.commerce, icon: Package },
+                { id: 'analytics', label: t.analytics, icon: BarChart3 },
+                { id: 'team', label: t.teamBranches, icon: Users },
+                { id: 'marketing', label: t.marketing, icon: Megaphone },
+                { id: 'telegram', label: t.telegramSetup, icon: Send },
+                { id: 'subscriptions', label: t.subscriptions, icon: CreditCard },
+                ...(currentUser?.platform_role === 'super_admin' ? [{ id: 'superadmin', label: t.superAdmin, icon: ShieldAlert }] : []),
+              ].map((item) => {
+                const Icon = item.icon;
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => { setActiveModule(item.id as ActiveModule); setMobileMoreOpen(false); }}
+                    className="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-xs font-semibold text-slate-700 transition hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-800"
+                  >
+                    <Icon className="h-4 w-4 text-indigo-500" />
+                    {item.label}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+          <nav className="telebiz-mobile-nav fixed inset-x-0 bottom-0 z-40 grid grid-cols-5 gap-1 border-t border-slate-200 bg-white/95 px-2 pt-2 shadow-[0_-8px_30px_rgba(15,23,42,0.08)] backdrop-blur-xl dark:border-slate-800 dark:bg-slate-950/95 lg:hidden" aria-label="Business navigation">
+            {[
+              { id: 'overview', label: 'Home', icon: LayoutDashboard },
+              { id: 'builder', label: 'Builder', icon: Layers },
+              { id: 'orders', label: 'Orders', icon: ShoppingCart },
+              { id: 'support', label: 'Support', icon: MessageSquare },
+              { id: 'more', label: 'More', icon: MoreHorizontal },
+            ].map((item) => {
+              const Icon = item.icon;
+              const active = item.id === 'more' ? mobileMoreOpen : activeModule === item.id;
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => item.id === 'more'
+                    ? setMobileMoreOpen((open) => !open)
+                    : (setActiveModule(item.id as ActiveModule), setMobileMoreOpen(false))}
+                  aria-current={item.id !== 'more' && active ? 'page' : undefined}
+                  aria-expanded={item.id === 'more' ? mobileMoreOpen : undefined}
+                  className={'flex min-w-0 flex-col items-center justify-center gap-1 rounded-xl px-1 py-2 text-[10px] font-semibold transition ' + (
+                    active ? 'bg-indigo-50 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300' : 'text-slate-500 hover:bg-slate-50 dark:text-slate-400 dark:hover:bg-slate-900'
+                  )}
+                >
+                  <Icon className="h-5 w-5" />
+                  <span>{item.label}</span>
+                </button>
+              );
+            })}
+          </nav>
+        </>
       )}
 
       {/* MODAL: CREATE NEW BUSINESS MINI APP (3 CREATION METHODS) */}
