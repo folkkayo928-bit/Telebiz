@@ -228,6 +228,31 @@ export function initDatabase() {
       description TEXT DEFAULT '',
       created_at TEXT NOT NULL
     );
+ 
+    CREATE TABLE IF NOT EXISTS business_payment_methods (
+      id TEXT PRIMARY KEY,
+      business_id TEXT NOT NULL REFERENCES businesses(id) ON DELETE CASCADE,
+      method_name TEXT NOT NULL,
+      account_name TEXT NOT NULL,
+      account_number TEXT NOT NULL,
+      is_active INTEGER NOT NULL DEFAULT 1,
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_business_payment_methods_business
+      ON business_payment_methods(business_id, is_active, sort_order);
+
+    CREATE TABLE IF NOT EXISTS payment_instruction_snapshots (
+      payment_id TEXT PRIMARY KEY REFERENCES payments(id) ON DELETE CASCADE,
+      payment_method_id TEXT NOT NULL DEFAULT '',
+      method_name TEXT NOT NULL,
+      account_name TEXT NOT NULL,
+      account_number TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+
 
     CREATE TABLE IF NOT EXISTS support_conversations (
       id TEXT PRIMARY KEY,
