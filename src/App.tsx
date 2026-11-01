@@ -1353,7 +1353,7 @@ export default function App() {
                           </div>
                         ))}
                       </div>
-                      <p className="mt-3 text-[10px] leading-5 text-slate-400">Service editing is not yet available in the current backend. You can create and manage the listings shown here.</p>
+                      <p className="mt-3 text-[10px] leading-5 text-slate-400">Service editing is not yet supported by the current backend. This screen can create and display service listings.</p>
                     </div>
                   </section>
 
