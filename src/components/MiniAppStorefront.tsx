@@ -3,11 +3,9 @@ import {
   ArrowRight,
   BadgeCheck,
   Calendar,
-  Check,
   CheckCircle2,
   ChevronRight,
   Clock,
-  ExternalLink,
   Heart,
   Mail,
   MapPin,
@@ -649,7 +647,7 @@ export const MiniAppStorefront: React.FC<StorefrontProps> = ({
         <p className="text-[10px] text-slate-400">Powered by <span className="font-semibold text-slate-500 dark:text-slate-300">TeleBiz</span> · {business.name}</p>
       </footer>
 
-      <nav className="telebiz-store-mobile-nav sticky bottom-0 z-30 grid grid-cols-5 border-t border-slate-200 bg-white/95 px-1.5 pt-2 backdrop-blur-xl dark:border-slate-800 dark:bg-slate-950/95 sm:hidden" aria-label="Store sections">
+      <nav className="telebiz-store-mobile-nav sticky bottom-0 z-30 grid border-t border-slate-200 bg-white/95 px-1.5 pt-2 backdrop-blur-xl dark:border-slate-800 dark:bg-slate-950/95 sm:hidden" style={{ gridTemplateColumns: 'repeat(' + visibleNavItems.length + ', minmax(0, 1fr))' }} aria-label="Store sections">
         {visibleNavItems.map((item) => {
           const Icon = item.icon;
           const active = activeTab === item.id;
