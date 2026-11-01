@@ -68,6 +68,16 @@ export default function App() {
   const [newBizModalOpen, setNewBizModalOpen] = useState(false);
   const [authModalOpen, setAuthModalOpen] = useState(false);
   const [statusBanner, setStatusBanner] = useState('');
+  const [paymentMethodName, setPaymentMethodName] = useState('');
+  const [paymentAccountName, setPaymentAccountName] = useState('');
+  const [paymentAccountNumber, setPaymentAccountNumber] = useState('');
+  const [editingPaymentMethod, setEditingPaymentMethod] = useState<any>(null);
+  const [paymentMethodSaving, setPaymentMethodSaving] = useState(false);
+  const [paymentMethodError, setPaymentMethodError] = useState('');
+  const [verificationPaymentId, setVerificationPaymentId] = useState('');
+  const [verificationReference, setVerificationReference] = useState('');
+  const [verificationSaving, setVerificationSaving] = useState(false);
+  const [orderManagementError, setOrderManagementError] = useState('');
 
   // New Business Form State
   const [newBizName, setNewBizName] = useState('');
@@ -220,6 +230,14 @@ export default function App() {
     setProductSearch('');
     setProductStockFilter('all');
     setCommerceError('');
+    setEditingPaymentMethod(null);
+    setPaymentMethodName('');
+    setPaymentAccountName('');
+    setPaymentAccountNumber('');
+    setPaymentMethodError('');
+    setVerificationPaymentId('');
+    setVerificationReference('');
+    setOrderManagementError('');
   }, [selectedBusinessId, authToken, loadTenantWorkspace]);
 
   const handleSwitchDemoAccount = async (userId: string) => {
@@ -404,15 +422,114 @@ export default function App() {
     }
   };
 
-  const handleVerifyPayment = async (paymentId: string, action: 'verify' | 'fail' | 'refund') => {
-    const res = await fetch(`/api/businesses/${selectedBusinessId}/payments/${paymentId}/verify`, {
-      method: 'POST',
-      headers: headersWithAuth(),
-      body: JSON.stringify({ action }),
-    });
-    if (res.ok) {
-      loadTenantWorkspace(selectedBusinessId);
-      setStatusBanner(`Payment ${action === 'verify' ? 'verified & order marked Paid' : action + 'ed'}.`);
+  const handleSavePaymentMethod = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (paymentMethodSaving) return;
+    setPaymentMethodSaving(true);
+    setPaymentMethodError('');
+    setOrderManagementError('');
+    try {
+      const editingId = editingPaymentMethod?.id;
+      const res = await fetch(
+        editingId
+          ? `/api/businesses/${selectedBusinessId}/payment-methods/${editingId}`
+          : `/api/businesses/${selectedBusinessId}/payment-methods`,
+        {
+          method: editingId ? 'PATCH' : 'POST',
+          headers: headersWithAuth(),
+          body: JSON.stringify({
+            method_name: paymentMethodName.trim(),
+            account_name: paymentAccountName.trim(),
+            account_number: paymentAccountNumber.trim(),
+          }),
+        }
+      );
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setPaymentMethodError(json.error || 'The payment method could not be saved.');
+        return;
+      }
+      setEditingPaymentMethod(null);
+      setPaymentMethodName('');
+      setPaymentAccountName('');
+      setPaymentAccountNumber('');
+      await loadTenantWorkspace(selectedBusinessId);
+      setStatusBanner(editingId ? 'Payment method updated.' : 'Payment method added to checkout.');
+    } catch (err: any) {
+      setPaymentMethodError(err.message || 'Network error. Payment details were not saved.');
+    } finally {
+      setPaymentMethodSaving(false);
+    }
+  };
+
+  const handleEditPaymentMethod = (method: any) => {
+    setEditingPaymentMethod(method);
+    setPaymentMethodName(method.method_name || '');
+    setPaymentAccountName(method.account_name || '');
+    setPaymentAccountNumber(method.account_number || '');
+    setPaymentMethodError('');
+  };
+
+  const handleTogglePaymentMethod = async (method: any) => {
+    setPaymentMethodError('');
+    try {
+      const res = await fetch(`/api/businesses/${selectedBusinessId}/payment-methods/${method.id}`, {
+        method: 'PATCH',
+        headers: headersWithAuth(),
+        body: JSON.stringify({
+          method_name: method.method_name,
+          account_name: method.account_name,
+          account_number: method.account_number,
+          is_active: !Boolean(Number(method.is_active)),
+        }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setPaymentMethodError(json.error || 'Payment method status could not be changed.');
+        return;
+      }
+      await loadTenantWorkspace(selectedBusinessId);
+    } catch (err: any) {
+      setPaymentMethodError(err.message || 'Network error. Payment method status was not changed.');
+    }
+  };
+
+  const handleVerifyPayment = async (
+    paymentId: string,
+    action: 'verify' | 'fail' | 'refund',
+    providerTxId?: string
+  ) => {
+    if (action === 'verify' && String(providerTxId || '').trim().length < 3) {
+      setOrderManagementError('Enter the real transaction reference after confirming the payment was received.');
+      return;
+    }
+    setVerificationSaving(true);
+    setOrderManagementError('');
+    try {
+      const res = await fetch(`/api/businesses/${selectedBusinessId}/payments/${paymentId}/verify`, {
+        method: 'POST',
+        headers: headersWithAuth(),
+        body: JSON.stringify({ action, provider_tx_id: providerTxId }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setOrderManagementError(json.error || 'Payment status could not be updated.');
+        return;
+      }
+      setVerificationPaymentId('');
+      setVerificationReference('');
+      await loadTenantWorkspace(selectedBusinessId);
+      setStatusBanner(
+        action === 'verify'
+          ? 'Payment verified and order marked as paid.'
+          : action === 'refund'
+          ? 'Payment refund recorded.'
+          : 'Payment marked as failed.'
+      );
+    } catch (err: any) {
+      setOrderManagementError(err.message || 'Network error. Payment status was not changed.');
+    } finally {
+      setVerificationSaving(false);
     }
   };
 
