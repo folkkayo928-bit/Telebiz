@@ -50,12 +50,17 @@ export const BuilderStudio: React.FC<BuilderStudioProps> = ({
   const [versionNote, setVersionNote] = useState('');
   const [saving, setSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState('');
+  const [actionError, setActionError] = useState('');
+  const [restoringVersionId, setRestoringVersionId] = useState('');
+  const [dfySaving, setDfySaving] = useState(false);
 
   // AI Builder State
   const [aiPrompt, setAiPrompt] = useState('');
   const [aiLoading, setAiLoading] = useState(false);
   const [aiSummary, setAiSummary] = useState('');
   const [aiError, setAiError] = useState('');
+  const [aiNotice, setAiNotice] = useState('');
+  const [aiGenerationsUsed, setAiGenerationsUsed] = useState(Number(business.ai_generations_used || 0));
 
   // DFY State
   const [dfyNotes, setDfyNotes] = useState(business.dfy_notes || '');
@@ -74,6 +79,7 @@ export const BuilderStudio: React.FC<BuilderStudioProps> = ({
     setAccentColor(business.accent_color || '#0284C7');
     setDfyNotes(business.dfy_notes || '');
     setDfyStatus(business.dfy_status || 'requested');
+    setAiGenerationsUsed(Number(business.ai_generations_used || 0));
   }, [business.id, versions]);
 
   const moveSection = (index: number, direction: -1 | 1) => {
@@ -168,6 +174,7 @@ export const BuilderStudio: React.FC<BuilderStudioProps> = ({
   const handleSaveVersion = async (status: 'draft' | 'published') => {
     setSaving(true);
     setSaveMessage('');
+    setActionError('');
     try {
       const res = await fetch(`/api/businesses/${business.id}/builder/save`, {
         method: 'POST',
@@ -188,38 +195,56 @@ export const BuilderStudio: React.FC<BuilderStudioProps> = ({
           note: versionNote || (status === 'published' ? 'Published via Visual Builder' : 'Saved Draft'),
         }),
       });
-      const json = await res.json();
-      if (res.ok) {
-        setSaveMessage(
-          status === 'published'
-            ? `Published Version v${json.versionNumber} live to Telegram & Web!`
-            : `Saved Draft Version v${json.versionNumber}.`
-        );
-        setVersionNote('');
-        onRefresh();
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setActionError(json.error || 'We could not save these changes. Please try again.');
+        return;
       }
+      setSaveMessage(
+        status === 'published'
+          ? `Published version v${json.versionNumber ?? ''} to Telegram & Web.`.trim()
+          : `Saved draft version v${json.versionNumber ?? ''}.`.trim()
+      );
+      setVersionNote('');
+      onRefresh();
+    } catch (err: any) {
+      setActionError(err.message || 'Network error. Your changes have not been saved.');
     } finally {
       setSaving(false);
     }
   };
 
   const handleRestoreVersion = async (versionId: string) => {
-    const res = await fetch(`/api/businesses/${business.id}/builder/restore/${versionId}`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${authToken}` },
-    });
-    if (res.ok) {
-      setSaveMessage('Restored selected version and published live.');
+    setRestoringVersionId(versionId);
+    setSaveMessage('');
+    setActionError('');
+    try {
+      const res = await fetch(`/api/businesses/${business.id}/builder/restore/${versionId}`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${authToken}` },
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setActionError(json.error || 'This version could not be restored. Please try again.');
+        return;
+      }
+      setSaveMessage('The selected version has been restored and published.');
       onRefresh();
+    } catch (err: any) {
+      setActionError(err.message || 'Network error. The version was not restored.');
+    } finally {
+      setRestoringVersionId('');
     }
   };
 
   const handleRunAiBuilder = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!aiPrompt.trim()) return;
+    if (!aiPrompt.trim() || aiLoading) return;
     setAiLoading(true);
     setAiError('');
     setAiSummary('');
+    setAiNotice('');
+    setActionError('');
     try {
       const res = await fetch(`/api/businesses/${business.id}/ai-builder`, {
         method: 'POST',
@@ -232,21 +257,27 @@ export const BuilderStudio: React.FC<BuilderStudioProps> = ({
           currentLayout: sections,
         }),
       });
-      const json = await res.json();
+      const json = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setAiError(json.error || 'AI generation failed');
+        setAiError(json.error || 'AI generation failed. Please try again.');
       } else {
         if (json.aiResult?.sections?.length) {
           setSections(json.aiResult.sections);
         }
+        if (json.aiResult?.theme?.primaryColor) {
+          setPrimaryColor(json.aiResult.theme.primaryColor);
+        }
         if (json.aiResult?.theme?.accentColor) {
           setAccentColor(json.aiResult.theme.accentColor);
         }
-        setAiSummary(json.aiResult?.summary || 'Generated updated Mini App layout.');
-        onRefresh();
+        if (json.ai_generations_used !== undefined) {
+          setAiGenerationsUsed(Number(json.ai_generations_used));
+        }
+        setAiNotice(json.notice || '');
+        setAiSummary(json.aiResult?.summary || 'Generated an updated Mini App layout.');
       }
     } catch (err: any) {
-      setAiError(err.message || 'Network error');
+      setAiError(err.message || 'Network error. Your layout has not been changed.');
     } finally {
       setAiLoading(false);
     }
@@ -254,76 +285,93 @@ export const BuilderStudio: React.FC<BuilderStudioProps> = ({
 
   const handleUpdateDfyRequest = async (e: React.FormEvent) => {
     e.preventDefault();
-    const res = await fetch(`/api/businesses/${business.id}/settings`, {
-      method: 'PATCH',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${authToken}`,
-      },
-      body: JSON.stringify({
-        dfy_status: dfyStatus,
-        dfy_notes: dfyNotes,
-        mini_app_published: dfyStatus === 'published' ? 1 : business.mini_app_published,
-      }),
-    });
-    if (res.ok) {
-      setSaveMessage('Updated Done-For-You project brief and pipeline status.');
+    if (dfySaving) return;
+    setDfySaving(true);
+    setSaveMessage('');
+    setActionError('');
+    try {
+      const res = await fetch(`/api/businesses/${business.id}/settings`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${authToken}`,
+        },
+        body: JSON.stringify({
+          dfy_status: dfyStatus,
+          dfy_notes: dfyNotes,
+          mini_app_published: dfyStatus === 'published' ? 1 : business.mini_app_published,
+        }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setActionError(json.error || 'We could not update the project brief. Please try again.');
+        return;
+      }
+      setSaveMessage('Done-for-you project brief updated.');
       onRefresh();
+    } catch (err: any) {
+      setActionError(err.message || 'Network error. Your project brief was not updated.');
+    } finally {
+      setDfySaving(false);
     }
   };
 
   return (
-    <div className="space-y-6">
-      {/* Mode Switcher Bar: 3 Creation Methods */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-200 dark:border-slate-800">
-        <div>
-          <h2 className="text-lg font-display font-bold text-slate-900 dark:text-white">
-            Mini App Creation & Customization Studio
-          </h2>
-          <p className="text-xs text-slate-500">
-            Switch seamlessly between Visual Self-Service Builder, Conversational AI Architect, and Done-For-You Concierge.
-          </p>
+    <div className="telebiz-builder space-y-6">
+      {/* Creation method selector */}
+      <section className="space-y-4">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+          <div className="space-y-1">
+            <div className="text-[10px] font-semibold uppercase tracking-[0.22em] text-slate-400">TeleBiz Studio</div>
+            <h2 className="text-2xl font-display font-semibold tracking-tight text-slate-950 dark:text-white sm:text-[28px]">
+              Build your storefront
+            </h2>
+            <p className="max-w-2xl text-sm leading-6 text-slate-500 dark:text-slate-400">
+              Shape your customer experience, then save a draft or publish when it is ready.
+            </p>
+          </div>
+          <div className="inline-flex w-fit items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-medium text-slate-600 shadow-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300">
+            <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+            {business.name}
+          </div>
         </div>
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+          <button type="button" onClick={() => setMode('visual')} aria-pressed={mode === 'visual'}
+            className={`group rounded-2xl border p-4 text-left transition-all ${mode === 'visual' ? 'border-slate-950 bg-white shadow-md ring-1 ring-slate-950/5 dark:border-white dark:bg-slate-900 dark:ring-white/10' : 'border-slate-200 bg-white/70 hover:border-slate-300 hover:bg-white dark:border-slate-800 dark:bg-slate-900/50 dark:hover:border-slate-700'}`}>
+            <div className="flex items-center justify-between">
+              <span className={`flex h-9 w-9 items-center justify-center rounded-xl ${mode === 'visual' ? 'bg-slate-950 text-white dark:bg-white dark:text-slate-950' : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300'}`}><Layers className="h-4 w-4" /></span>
+              {mode === 'visual' && <CheckCircle2 className="h-4 w-4 text-emerald-600" />}
+            </div>
+            <div className="mt-3 text-sm font-semibold text-slate-950 dark:text-white">Visual builder</div>
+            <p className="mt-1 text-xs leading-5 text-slate-500 dark:text-slate-400">Arrange sections, choose a template, and refine your brand.</p>
+          </button>
+          <button type="button" onClick={() => setMode('ai')} aria-pressed={mode === 'ai'}
+            className={`group rounded-2xl border p-4 text-left transition-all ${mode === 'ai' ? 'border-slate-950 bg-white shadow-md ring-1 ring-slate-950/5 dark:border-white dark:bg-slate-900 dark:ring-white/10' : 'border-slate-200 bg-white/70 hover:border-slate-300 hover:bg-white dark:border-slate-800 dark:bg-slate-900/50 dark:hover:border-slate-700'}`}>
+            <div className="flex items-center justify-between">
+              <span className={`flex h-9 w-9 items-center justify-center rounded-xl ${mode === 'ai' ? 'bg-slate-950 text-white dark:bg-white dark:text-slate-950' : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300'}`}><Sparkles className="h-4 w-4" /></span>
+              <span className="text-[10px] font-medium tabular-nums text-slate-400">{aiGenerationsUsed}/{business.ai_generations_limit ?? 0} uses</span>
+            </div>
+            <div className="mt-3 text-sm font-semibold text-slate-950 dark:text-white">AI builder</div>
+            <p className="mt-1 text-xs leading-5 text-slate-500 dark:text-slate-400">Describe what you need and get a tailored layout to review.</p>
+          </button>
+          <button type="button" onClick={() => setMode('dfy')} aria-pressed={mode === 'dfy'}
+            className={`group rounded-2xl border p-4 text-left transition-all ${mode === 'dfy' ? 'border-slate-950 bg-white shadow-md ring-1 ring-slate-950/5 dark:border-white dark:bg-slate-900 dark:ring-white/10' : 'border-slate-200 bg-white/70 hover:border-slate-300 hover:bg-white dark:border-slate-800 dark:bg-slate-900/50 dark:hover:border-slate-700'}`}>
+            <div className="flex items-center justify-between">
+              <span className={`flex h-9 w-9 items-center justify-center rounded-xl ${mode === 'dfy' ? 'bg-slate-950 text-white dark:bg-white dark:text-slate-950' : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300'}`}><Wrench className="h-4 w-4" /></span>
+              {business.dfy_status && business.dfy_status !== 'not_applicable' && <span className="rounded-full bg-slate-100 px-2 py-1 text-[10px] font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300">{String(business.dfy_status).replace(/_/g, ' ')}</span>}
+            </div>
+            <div className="mt-3 text-sm font-semibold text-slate-950 dark:text-white">Done for you</div>
+            <p className="mt-1 text-xs leading-5 text-slate-500 dark:text-slate-400">Send your brief to the TeleBiz team for assisted setup.</p>
+          </button>
+        </div>
+      </section>
 
-        <div className="flex items-center gap-1 p-1 bg-slate-100 dark:bg-slate-800 rounded-lg shrink-0">
-          <button
-            type="button"
-            onClick={() => setMode('visual')}
-            className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors whitespace-nowrap flex items-center gap-1.5 ${
-              mode === 'visual'
-                ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-xs'
-                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
-            }`}
-          >
-            <Layers className="w-3.5 h-3.5" />
-            1. Self-Service Visual Builder
-          </button>
-          <button
-            type="button"
-            onClick={() => setMode('ai')}
-            className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors whitespace-nowrap flex items-center gap-1.5 ${
-              mode === 'ai'
-                ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-xs'
-                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
-            }`}
-          >
-            <Sparkles className="w-3.5 h-3.5" />
-            2. AI-Powered Builder ({business.ai_generations_used}/{business.ai_generations_limit})
-          </button>
-          <button
-            type="button"
-            onClick={() => setMode('dfy')}
-            className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors whitespace-nowrap flex items-center gap-1.5 ${
-              mode === 'dfy'
-                ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-xs'
-                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
-            }`}
-          >
-            <Wrench className="w-3.5 h-3.5" />
-            3. Done-For-You Service
-          </button>
+      {saveMessage || actionError ? (
+        <div role="status" className={`flex items-center justify-between gap-3 rounded-xl border px-4 py-3 text-xs font-medium ${actionError ? 'border-rose-200 bg-rose-50 text-rose-800 dark:border-rose-900/60 dark:bg-rose-950/30 dark:text-rose-200' : 'border-emerald-200 bg-emerald-50 text-emerald-900 dark:border-emerald-900/60 dark:bg-emerald-950/30 dark:text-emerald-200'}`}>
+          <span>{actionError || saveMessage}</span>
+          <button type="button" onClick={() => { setSaveMessage(''); setActionError(''); }} className="shrink-0 text-current underline-offset-2 hover:underline">Dismiss</button>
         </div>
-      </div>
+      ) : null}
 
       {saveMessage && (
         <div className="p-3.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800/60 text-xs font-medium text-emerald-900 dark:text-emerald-200 flex items-center justify-between">
@@ -341,7 +389,7 @@ export const BuilderStudio: React.FC<BuilderStudioProps> = ({
           {mode === 'visual' && (
             <div className="space-y-6">
               {/* Ready-Made 9 Category Templates */}
-              <div className="p-5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl space-y-3">
+              <div className="p-5 sm:p-6 bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 rounded-2xl shadow-sm space-y-3">
                 <div className="flex items-center justify-between">
                   <h3 className="text-sm font-display font-semibold text-slate-900 dark:text-white">
                     Ready-Made Industry Templates (9 Categories)
@@ -364,7 +412,7 @@ export const BuilderStudio: React.FC<BuilderStudioProps> = ({
               </div>
 
               {/* Branding & Color Customization */}
-              <div className="p-5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl space-y-4">
+              <div className="p-5 sm:p-6 bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 rounded-2xl shadow-sm space-y-4">
                 <h3 className="text-sm font-display font-semibold text-slate-900 dark:text-white">
                   Branding & Color Palette
                 </h3>
@@ -411,7 +459,7 @@ export const BuilderStudio: React.FC<BuilderStudioProps> = ({
               </div>
 
               {/* Visual Section & Page Manager */}
-              <div className="p-5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl space-y-4">
+              <div className="p-5 sm:p-6 bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 rounded-2xl shadow-sm space-y-4">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <h3 className="text-sm font-display font-semibold text-slate-900 dark:text-white">
                     Page Sections & Layout Order ({sections.length})
@@ -435,6 +483,13 @@ export const BuilderStudio: React.FC<BuilderStudioProps> = ({
                 </div>
 
                 <div className="space-y-3">
+                  {sections.length === 0 && (
+                    <div className="rounded-xl border border-dashed border-slate-300 px-4 py-8 text-center dark:border-slate-700">
+                      <Layers className="mx-auto h-5 w-5 text-slate-400" />
+                      <p className="mt-2 text-xs font-medium text-slate-700 dark:text-slate-300">Your page is ready to design</p>
+                      <p className="mt-1 text-[11px] text-slate-500">Choose an industry template or add a section to get started.</p>
+                    </div>
+                  )}
                   {sections.map((sec, idx) => (
                     <div
                       key={sec.id || idx}
@@ -513,31 +568,34 @@ export const BuilderStudio: React.FC<BuilderStudioProps> = ({
                   <div className="flex items-center gap-2 shrink-0">
                     <button
                       type="button"
-                      disabled={saving}
+                      disabled={saving || restoringVersionId !== ''}
                       onClick={() => handleSaveVersion('draft')}
                       className="px-3.5 py-2 rounded-lg border border-slate-300 dark:border-slate-700 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100 whitespace-nowrap"
                     >
-                      Save Draft
+                      {saving ? 'Saving...' : 'Save Draft'}
                     </button>
                     <button
                       type="button"
-                      disabled={saving}
+                      disabled={saving || restoringVersionId !== ''}
                       onClick={() => handleSaveVersion('published')}
                       className="px-4 py-2 rounded-lg bg-sky-600 hover:bg-sky-500 text-white text-xs font-semibold flex items-center gap-1.5 whitespace-nowrap"
                     >
                       <Save className="w-3.5 h-3.5" />
-                      Publish Live (v{(versions[0]?.version_number || 1) + 1})
+                      {saving ? 'Publishing...' : `Publish live (v${(versions[0]?.version_number || 1) + 1})`}
                     </button>
                   </div>
                 </div>
               </div>
 
               {/* Version History & One-Click Restore */}
-              <div className="p-5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl space-y-3">
+              <div className="p-5 sm:p-6 bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 rounded-2xl shadow-sm space-y-3">
                 <h3 className="text-sm font-display font-semibold text-slate-900 dark:text-white">
                   Version History & Rollback ({versions.length} Revisions)
                 </h3>
                 <div className="divide-y divide-slate-100 dark:divide-slate-800 text-xs">
+                  {versions.length === 0 && (
+                    <p className="py-5 text-center text-xs text-slate-500">No saved versions yet. Save a draft to create your first revision.</p>
+                  )}
                   {versions.map((v) => (
                     <div key={v.id} className="py-2.5 flex items-center justify-between gap-4">
                       <div>
@@ -556,7 +614,7 @@ export const BuilderStudio: React.FC<BuilderStudioProps> = ({
                         onClick={() => handleRestoreVersion(v.id)}
                         className="px-2.5 py-1 rounded border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 flex items-center gap-1 shrink-0"
                       >
-                        <RotateCcw className="w-3 h-3" /> Restore
+                        <RotateCcw className="w-3 h-3" /> {restoringVersionId === v.id ? 'Restoring...' : 'Restore'}
                       </button>
                     </div>
                   ))}
@@ -567,7 +625,7 @@ export const BuilderStudio: React.FC<BuilderStudioProps> = ({
 
           {/* METHOD C: AI-POWERED MINI APP BUILDER */}
           {mode === 'ai' && (
-            <div className="p-5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl space-y-4">
+            <div className="p-5 sm:p-6 bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 rounded-2xl shadow-sm space-y-4">
               <div className="flex items-center justify-between">
                 <div>
                   <h3 className="text-sm font-display font-semibold text-slate-900 dark:text-white">
@@ -578,26 +636,34 @@ export const BuilderStudio: React.FC<BuilderStudioProps> = ({
                   </p>
                 </div>
                 <div className="text-right font-mono text-xs text-slate-600 dark:text-slate-400 tabular-nums">
-                  Quota: {business.ai_generations_used} / {business.ai_generations_limit} runs
+                  Quota: {aiGenerationsUsed} / {business.ai_generations_limit ?? 0} runs
                 </div>
               </div>
 
               {aiError && (
-                <div className="p-3 rounded-lg bg-rose-50 dark:bg-rose-950/50 border border-rose-200 text-xs text-rose-700 dark:text-rose-300">
+                <div role="alert" className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/50 border border-rose-200 text-xs text-rose-700 dark:text-rose-300">
                   {aiError}
+                </div>
+              )}
+
+              {aiNotice && (
+                <div className="rounded-xl border border-amber-200 bg-amber-50 px-3.5 py-3 text-xs leading-5 text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200">
+                  <span className="font-semibold">Provider notice:</span> {aiNotice}
                 </div>
               )}
 
               {aiSummary && (
                 <div className="p-3.5 rounded-xl bg-sky-50 dark:bg-sky-950/40 border border-sky-200 dark:border-sky-800 space-y-2 text-xs">
-                  <div className="font-semibold text-sky-950 dark:text-sky-200">AI Architect Recommendation Applied to Preview:</div>
+                  <div className="font-semibold text-sky-950 dark:text-sky-200">Your AI layout is ready to review</div>
                   <p className="text-sky-800 dark:text-sky-300">{aiSummary}</p>
+                  <p className="text-sky-700/80 dark:text-sky-300/80">The generated sections and theme are loaded into the editor. Review them before saving a draft or publishing.</p>
                   <button
                     type="button"
                     onClick={() => handleSaveVersion('published')}
-                    className="px-3.5 py-1.5 rounded-lg bg-sky-600 text-white font-semibold"
+                    disabled={saving || restoringVersionId !== ''}
+                    className="px-3.5 py-2 rounded-lg bg-slate-950 text-white font-semibold transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-white dark:text-slate-950"
                   >
-                    Publish AI Layout Changes
+                    {saving ? 'Publishing...' : 'Publish this layout'}
                   </button>
                 </div>
               )}
@@ -651,7 +717,7 @@ export const BuilderStudio: React.FC<BuilderStudioProps> = ({
 
           {/* METHOD A: DONE-FOR-YOU CREATION SERVICE */}
           {mode === 'dfy' && (
-            <div className="p-5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl space-y-5">
+            <div className="p-5 sm:p-6 bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 rounded-2xl shadow-sm space-y-5">
               <div>
                 <h3 className="text-sm font-display font-semibold text-slate-900 dark:text-white">
                   Done-For-You (DFY) Concierge Creation & Maintenance Service
@@ -703,26 +769,37 @@ export const BuilderStudio: React.FC<BuilderStudioProps> = ({
                 </div>
                 <button
                   type="submit"
-                  className="px-4 py-2 rounded-lg bg-sky-600 hover:bg-sky-500 text-white text-xs font-semibold flex items-center gap-1.5"
+                  disabled={dfySaving}
+                  className="px-4 py-2.5 rounded-xl bg-slate-950 text-white text-xs font-semibold transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-white dark:text-slate-950"
                 >
-                  <CheckCircle2 className="w-3.5 h-3.5" />
-                  Save DFY Project Status & Specification
+                  <CheckCircle2 className="mr-1.5 inline h-3.5 w-3.5" />
+                  {dfySaving ? 'Saving brief...' : 'Save project brief'}
                 </button>
               </form>
             </div>
           )}
         </div>
 
-        {/* Right Column: Live Interactive Mini App Preview (5 cols) */}
-        <div className="lg:col-span-5 space-y-2">
-          <div className="flex items-center justify-between text-xs text-slate-500 px-1">
-            <span className="font-medium text-slate-700 dark:text-slate-300">
-              Live Interactive Telegram Mini App Preview
-            </span>
-            <span>Real Database Connected</span>
+        {/* Customer-facing storefront: current published version */}
+        <aside className="space-y-3 lg:sticky lg:top-5">
+          <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400">Customer view</div>
+                <h3 className="mt-1 text-sm font-semibold text-slate-950 dark:text-white">Published storefront</h3>
+              </div>
+              <span className={`rounded-full px-2.5 py-1 text-[10px] font-semibold ${business.mini_app_published ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300' : 'bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300'}`}>
+                {business.mini_app_published ? 'Live' : 'Not published'}
+              </span>
+            </div>
+            <p className="mt-2 text-xs leading-5 text-slate-500 dark:text-slate-400">
+              This is the latest published customer experience. Your edits stay private until you publish them.
+            </p>
           </div>
-          <MiniAppStorefront slug={business.slug} mode="embedded_preview" onOrderCreated={onRefresh} />
-        </div>
+          <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-950">
+            <MiniAppStorefront slug={business.slug} mode="embedded_preview" onOrderCreated={onRefresh} />
+          </div>
+        </aside>
       </div>
     </div>
   );
