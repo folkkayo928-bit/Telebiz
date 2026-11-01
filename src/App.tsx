@@ -595,7 +595,7 @@ export default function App() {
   const activeConversation = supportThreads.find((c) => c.id === selectedConvId) || supportThreads[0];
 
   return (
-    <div className="min-h-screen flex flex-col bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100">
+    <div className="telebiz-app min-h-screen flex flex-col bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100">
       {/* STRICT TOP BAR CONTRACT: 3 Zones separated by gap-8 */}
       <header className="flex items-center justify-between gap-8 px-6 py-3.5 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 sticky top-0 z-30">
         {/* Zone 1: Single text element wordmark */}
