@@ -18,6 +18,7 @@ import {
   Send,
   ShoppingBag,
   Sparkles,
+  Copy,
   Store,
   X,
 } from 'lucide-react';
@@ -104,8 +105,8 @@ export const MiniAppStorefront: React.FC<StorefrontProps> = ({
   const [telegramUsername, setTelegramUsername] = useState('');
   const [deliveryAddress, setDeliveryAddress] = useState('');
   const [discountCode, setDiscountCode] = useState('');
-  const [paymentMethod, setPaymentMethod] = useState<'telebirr' | 'telegram_stars' | 'cbe_birr' | 'card'>('telebirr');
-  const [providerTxId] = useState('');
+  const [selectedPaymentMethodId, setSelectedPaymentMethodId] = useState('');
+  const [copyFeedback, setCopyFeedback] = useState('');
 
   const [orderResult, setOrderResult] = useState<any>(null);
   const [orderError, setOrderError] = useState('');
@@ -159,6 +160,10 @@ export const MiniAppStorefront: React.FC<StorefrontProps> = ({
         setError(json.error || 'Unable to load this storefront.');
       } else {
         setData(json);
+        const methods = Array.isArray(json.paymentMethods) ? json.paymentMethods : [];
+        setSelectedPaymentMethodId((current) =>
+          methods.some((method: any) => method.id === current) ? current : (methods[0]?.id || '')
+        );
         if (json.services?.length > 0 && !selectedServiceId) {
           setSelectedServiceId(json.services[0].id);
         }
@@ -203,7 +208,7 @@ export const MiniAppStorefront: React.FC<StorefrontProps> = ({
     );
   }
 
-  const { business, version, products = [], services = [], branches = [], promotions = [], faqs = [] } = data;
+  const { business, version, products = [], services = [], branches = [], promotions = [], faqs = [], paymentMethods = [] } = data;
   const catMeta = BUSINESS_CATEGORIES.find((c) => c.id === business.category) || BUSINESS_CATEGORIES[0];
   const layoutSections: any[] = parseJsonArray(version?.layout_json, []);
   const productCategories = ['All', ...Array.from(new Set(products.map((p: any) => p.category_name).filter(Boolean))) as string[]];
@@ -219,6 +224,7 @@ export const MiniAppStorefront: React.FC<StorefrontProps> = ({
 
   const cartCount = cart.reduce((sum, item) => sum + item.qty, 0);
   const cartSubtotal = cart.reduce((sum, item) => sum + item.price * item.qty, 0);
+  const selectedPaymentMethod = paymentMethods.find((method: any) => method.id === selectedPaymentMethodId);
   const primaryColor = business.primary_color || '#172554';
   const accentColor = business.accent_color || '#4f46e5';
   const selectedService = services.find((service: any) => service.id === selectedServiceId) || services[0];
@@ -257,6 +263,29 @@ export const MiniAppStorefront: React.FC<StorefrontProps> = ({
     loadStorefront();
   };
 
+  const handleCopyPaymentText = async (label: string, value: string) => {
+    if (!value) return;
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(value);
+      } else {
+        const field = document.createElement('textarea');
+        field.value = value;
+        field.setAttribute('readonly', 'true');
+        field.style.position = 'fixed';
+        field.style.opacity = '0';
+        document.body.appendChild(field);
+        field.select();
+        const copied = document.execCommand('copy');
+        document.body.removeChild(field);
+        if (!copied) throw new Error('Copy is not available in this browser.');
+      }
+      setCopyFeedback(label + ' copied.');
+    } catch {
+      setCopyFeedback('Could not copy automatically. Please select and copy the details.');
+    }
+  };
+
   const handleSubmitOrder = async (e: React.FormEvent) => {
     e.preventDefault();
     setOrderError('');
@@ -272,8 +301,7 @@ export const MiniAppStorefront: React.FC<StorefrontProps> = ({
           delivery_address: deliveryAddress,
           items: cart,
           discount_code: discountCode,
-          payment_method: paymentMethod,
-          provider_tx_id: providerTxId,
+          payment_method_id: selectedPaymentMethodId,
           source: channelSource,
         }),
       });
@@ -428,18 +456,64 @@ export const MiniAppStorefront: React.FC<StorefrontProps> = ({
       </nav>
 
       {orderResult && (
-        <div className="mx-4 mt-4 flex items-start gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-emerald-900 dark:border-emerald-900/70 dark:bg-emerald-950/40 dark:text-emerald-200 sm:mx-6">
-          <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0" />
-          <div className="min-w-0 flex-1">
-            <p className="text-sm font-bold">Order request received</p>
-            <p className="mt-1 text-xs leading-5">Order <span className="font-mono font-bold">{orderResult.orderNumber}</span> · {formatMoney(orderResult.total)} · Reference <span className="font-mono">{orderResult.referenceCode}</span></p>
-            <p className="mt-1 text-[11px] leading-5 text-emerald-800/80 dark:text-emerald-200/80">{orderResult.paymentStatus === 'paid' ? 'The payment status has been verified.' : 'Payment is not confirmed yet. The business must verify the transaction before the order is marked as paid.'}</p>
-          </div>
-          <button type="button" onClick={() => setOrderResult(null)} className="rounded-lg p-1 text-emerald-700 hover:bg-emerald-100 dark:text-emerald-200 dark:hover:bg-emerald-900/60" aria-label="Dismiss order confirmation"><X className="h-4 w-4" /></button>
+        <div className="mx-4 mt-4 sm:mx-6">
+          <section className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-amber-950 shadow-sm dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-sm font-bold">Order request received</p>
+                <p className="mt-1 text-xs leading-5">
+                  Order <span className="font-mono font-bold">{orderResult.orderNumber}</span> · {formatMoney(orderResult.total)} · Payment reference <span className="font-mono font-semibold">{orderResult.referenceCode}</span>
+                </p>
+                <p className="mt-2 text-[11px] leading-5">
+                  Your order is awaiting payment verification. Transfer the exact amount using the account details below. The business must confirm receipt before the order is marked as paid.
+                </p>
+              </div>
+              <button type="button" onClick={() => setOrderResult(null)} className="rounded-lg p-1 text-amber-800 hover:bg-amber-100 dark:text-amber-200 dark:hover:bg-amber-900/50" aria-label="Dismiss order instructions"><X className="h-4 w-4" /></button>
+            </div>
+
+            {orderResult.paymentMethod && (
+              <div className="mt-4 rounded-xl border border-amber-200/80 bg-white p-3.5 dark:border-amber-800/60 dark:bg-slate-950/70">
+                <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-amber-700 dark:text-amber-300">Selected payment account</p>
+                <div className="mt-3 space-y-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="text-[10px] text-slate-500">Payment method</p>
+                      <p className="mt-0.5 text-sm font-semibold text-slate-950 dark:text-white">{orderResult.paymentMethod.methodName}</p>
+                    </div>
+                    <button type="button" onClick={() => handleCopyPaymentText('Payment method name', orderResult.paymentMethod.methodName)} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-2.5 py-1.5 text-[10px] font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-900">
+                      <Copy className="h-3 w-3" /> Copy name
+                    </button>
+                  </div>
+                  <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-3 dark:border-slate-800">
+                    <div className="min-w-0">
+                      <p className="text-[10px] text-slate-500">Account holder name</p>
+                      <p className="mt-0.5 break-words text-sm font-semibold text-slate-950 dark:text-white">{orderResult.paymentMethod.accountName}</p>
+                    </div>
+                    <button type="button" onClick={() => handleCopyPaymentText('Account holder name', orderResult.paymentMethod.accountName)} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-2.5 py-1.5 text-[10px] font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-900">
+                      <Copy className="h-3 w-3" /> Copy name
+                    </button>
+                  </div>
+                  <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-3 dark:border-slate-800">
+                    <div className="min-w-0">
+                      <p className="text-[10px] text-slate-500">Account number</p>
+                      <p className="mt-0.5 break-all font-mono text-sm font-bold tracking-wide text-slate-950 dark:text-white">{orderResult.paymentMethod.accountNumber}</p>
+                    </div>
+                    <button type="button" onClick={() => handleCopyPaymentText('Account number', orderResult.paymentMethod.accountNumber)} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-2.5 py-1.5 text-[10px] font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-900">
+                      <Copy className="h-3 w-3" /> Copy number
+                    </button>
+                  </div>
+                  <button type="button" onClick={() => handleCopyPaymentText('Payment details', [orderResult.paymentMethod.methodName, orderResult.paymentMethod.accountName, orderResult.paymentMethod.accountNumber].join('\n'))} className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-slate-950 px-3 py-2.5 text-xs font-semibold text-white transition hover:bg-slate-800 dark:bg-white dark:text-slate-950">
+                    <Copy className="h-3.5 w-3.5" /> Copy all payment details
+                  </button>
+                  {copyFeedback && <p role="status" className="text-center text-[10px] font-medium text-emerald-700 dark:text-emerald-300">{copyFeedback}</p>}
+                </div>
+              </div>
+            )}
+          </section>
         </div>
       )}
 
-      <main className="telebiz-store-content flex-1 space-y-7 px-4 pb-6 pt-5 sm:px-6 sm:pt-7">
+            <main className="telebiz-store-content flex-1 space-y-7 px-4 pb-6 pt-5 sm:px-6 sm:pt-7">
         {activeTab === 'home' && (
           <div className="space-y-8">
             {heroSection ? (
@@ -687,11 +761,42 @@ export const MiniAppStorefront: React.FC<StorefrontProps> = ({
 
                   {channelSource === 'telegram' && <div><label className="telebiz-store-label">Telegram username <span className="font-normal normal-case tracking-normal text-slate-400">(optional)</span></label><input type="text" value={telegramUsername} onChange={(e) => setTelegramUsername(e.target.value)} placeholder="@username" className="telebiz-store-input w-full" /></div>}
 
-                  <div><label className="telebiz-store-label">Preferred payment method</label><select value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value as any)} className="telebiz-store-input w-full"><option value="telebirr">Telebirr</option><option value="telegram_stars">Telegram Stars (digital goods)</option><option value="cbe_birr">CBE Birr</option><option value="card">Debit or credit card</option></select></div>
+                  <div className="space-y-2">
+                    <label className="telebiz-store-label">Choose a payment method</label>
+                    {paymentMethods.length === 0 ? (
+                      <div className="rounded-xl border border-amber-200 bg-amber-50 p-3.5 text-[11px] leading-5 text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200">
+                        This business has not added a payment account yet. Please contact the business before placing an order.
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                        {paymentMethods.map((method: any) => (
+                          <button
+                            key={method.id}
+                            type="button"
+                            onClick={() => setSelectedPaymentMethodId(method.id)}
+                            aria-pressed={selectedPaymentMethodId === method.id}
+                            className={selectedPaymentMethodId === method.id
+                              ? 'rounded-xl border border-slate-950 bg-slate-50 p-3 text-left ring-1 ring-slate-950/10 dark:border-white dark:bg-slate-900 dark:ring-white/10'
+                              : 'rounded-xl border border-slate-200 bg-white p-3 text-left transition hover:border-slate-400 dark:border-slate-800 dark:bg-slate-950 dark:hover:border-slate-600'}
+                          >
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="text-xs font-semibold text-slate-950 dark:text-white">{method.method_name}</span>
+                              <span className={selectedPaymentMethodId === method.id ? 'h-2.5 w-2.5 rounded-full bg-emerald-500' : 'h-2.5 w-2.5 rounded-full border border-slate-300 dark:border-slate-600'} />
+                            </div>
+                            <p className="mt-1 text-[11px] text-slate-500">{method.account_name}</p>
+                            <p className="mt-1 break-all font-mono text-[11px] text-slate-700 dark:text-slate-300">{method.account_number}</p>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    {selectedPaymentMethod && (
+                      <p className="text-[10px] leading-5 text-slate-500">After you submit the order, the selected account details will remain visible with buttons to copy the account name and number.</p>
+                    )}
+                  </div>
 
-                  <div className="rounded-xl border border-amber-200 bg-amber-50 p-3.5 text-[11px] leading-5 text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200">Submitting this form sends your order request to the business. It does not confirm that payment has been completed. The business must verify the payment before marking the order as paid.</div>
+                  <div className="rounded-xl border border-amber-200 bg-amber-50 p-3.5 text-[11px] leading-5 text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200">Submitting this form sends your order request to the business. Payment remains pending until the business checks the incoming transfer and verifies it.</div>
 
-                  <div className="flex items-center justify-between border-t border-slate-100 pt-4 dark:border-slate-800"><div><p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Order subtotal</p><p className="mt-1 text-xl font-bold tracking-tight text-slate-950 dark:text-white">{formatMoney(cartSubtotal)}</p></div><button type="submit" disabled={submittingOrder || cart.length === 0} className="inline-flex items-center gap-2 rounded-xl px-5 py-3.5 text-xs font-bold text-white shadow-sm transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60" style={{ backgroundColor: accentColor }}>{submittingOrder ? 'Sending order...' : 'Submit order request'} <ArrowRight className="h-4 w-4" /></button></div>
+                  <div className="flex items-center justify-between border-t border-slate-100 pt-4 dark:border-slate-800"><div><p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Order subtotal</p><p className="mt-1 text-xl font-bold tracking-tight text-slate-950 dark:text-white">{formatMoney(cartSubtotal)}</p></div><button type="submit" disabled={submittingOrder || cart.length === 0 || !selectedPaymentMethodId || paymentMethods.length === 0} className="inline-flex items-center gap-2 rounded-xl px-5 py-3.5 text-xs font-bold text-white shadow-sm transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60" style={{ backgroundColor: accentColor }}>{submittingOrder ? 'Sending order...' : 'Submit order request'} <ArrowRight className="h-4 w-4" /></button></div>
                 </form>
               )}
             </div>
