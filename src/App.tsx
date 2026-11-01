@@ -1582,199 +1582,285 @@ export default function App() {
               </div>
             )}
 
-            {/* MODULE 4: ORDERS, BOOKINGS & SEPARATED PAYMENT VERIFICATION LEDGERS */}
+            {/* MODULE 4: ORDERS, BOOKINGS & PAYMENT METHODS */}
             {activeModule === 'orders' && workspace && (
               <div className="space-y-6">
-                {/* Orders Management Table */}
-                <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 space-y-4">
+                <section className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
                   <div>
-                    <h2 className="text-sm font-display font-semibold text-slate-900 dark:text-white">
-                      Customer Orders, Fulfillment & Delivery Status ({workspace.orders.length})
-                    </h2>
-                    <p className="text-xs text-slate-500">
-                      Manage order lifecycle, courier dispatch, and refunds.
+                    <div className="text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-400">Order operations</div>
+                    <h2 className="mt-1 text-2xl font-display font-semibold tracking-tight text-slate-950 dark:text-white">Orders & payments</h2>
+                    <p className="mt-1 max-w-2xl text-sm leading-6 text-slate-500 dark:text-slate-400">
+                      Track orders, confirm received payments, and manage the account details customers use at checkout.
                     </p>
                   </div>
+                  <div className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-2 text-[11px] font-medium text-slate-600 shadow-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300">
+                    <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                    {workspace.business?.name || 'Current business'}
+                  </div>
+                </section>
 
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left border-collapse text-xs">
-                      <thead>
-                        <tr className="border-b border-slate-200 dark:border-slate-800 text-slate-500">
-                          <th className="py-2 pr-3">Order #</th>
-                          <th className="py-2 px-3">Customer & Address</th>
-                          <th className="py-2 px-3">Payment Status</th>
-                          <th className="py-2 px-3">Order Status</th>
-                          <th className="py-2 px-3">Delivery</th>
-                          <th className="py-2 pl-3 text-right">Amount</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                        {workspace.orders.map((ord: any) => (
-                          <tr key={ord.id}>
-                            <td className="py-3 pr-3 font-mono font-semibold text-slate-900 dark:text-white">
-                              {ord.order_number}
-                              <div className="text-[11px] font-normal text-slate-500">{ord.source}</div>
-                            </td>
-                            <td className="py-3 px-3">
-                              <div className="font-medium text-slate-900 dark:text-white">{ord.customer_name}</div>
-                              <div className="text-[11px] text-slate-500">
-                                {ord.customer_phone} · {ord.delivery_address}
-                              </div>
-                            </td>
-                            <td className="py-3 px-3">
-                              <span
-                                className={`font-semibold uppercase ${
-                                  ord.payment_status === 'paid'
-                                    ? 'text-emerald-700 dark:text-emerald-400'
-                                    : ord.payment_status === 'pending_verification'
-                                    ? 'text-amber-700 dark:text-amber-400'
-                                    : 'text-rose-600'
-                                }`}
-                              >
-                                {ord.payment_status.replace(/_/g, ' ')}
-                              </span>
-                              <div className="text-[11px] text-slate-500 uppercase">{ord.payment_method}</div>
-                            </td>
-                            <td className="py-3 px-3">
-                              <select
-                                value={ord.status}
-                                onChange={(e) => handleUpdateOrderStatus(ord.id, e.target.value, ord.delivery_status)}
-                                className="px-2 py-1 rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800"
-                              >
-                                <option value="pending">Pending</option>
-                                <option value="confirmed">Confirmed</option>
-                                <option value="preparing">Preparing</option>
-                                <option value="out_for_delivery">Out for Delivery</option>
-                                <option value="completed">Completed</option>
-                                <option value="cancelled">Cancelled</option>
-                                <option value="refunded">Refunded</option>
-                              </select>
-                            </td>
-                            <td className="py-3 px-3">
-                              <select
-                                value={ord.delivery_status}
-                                onChange={(e) => handleUpdateOrderStatus(ord.id, ord.status, e.target.value)}
-                                className="px-2 py-1 rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800"
-                              >
-                                <option value="awaiting_dispatch">Awaiting Dispatch</option>
-                                <option value="preparing_package">Preparing Package</option>
-                                <option value="courier_en_route">Courier En Route</option>
-                                <option value="delivered">Delivered</option>
-                              </select>
-                            </td>
-                            <td className="py-3 pl-3 text-right font-mono font-semibold tabular-nums">
-                              {Number(ord.total).toLocaleString()} {ord.currency}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                {orderManagementError && (
+                  <div role="alert" className="flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-xs leading-5 text-rose-800 dark:border-rose-900/60 dark:bg-rose-950/30 dark:text-rose-200">
+                    <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                    <span className="flex-1">{orderManagementError}</span>
+                    <button type="button" onClick={() => setOrderManagementError('')} className="shrink-0 underline">Dismiss</button>
+                  </div>
+                )}
+
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                  <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+                    <div className="text-xs text-slate-500">Total orders</div>
+                    <div className="mt-2 text-2xl font-semibold tabular-nums text-slate-950 dark:text-white">{workspace.orders.length}</div>
+                    <p className="mt-1 text-[11px] text-slate-500">Customer order records</p>
+                  </div>
+                  <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+                    <div className="text-xs text-slate-500">Awaiting payment verification</div>
+                    <div className="mt-2 text-2xl font-semibold tabular-nums text-slate-950 dark:text-white">{workspace.orders.filter((o: any) => o.payment_status === 'pending_verification').length}</div>
+                    <p className="mt-1 text-[11px] text-slate-500">Review incoming transfers</p>
+                  </div>
+                  <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+                    <div className="text-xs text-slate-500">Booking requests</div>
+                    <div className="mt-2 text-2xl font-semibold tabular-nums text-slate-950 dark:text-white">{workspace.bookings.filter((b: any) => b.status === 'requested').length}</div>
+                    <p className="mt-1 text-[11px] text-slate-500">Appointments needing a decision</p>
                   </div>
                 </div>
 
-                {/* Separated Payment Ledgers: Business Customer Payments vs Platform Payments */}
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                  {/* Ledger B: Business Customer Payments & Verification */}
-                  <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 space-y-4">
+                {/* Multiple owner-managed checkout payment methods */}
+                <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900 sm:p-5">
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
                     <div>
-                      <h3 className="text-sm font-display font-semibold text-slate-900 dark:text-white">
-                        Business Customer Payment Ledger & Verification
-                      </h3>
-                      <p className="text-xs text-slate-500">
-                        Verify initiated Telebirr, CBE Birr, Card, and Telegram Stars transactions.
+                      <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400">Checkout configuration</div>
+                      <h3 className="mt-1 text-base font-semibold text-slate-950 dark:text-white">Customer payment methods</h3>
+                      <p className="mt-1 max-w-2xl text-xs leading-5 text-slate-500">
+                        Add several bank or mobile-money accounts. Active methods appear at checkout; customers can copy the account holder name and number after placing an order.
                       </p>
                     </div>
-                    <div className="divide-y divide-slate-100 dark:divide-slate-800 text-xs">
-                      {workspace.payments
-                        .filter((p: any) => p.scope === 'business')
-                        .map((pay: any) => (
-                          <div key={pay.id} className="py-3 flex items-center justify-between gap-3">
-                            <div>
-                              <div className="font-mono font-semibold text-slate-900 dark:text-white">
-                                {pay.reference_code} · {Number(pay.amount).toLocaleString()} {pay.currency}
+                    <span className="w-fit rounded-full bg-slate-100 px-3 py-1.5 text-[10px] font-semibold text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+                      {(workspace.paymentMethods || []).filter((m: any) => Boolean(Number(m.is_active))).length} active
+                    </span>
+                  </div>
+
+                  {paymentMethodError && (
+                    <div role="alert" className="mt-4 rounded-xl border border-rose-200 bg-rose-50 px-3.5 py-3 text-xs text-rose-800 dark:border-rose-900/60 dark:bg-rose-950/30 dark:text-rose-200">{paymentMethodError}</div>
+                  )}
+
+                  <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-12">
+                    <div className="space-y-2 xl:col-span-7">
+                      {(workspace.paymentMethods || []).length === 0 ? (
+                        <div className="rounded-xl border border-dashed border-slate-300 px-4 py-8 text-center dark:border-slate-700">
+                          <CreditCard className="mx-auto h-6 w-6 text-slate-400" />
+                          <p className="mt-2 text-sm font-medium text-slate-800 dark:text-slate-200">No payment methods configured</p>
+                          <p className="mt-1 text-xs text-slate-500">Add your first payment account so customers can complete checkout.</p>
+                        </div>
+                      ) : (workspace.paymentMethods || []).map((method: any) => (
+                        <article key={method.id} className="rounded-xl border border-slate-200 p-3.5 dark:border-slate-800">
+                          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                            <div className="min-w-0">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <h4 className="text-sm font-semibold text-slate-950 dark:text-white">{method.method_name}</h4>
+                                <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${Boolean(Number(method.is_active)) ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300' : 'bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400'}`}>
+                                  {Boolean(Number(method.is_active)) ? 'Active at checkout' : 'Inactive'}
+                                </span>
                               </div>
-                              <div className="text-[11px] text-slate-500">
-                                {pay.description} · Method: {pay.method.toUpperCase()} · Status:{' '}
-                                <span className="font-semibold uppercase">{pay.status}</span>
-                              </div>
+                              <p className="mt-1 text-xs text-slate-500">{method.account_name}</p>
+                              <p className="mt-1 break-all font-mono text-xs font-semibold tracking-wide text-slate-800 dark:text-slate-200">{method.account_number}</p>
                             </div>
-                            <div className="flex items-center gap-1.5 shrink-0">
+                            <div className="flex shrink-0 flex-wrap gap-2">
+                              <button type="button" onClick={() => handleEditPaymentMethod(method)} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-2 text-[11px] font-semibold text-slate-700 transition hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800">
+                                <Pencil className="h-3.5 w-3.5" /> Edit
+                              </button>
+                              <button type="button" onClick={() => handleTogglePaymentMethod(method)} className="rounded-lg border border-slate-200 px-3 py-2 text-[11px] font-semibold text-slate-600 transition hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800">
+                                {Boolean(Number(method.is_active)) ? 'Deactivate' : 'Activate'}
+                              </button>
+                            </div>
+                          </div>
+                        </article>
+                      ))}
+                    </div>
+
+                    <form onSubmit={handleSavePaymentMethod} className="space-y-3 rounded-xl bg-slate-50 p-4 dark:bg-slate-950/60 xl:col-span-5">
+                      <div className="flex items-center justify-between gap-2">
+                        <div>
+                          <h4 className="text-sm font-semibold text-slate-950 dark:text-white">{editingPaymentMethod ? 'Edit payment method' : 'Add payment method'}</h4>
+                          <p className="mt-1 text-[11px] text-slate-500">All three fields are shown to customers.</p>
+                        </div>
+                        {editingPaymentMethod && (
+                          <button type="button" onClick={() => { setEditingPaymentMethod(null); setPaymentMethodName(''); setPaymentAccountName(''); setPaymentAccountNumber(''); setPaymentMethodError(''); }} className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-200 dark:hover:bg-slate-800" aria-label="Cancel payment method edit">
+                            <X className="h-4 w-4" />
+                          </button>
+                        )}
+                      </div>
+                      <div>
+                        <label className="mb-1 block text-xs font-medium text-slate-700 dark:text-slate-300">Payment method name</label>
+                        <input required maxLength={80} value={paymentMethodName} onChange={(e) => setPaymentMethodName(e.target.value)} placeholder="e.g. Telebirr or Commercial Bank of Ethiopia" className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-xs dark:border-slate-700 dark:bg-slate-900" />
+                      </div>
+                      <div>
+                        <label className="mb-1 block text-xs font-medium text-slate-700 dark:text-slate-300">Account holder name</label>
+                        <input required maxLength={120} value={paymentAccountName} onChange={(e) => setPaymentAccountName(e.target.value)} placeholder="Name shown on the account" className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-xs dark:border-slate-700 dark:bg-slate-900" />
+                      </div>
+                      <div>
+                        <label className="mb-1 block text-xs font-medium text-slate-700 dark:text-slate-300">Account number</label>
+                        <input required maxLength={80} value={paymentAccountNumber} onChange={(e) => setPaymentAccountNumber(e.target.value)} placeholder="Enter the receiving account number" className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-xs dark:border-slate-700 dark:bg-slate-900" />
+                      </div>
+                      <button type="submit" disabled={paymentMethodSaving} className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-slate-950 px-4 py-2.5 text-xs font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-white dark:text-slate-950">
+                        <Plus className="h-4 w-4" /> {paymentMethodSaving ? 'Saving...' : editingPaymentMethod ? 'Save payment method' : 'Add payment method'}
+                      </button>
+                    </form>
+                  </div>
+                  <p className="mt-3 text-[10px] leading-5 text-slate-400">Deactivated methods are hidden from new checkouts. Previous orders keep the payment instructions selected when they were placed.</p>
+                </section>
+
+                {/* Orders and fulfillment */}
+                <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900 sm:p-5">
+                  <div className="mb-4 flex flex-wrap items-end justify-between gap-2">
+                    <div>
+                      <h3 className="text-sm font-semibold text-slate-950 dark:text-white">Customer orders</h3>
+                      <p className="mt-1 text-xs text-slate-500">Update order progress and delivery status for each request.</p>
+                    </div>
+                    <span className="text-[11px] tabular-nums text-slate-400">{workspace.orders.length} records</span>
+                  </div>
+                  <div className="space-y-3">
+                    {workspace.orders.length === 0 ? (
+                      <div className="rounded-xl border border-dashed border-slate-300 px-4 py-9 text-center dark:border-slate-700">
+                        <Package className="mx-auto h-6 w-6 text-slate-400" />
+                        <p className="mt-2 text-sm font-medium text-slate-800 dark:text-slate-200">No orders yet</p>
+                        <p className="mt-1 text-xs text-slate-500">New customer orders will appear here.</p>
+                      </div>
+                    ) : workspace.orders.map((ord: any) => (
+                      <article key={ord.id} className="rounded-xl border border-slate-200 p-4 dark:border-slate-800">
+                        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                          <div className="min-w-0 flex-1">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="font-mono text-sm font-semibold text-slate-950 dark:text-white">{ord.order_number}</span>
+                              <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-600 dark:bg-slate-800 dark:text-slate-300">{String(ord.status).replace(/_/g, ' ')}</span>
+                              <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${ord.payment_status === 'paid' ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300' : ord.payment_status === 'pending_verification' ? 'bg-amber-50 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300' : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300'}`}>
+                                {String(ord.payment_status).replace(/_/g, ' ')}
+                              </span>
+                            </div>
+                            <p className="mt-2 text-xs font-medium text-slate-800 dark:text-slate-200">{ord.customer_name} · {ord.customer_phone}</p>
+                            <p className="mt-1 break-words text-xs text-slate-500">{ord.delivery_address || 'No delivery address supplied'} · {String(ord.source || 'web').toUpperCase()}</p>
+                            <p className="mt-2 text-xs text-slate-500">Payment method: <span className="font-semibold text-slate-700 dark:text-slate-300">{ord.payment_method}</span></p>
+                          </div>
+                          <div className="flex flex-col gap-2 sm:flex-row lg:flex-col lg:items-end">
+                            <div className="text-lg font-semibold tabular-nums text-slate-950 dark:text-white">{Number(ord.total).toLocaleString()} {ord.currency}</div>
+                            <select value={ord.status} onChange={(e) => handleUpdateOrderStatus(ord.id, e.target.value, ord.delivery_status)} aria-label={'Order status for ' + ord.order_number} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs dark:border-slate-700 dark:bg-slate-950 sm:w-auto">
+                              <option value="pending">Pending</option>
+                              <option value="confirmed">Confirmed</option>
+                              <option value="preparing">Preparing</option>
+                              <option value="out_for_delivery">Out for delivery</option>
+                              <option value="completed">Completed</option>
+                              <option value="cancelled">Cancelled</option>
+                              <option value="refunded">Refunded</option>
+                            </select>
+                            <select value={ord.delivery_status} onChange={(e) => handleUpdateOrderStatus(ord.id, ord.status, e.target.value)} aria-label={'Delivery status for ' + ord.order_number} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs dark:border-slate-700 dark:bg-slate-950 sm:w-auto">
+                              <option value="awaiting_dispatch">Awaiting dispatch</option>
+                              <option value="preparing_package">Preparing package</option>
+                              <option value="courier_en_route">Courier en route</option>
+                              <option value="delivered">Delivered</option>
+                            </select>
+                          </div>
+                        </div>
+                      </article>
+                    ))}
+                  </div>
+                </section>
+
+                <div className="grid grid-cols-1 gap-5 xl:grid-cols-2">
+                  {/* Business payments */}
+                  <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900 sm:p-5">
+                    <div>
+                      <h3 className="text-sm font-semibold text-slate-950 dark:text-white">Payment verification</h3>
+                      <p className="mt-1 text-xs leading-5 text-slate-500">Check your bank or mobile-money account first. Enter its real transaction reference before confirming receipt.</p>
+                    </div>
+                    <div className="mt-3 space-y-3">
+                      {workspace.payments.filter((p: any) => p.scope === 'business').length === 0 ? (
+                        <div className="rounded-xl border border-dashed border-slate-300 px-4 py-8 text-center dark:border-slate-700">
+                          <CreditCard className="mx-auto h-5 w-5 text-slate-400" />
+                          <p className="mt-2 text-xs font-medium text-slate-700 dark:text-slate-300">No customer payments recorded</p>
+                        </div>
+                      ) : workspace.payments.filter((p: any) => p.scope === 'business').map((pay: any) => (
+                        <article key={pay.id} className="rounded-xl border border-slate-200 p-3.5 dark:border-slate-800">
+                          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                            <div className="min-w-0">
+                              <div className="font-mono text-xs font-semibold text-slate-950 dark:text-white">{pay.reference_code} · {Number(pay.amount).toLocaleString()} {pay.currency}</div>
+                              <div className="mt-1 text-xs font-medium text-slate-700 dark:text-slate-300">{pay.payment_method_name || pay.method}</div>
+                              <div className="mt-1 text-[11px] text-slate-500">{pay.description}</div>
+                              {pay.payment_account_name && <div className="mt-2 text-[11px] text-slate-500">Account holder: {pay.payment_account_name}</div>}
+                              {pay.payment_account_number && <div className="mt-0.5 break-all font-mono text-[11px] text-slate-600 dark:text-slate-400">Account: {pay.payment_account_number}</div>}
+                              <span className={`mt-2 inline-flex rounded-full px-2.5 py-1 text-[10px] font-semibold ${pay.status === 'verified' ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300' : pay.status === 'failed' ? 'bg-rose-50 text-rose-700 dark:bg-rose-950/40 dark:text-rose-300' : 'bg-amber-50 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300'}`}>{String(pay.status).toUpperCase()}</span>
+                            </div>
+                            <div className="flex shrink-0 flex-wrap gap-2">
                               {pay.status !== 'verified' && (
-                                <button
-                                  type="button"
-                                  onClick={() => handleVerifyPayment(pay.id, 'verify')}
-                                  className="px-2.5 py-1 rounded bg-emerald-600 text-white font-semibold"
-                                >
-                                  {t.verifyPayment}
+                                <button type="button" disabled={verificationSaving} onClick={() => { setVerificationPaymentId(verificationPaymentId === pay.id ? '' : pay.id); setVerificationReference(''); setOrderManagementError(''); }} className="rounded-lg bg-slate-950 px-3 py-2 text-[11px] font-semibold text-white transition hover:bg-slate-800 disabled:opacity-50 dark:bg-white dark:text-slate-950">
+                                  Verify receipt
                                 </button>
                               )}
                               {pay.status === 'verified' && (
-                                <button
-                                  type="button"
-                                  onClick={() => handleVerifyPayment(pay.id, 'refund')}
-                                  className="px-2.5 py-1 rounded border border-slate-200 dark:border-slate-700 text-rose-600"
-                                >
-                                  Refund
-                                </button>
+                                <button type="button" disabled={verificationSaving} onClick={() => handleVerifyPayment(pay.id, 'refund')} className="rounded-lg border border-slate-200 px-3 py-2 text-[11px] font-semibold text-rose-600 hover:bg-rose-50 disabled:opacity-50 dark:border-slate-700 dark:hover:bg-rose-950/30">Refund</button>
                               )}
                             </div>
                           </div>
-                        ))}
+                          {verificationPaymentId === pay.id && (
+                            <form onSubmit={(e) => { e.preventDefault(); handleVerifyPayment(pay.id, 'verify', verificationReference); }} className="mt-3 space-y-2 rounded-xl bg-slate-50 p-3 dark:bg-slate-950/60">
+                              <label className="block text-[11px] font-medium text-slate-700 dark:text-slate-300">Real bank / provider transaction reference</label>
+                              <input required minLength={3} value={verificationReference} onChange={(e) => setVerificationReference(e.target.value)} placeholder="Enter the reference shown by your bank" className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-xs dark:border-slate-700 dark:bg-slate-900" />
+                              <div className="flex flex-wrap justify-end gap-2">
+                                <button type="button" onClick={() => { setVerificationPaymentId(''); setVerificationReference(''); }} className="rounded-lg border border-slate-200 px-3 py-2 text-[11px] font-semibold text-slate-600 dark:border-slate-700 dark:text-slate-300">Cancel</button>
+                                <button type="submit" disabled={verificationSaving} className="rounded-lg bg-emerald-600 px-3 py-2 text-[11px] font-semibold text-white disabled:opacity-50">{verificationSaving ? 'Confirming...' : 'Confirm money received'}</button>
+                              </div>
+                            </form>
+                          )}
+                        </article>
+                      ))}
                     </div>
-                  </div>
+                  </section>
 
-                  {/* Ledger A: Platform Subscription & Add-On Payments + Bookings */}
-                  <div className="space-y-6">
-                    <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 space-y-3">
-                      <h3 className="text-sm font-display font-semibold text-slate-900 dark:text-white">
-                        Appointments & Reservations ({workspace.bookings.length})
-                      </h3>
-                      <div className="divide-y divide-slate-100 dark:divide-slate-800 text-xs">
-                        {workspace.bookings.map((b: any) => (
-                          <div key={b.id} className="py-2.5 flex items-center justify-between gap-3">
-                            <div>
-                              <div className="font-semibold text-slate-900 dark:text-white">
-                                {b.booking_number} — {b.service_name}
-                              </div>
-                              <div className="text-slate-500">
-                                {b.customer_name} ({b.customer_phone}) · {b.booking_date} at {b.booking_time}
-                              </div>
+                  {/* Bookings and platform billing */}
+                  <div className="space-y-5">
+                    <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900 sm:p-5">
+                      <div>
+                        <h3 className="text-sm font-semibold text-slate-950 dark:text-white">Appointments & reservations</h3>
+                        <p className="mt-1 text-xs text-slate-500">{workspace.bookings.length} booking records</p>
+                      </div>
+                      <div className="mt-3 space-y-2">
+                        {workspace.bookings.length === 0 ? (
+                          <div className="rounded-xl border border-dashed border-slate-300 px-4 py-7 text-center dark:border-slate-700">
+                            <Clock3 className="mx-auto h-5 w-5 text-slate-400" />
+                            <p className="mt-2 text-xs font-medium text-slate-700 dark:text-slate-300">No bookings yet</p>
+                          </div>
+                        ) : workspace.bookings.map((booking: any) => (
+                          <article key={booking.id} className="flex flex-col gap-3 rounded-xl border border-slate-200 p-3 dark:border-slate-800 sm:flex-row sm:items-center sm:justify-between">
+                            <div className="min-w-0">
+                              <div className="text-xs font-semibold text-slate-950 dark:text-white">{booking.booking_number} · {booking.service_name}</div>
+                              <div className="mt-1 text-[11px] text-slate-500">{booking.customer_name} · {booking.customer_phone}</div>
+                              <div className="mt-1 text-[11px] text-slate-500">{booking.booking_date} at {booking.booking_time} · {booking.guests} guests</div>
+                              <div className="mt-1 text-[11px] font-medium text-slate-600 dark:text-slate-300">{Number(booking.amount).toLocaleString()} {booking.currency} · Payment {String(booking.payment_status).replace(/_/g, ' ')}</div>
                             </div>
-                            <select
-                              value={b.status}
-                              onChange={(e) => handleUpdateBookingStatus(b.id, e.target.value)}
-                              className="px-2 py-1 rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs"
-                            >
+                            <select value={booking.status} onChange={(e) => handleUpdateBookingStatus(booking.id, e.target.value)} aria-label={'Booking status for ' + booking.booking_number} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs dark:border-slate-700 dark:bg-slate-950">
                               <option value="requested">Requested</option>
                               <option value="confirmed">Confirmed</option>
                               <option value="completed">Completed</option>
                               <option value="cancelled">Cancelled</option>
                             </select>
+                          </article>
+                        ))}
+                      </div>
+                    </section>
+
+                    <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900 sm:p-5">
+                      <h3 className="text-sm font-semibold text-slate-950 dark:text-white">Platform billing</h3>
+                      <p className="mt-1 text-xs text-slate-500">TeleBiz subscription and add-on payments are kept separate.</p>
+                      <div className="mt-3 space-y-2">
+                        {workspace.payments.filter((p: any) => p.scope === 'platform').length === 0 ? (
+                          <p className="py-4 text-center text-xs text-slate-500">No platform billing records.</p>
+                        ) : workspace.payments.filter((p: any) => p.scope === 'platform').map((payment: any) => (
+                          <div key={payment.id} className="flex items-center justify-between gap-3 border-t border-slate-100 py-2.5 text-xs dark:border-slate-800">
+                            <div className="min-w-0"><div className="font-mono font-semibold text-slate-900 dark:text-white">{payment.reference_code}</div><div className="mt-1 truncate text-[11px] text-slate-500">{payment.description}</div></div>
+                            <div className="shrink-0 text-right font-semibold tabular-nums text-slate-800 dark:text-slate-200">{Number(payment.amount).toLocaleString()} {payment.currency}<div className="mt-1 text-[10px] font-normal uppercase text-slate-500">{payment.status}</div></div>
                           </div>
                         ))}
                       </div>
-                    </div>
-
-                    <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 space-y-3">
-                      <h3 className="text-sm font-display font-semibold text-slate-900 dark:text-white">
-                        Platform Billing Ledger (Separated from Customer Orders)
-                      </h3>
-                      <div className="divide-y divide-slate-100 dark:divide-slate-800 text-xs">
-                        {workspace.payments
-                          .filter((p: any) => p.scope === 'platform')
-                          .map((p: any) => (
-                            <div key={p.id} className="py-2.5 flex items-center justify-between">
-                              <div>
-                                <div className="font-mono font-semibold">{p.reference_code}</div>
-                                <div className="text-slate-500">{p.description}</div>
-                              </div>
-                              <div className="font-mono font-semibold tabular-nums">
-                                {Number(p.amount).toLocaleString()} {p.currency} ({p.status})
-                              </div>
-                            </div>
-                          ))}
-                      </div>
-                    </div>
+                    </section>
                   </div>
                 </div>
               </div>
