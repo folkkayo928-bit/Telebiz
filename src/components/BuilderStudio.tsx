@@ -483,6 +483,13 @@ export const BuilderStudio: React.FC<BuilderStudioProps> = ({
                 </div>
 
                 <div className="space-y-3">
+                  {sections.length === 0 && (
+                    <div className="rounded-xl border border-dashed border-slate-300 px-4 py-8 text-center dark:border-slate-700">
+                      <Layers className="mx-auto h-5 w-5 text-slate-400" />
+                      <p className="mt-2 text-xs font-medium text-slate-700 dark:text-slate-300">Your page is ready to design</p>
+                      <p className="mt-1 text-[11px] text-slate-500">Choose an industry template or add a section to get started.</p>
+                    </div>
+                  )}
                   {sections.map((sec, idx) => (
                     <div
                       key={sec.id || idx}
@@ -586,6 +593,9 @@ export const BuilderStudio: React.FC<BuilderStudioProps> = ({
                   Version History & Rollback ({versions.length} Revisions)
                 </h3>
                 <div className="divide-y divide-slate-100 dark:divide-slate-800 text-xs">
+                  {versions.length === 0 && (
+                    <p className="py-5 text-center text-xs text-slate-500">No saved versions yet. Save a draft to create your first revision.</p>
+                  )}
                   {versions.map((v) => (
                     <div key={v.id} className="py-2.5 flex items-center justify-between gap-4">
                       <div>
@@ -644,8 +654,9 @@ export const BuilderStudio: React.FC<BuilderStudioProps> = ({
 
               {aiSummary && (
                 <div className="p-3.5 rounded-xl bg-sky-50 dark:bg-sky-950/40 border border-sky-200 dark:border-sky-800 space-y-2 text-xs">
-                  <div className="font-semibold text-sky-950 dark:text-sky-200">AI Architect Recommendation Applied to Preview:</div>
+                  <div className="font-semibold text-sky-950 dark:text-sky-200">Your AI layout is ready to review</div>
                   <p className="text-sky-800 dark:text-sky-300">{aiSummary}</p>
+                  <p className="text-sky-700/80 dark:text-sky-300/80">The generated sections and theme are loaded into the editor. Review them before saving a draft or publishing.</p>
                   <button
                     type="button"
                     onClick={() => handleSaveVersion('published')}
