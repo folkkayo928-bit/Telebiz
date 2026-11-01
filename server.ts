@@ -992,7 +992,7 @@ app.patch('/api/businesses/:id/orders/:orderId', (req: Request, res: Response) =
   res.json(orders);
 });
 
-// Explicit Payment Verification (Requirement 11: Never mark an order as paid merely because customer clicked pay)
+// Manual payment verification: a business user must enter the real bank/provider reference after checking receipt.
 app.post('/api/businesses/:id/payments/:paymentId/verify', (req: Request, res: Response) => {
   const access = verifyTenantAccess(req.user, req.params.id, 'orders.manage');
   if (!access.allowed) {
@@ -1000,55 +1000,84 @@ app.post('/api/businesses/:id/payments/:paymentId/verify', (req: Request, res: R
     return;
   }
 
-  const { provider_tx_id, action } = req.body; // action: 'verify' | 'fail' | 'refund'
+  const { provider_tx_id, action } = req.body;
+  if (!['verify', 'fail', 'refund'].includes(action)) {
+    res.status(400).json({ error: 'Unsupported payment action.' });
+    return;
+  }
+
   const payment = db.prepare('SELECT * FROM payments WHERE id = ? AND business_id = ?').get(req.params.paymentId, req.params.id) as any;
   if (!payment) {
     res.status(404).json({ error: 'Payment record not found' });
     return;
   }
 
-  const now = new Date().toISOString();
-  if (action === 'fail') {
-    db.prepare('UPDATE payments SET status = ? WHERE id = ?').run('failed', payment.id);
-    if (payment.order_id) {
-      db.prepare('UPDATE orders SET payment_status = ? WHERE id = ?').run('failed', payment.order_id);
+  if (action === 'verify') {
+    const transactionReference = String(provider_tx_id || '').trim();
+    if (transactionReference.length < 3) {
+      res.status(400).json({ error: 'Enter the real transaction reference after confirming the money was received.' });
+      return;
     }
-  } else if (action === 'refund') {
-    db.prepare('UPDATE payments SET status = ? WHERE id = ?').run('refunded', payment.id);
-    if (payment.order_id) {
-      db.prepare('UPDATE orders SET payment_status = ?, status = ? WHERE id = ?').run('refunded', 'refunded', payment.order_id);
+    const duplicate = db.prepare(
+      'SELECT id FROM payments WHERE business_id = ? AND provider_tx_id = ? AND status = ? AND id <> ?'
+    ).get(req.params.id, transactionReference, 'verified', payment.id);
+    if (duplicate) {
+      res.status(409).json({ error: 'This transaction reference has already been used for another verified payment.' });
+      return;
     }
-  } else {
-    // Verify transaction reference and record funnel event 'payment_confirmed' + 'purchase_complete'
-    db.prepare('UPDATE payments SET status = ?, provider_tx_id = ?, verified_at = ?, verified_by = ? WHERE id = ?').run(
-      'verified',
-      provider_tx_id || payment.provider_tx_id || ('VER_' + crypto.randomBytes(3).toString('hex').toUpperCase()),
-      now,
-      req.user!.name,
-      payment.id
-    );
-
-    if (payment.order_id) {
-      db.prepare('UPDATE orders SET payment_status = ?, status = CASE WHEN status = "pending" THEN "confirmed" ELSE status END WHERE id = ?').run('paid', payment.order_id);
-      const ord = db.prepare('SELECT * FROM orders WHERE id = ?').get(payment.order_id) as any;
-      if (ord && ord.customer_id) {
-        // Award loyalty points & update total spent upon verified payment
-        const pointsEarned = Math.floor(ord.total / 25);
-        db.prepare('UPDATE customers SET total_spent = total_spent + ?, loyalty_points = loyalty_points + ? WHERE id = ?').run(ord.total, pointsEarned, ord.customer_id);
-      }
-      // Record real funnel analytics events for payment_confirmed and purchase_complete
-      const insertEv = db.prepare(`
-        INSERT INTO analytics_events (id, business_id, customer_id, session_id, event_type, page_name, product_id, source, device_type, duration_secs, created_at)
-        VALUES (?, ?, ?, ?, ?, 'checkout', null, 'telegram', 'mobile_tg', 90, ?)
-      `);
-      insertEv.run('ev_' + crypto.randomBytes(4).toString('hex'), req.params.id, ord?.customer_id || null, 'sess_ver_' + payment.id, 'payment_confirmed', now);
-      insertEv.run('ev_' + crypto.randomBytes(4).toString('hex'), req.params.id, ord?.customer_id || null, 'sess_ver_' + payment.id, 'purchase_complete', now);
-    }
-
-    if (payment.booking_id) {
-      db.prepare('UPDATE bookings SET payment_status = ?, status = "confirmed" WHERE id = ?').run('paid', payment.booking_id);
+    if (payment.status === 'verified') {
+      const payments = db.prepare('SELECT * FROM payments WHERE business_id = ? ORDER BY created_at DESC').all(req.params.id);
+      const orders = db.prepare('SELECT * FROM orders WHERE business_id = ? ORDER BY created_at DESC').all(req.params.id);
+      res.json({ payments, orders, alreadyVerified: true });
+      return;
     }
   }
+
+  const now = new Date().toISOString();
+  const updatePayment = db.transaction(() => {
+    if (action === 'fail') {
+      db.prepare('UPDATE payments SET status = ? WHERE id = ? AND business_id = ?').run('failed', payment.id, req.params.id);
+      if (payment.order_id) {
+        db.prepare('UPDATE orders SET payment_status = ? WHERE id = ? AND business_id = ?').run('failed', payment.order_id, req.params.id);
+      }
+    } else if (action === 'refund') {
+      db.prepare('UPDATE payments SET status = ? WHERE id = ? AND business_id = ?').run('refunded', payment.id, req.params.id);
+      if (payment.order_id) {
+        db.prepare('UPDATE orders SET payment_status = ?, status = ? WHERE id = ? AND business_id = ?').run('refunded', 'refunded', payment.order_id, req.params.id);
+      }
+    } else {
+      db.prepare('UPDATE payments SET status = ?, provider_tx_id = ?, verified_at = ?, verified_by = ? WHERE id = ? AND business_id = ?').run(
+        'verified',
+        String(provider_tx_id).trim(),
+        now,
+        req.user!.name,
+        payment.id,
+        req.params.id
+      );
+
+      if (payment.order_id) {
+        db.prepare('UPDATE orders SET payment_status = ?, status = CASE WHEN status = "pending" THEN "confirmed" ELSE status END WHERE id = ? AND business_id = ?').run('paid', payment.order_id, req.params.id);
+        const order = db.prepare('SELECT * FROM orders WHERE id = ? AND business_id = ?').get(payment.order_id, req.params.id) as any;
+        if (order && order.customer_id) {
+          const pointsEarned = Math.floor(Number(order.total) / 25);
+          db.prepare('UPDATE customers SET total_spent = total_spent + ?, loyalty_points = loyalty_points + ? WHERE id = ? AND business_id = ?').run(
+            order.total, pointsEarned, order.customer_id, req.params.id
+          );
+        }
+        const insertEvent = db.prepare(`
+          INSERT INTO analytics_events (id, business_id, customer_id, session_id, event_type, page_name, product_id, source, device_type, duration_secs, created_at)
+          VALUES (?, ?, ?, ?, ?, 'checkout', null, 'telegram', 'mobile_tg', 90, ?)
+        `);
+        insertEvent.run('ev_' + crypto.randomBytes(4).toString('hex'), req.params.id, order?.customer_id || null, 'sess_ver_' + payment.id, 'payment_confirmed', now);
+        insertEvent.run('ev_' + crypto.randomBytes(4).toString('hex'), req.params.id, order?.customer_id || null, 'sess_ver_' + payment.id, 'purchase_complete', now);
+      }
+
+      if (payment.booking_id) {
+        db.prepare('UPDATE bookings SET payment_status = ?, status = "confirmed" WHERE id = ? AND business_id = ?').run('paid', payment.booking_id, req.params.id);
+      }
+    }
+  });
+  updatePayment();
 
   const payments = db.prepare('SELECT * FROM payments WHERE business_id = ? ORDER BY created_at DESC').all(req.params.id);
   const orders = db.prepare('SELECT * FROM orders WHERE business_id = ? ORDER BY created_at DESC').all(req.params.id);
@@ -1965,144 +1994,230 @@ app.post('/api/storefront/:slug/checkout', (req: Request, res: Response) => {
     delivery_address,
     items,
     discount_code,
-    payment_method,
-    provider_tx_id,
+    payment_method_id,
     source,
   } = req.body;
 
-  if (!customer_name || !customer_phone || !Array.isArray(items) || items.length === 0) {
+  if (!String(customer_name || '').trim() || !String(customer_phone || '').trim() || !Array.isArray(items) || items.length === 0) {
     res.status(400).json({ error: 'Customer name, phone, and cart items are required.' });
     return;
   }
 
-  let subtotal = 0;
-  for (const item of items) {
-    subtotal += Number(item.price) * Number(item.qty || 1);
-    db.prepare('UPDATE products SET stock = MAX(0, stock - ?), purchases_count = purchases_count + ? WHERE id = ? AND business_id = ?').run(
-      Number(item.qty || 1),
-      Number(item.qty || 1),
-      item.productId,
-      business.id
-    );
+  const paymentMethod = db.prepare(
+    'SELECT id, method_name, account_name, account_number FROM business_payment_methods WHERE id = ? AND business_id = ? AND is_active = 1'
+  ).get(String(payment_method_id || ''), business.id) as any;
+  if (!paymentMethod) {
+    res.status(400).json({ error: 'Please choose an active payment method configured by this business.' });
+    return;
   }
 
-  let discountAmount = 0;
-  if (discount_code) {
-    const promo = db.prepare('SELECT * FROM promotions WHERE business_id = ? AND UPPER(code) = UPPER(?) AND active = 1').get(business.id, discount_code) as any;
-    if (promo && subtotal >= promo.min_order_amount) {
-      discountAmount = promo.discount_type === 'percentage' ? Math.round(subtotal * (promo.discount_value / 100)) : promo.discount_value;
-      db.prepare('UPDATE promotions SET usage_count = usage_count + 1 WHERE id = ?').run(promo.id);
+  // Rebuild the cart from trusted catalog data. Never trust browser-submitted prices or stock.
+  const normalizedItems: any[] = [];
+  const quantitiesByProduct = new Map<string, number>();
+  let subtotal = 0;
+  for (const item of items) {
+    const productId = String(item?.productId || '');
+    const quantity = Number(item?.qty ?? 1);
+    if (!productId || !Number.isInteger(quantity) || quantity < 1 || quantity > 1000) {
+      res.status(400).json({ error: 'The cart contains an invalid product or quantity.' });
+      return;
+    }
+
+    const product = db.prepare(
+      'SELECT id, name, price, currency, stock, available FROM products WHERE id = ? AND business_id = ?'
+    ).get(productId, business.id) as any;
+    if (!product || !Number(product.available)) {
+      res.status(409).json({ error: 'One of the selected products is no longer available. Please refresh the storefront.' });
+      return;
+    }
+
+    quantitiesByProduct.set(productId, (quantitiesByProduct.get(productId) || 0) + quantity);
+    normalizedItems.push({
+      productId: product.id,
+      name: product.name,
+      price: Number(product.price),
+      currency: product.currency || 'ETB',
+      qty: quantity,
+      variation: String(item?.variation || 'Standard').slice(0, 120),
+    });
+    subtotal += Number(product.price) * quantity;
+  }
+
+  for (const [productId, quantity] of quantitiesByProduct.entries()) {
+    const product = db.prepare('SELECT name, stock FROM products WHERE id = ? AND business_id = ?').get(productId, business.id) as any;
+    if (!product || Number(product.stock) < quantity) {
+      res.status(409).json({ error: 'Not enough stock is available for ' + (product?.name || 'one of your products') + '. Please update your cart.' });
+      return;
     }
   }
 
-  const total = Math.max(0, subtotal - discountAmount);
   const now = new Date().toISOString();
+  const orderSource = source === 'web' ? 'web' : 'telegram';
 
-  // Find or create customer record
-  let customer = db.prepare('SELECT * FROM customers WHERE business_id = ? AND phone = ?').get(business.id, customer_phone) as any;
-  if (!customer) {
-    const cusId = 'cus_' + crypto.randomBytes(4).toString('hex');
-    db.prepare(`
-      INSERT INTO customers (id, business_id, name, phone, telegram_username, segment, loyalty_points, referral_code, consent_marketing, source, visits_count, total_spent, last_seen_at, created_at)
-      VALUES (?, ?, ?, ?, ?, 'first_time', 10, ?, 1, ?, 1, 0, ?, ?)
-    `).run(
-      cusId,
-      business.id,
-      customer_name,
-      customer_phone,
-      telegram_username || '',
-      'REF-' + crypto.randomBytes(2).toString('hex').toUpperCase(),
-      source === 'web' ? 'web_store' : 'telegram_mini_app',
-      now,
-      now
-    );
-    customer = db.prepare('SELECT * FROM customers WHERE id = ?').get(cusId);
-  } else {
-    db.prepare("UPDATE customers SET visits_count = visits_count + 1, segment = CASE WHEN visits_count >= 5 THEN 'vip' ELSE 'returning' END, last_seen_at = ? WHERE id = ?").run(now, customer.id);
+  try {
+    const createOrder = db.transaction(() => {
+      // Atomic stock deduction: a concurrent checkout cannot oversell the same remaining units.
+      for (const [productId, quantity] of quantitiesByProduct.entries()) {
+        const update = db.prepare(
+          'UPDATE products SET stock = stock - ?, purchases_count = purchases_count + ? WHERE id = ? AND business_id = ? AND available = 1 AND stock >= ?'
+        ).run(quantity, quantity, productId, business.id, quantity);
+        if (update.changes !== 1) {
+          throw new Error('STOCK_CHANGED: Stock changed while the order was being submitted. Please refresh and try again.');
+        }
+      }
+
+      let discountAmount = 0;
+      if (discount_code) {
+        const promo = db.prepare(
+          'SELECT * FROM promotions WHERE business_id = ? AND UPPER(code) = UPPER(?) AND active = 1'
+        ).get(business.id, String(discount_code).trim()) as any;
+        const notExpired = !promo?.expires_at || new Date(promo.expires_at).getTime() >= Date.now();
+        const underLimit = !promo?.max_uses || Number(promo.usage_count || 0) < Number(promo.max_uses);
+        if (promo && notExpired && underLimit && subtotal >= Number(promo.min_order_amount || 0)) {
+          const requestedDiscount = promo.discount_type === 'percentage'
+            ? Math.round(subtotal * (Number(promo.discount_value) / 100))
+            : Number(promo.discount_value);
+          discountAmount = Math.min(subtotal, Math.max(0, requestedDiscount));
+          db.prepare('UPDATE promotions SET usage_count = usage_count + 1 WHERE id = ?').run(promo.id);
+        }
+      }
+
+      const total = Math.max(0, subtotal - discountAmount);
+      let customer = db.prepare('SELECT * FROM customers WHERE business_id = ? AND phone = ?').get(
+        business.id,
+        String(customer_phone).trim()
+      ) as any;
+      if (!customer) {
+        const customerId = 'cus_' + crypto.randomBytes(4).toString('hex');
+        db.prepare(`
+          INSERT INTO customers (id, business_id, name, phone, telegram_username, segment, loyalty_points, referral_code, consent_marketing, source, visits_count, total_spent, last_seen_at, created_at)
+          VALUES (?, ?, ?, ?, ?, 'first_time', 0, ?, 0, ?, 1, 0, ?, ?)
+        `).run(
+          customerId,
+          business.id,
+          String(customer_name).trim(),
+          String(customer_phone).trim(),
+          String(telegram_username || '').trim(),
+          'REF-' + crypto.randomBytes(2).toString('hex').toUpperCase(),
+          orderSource === 'web' ? 'web_store' : 'telegram_mini_app',
+          now,
+          now
+        );
+        customer = db.prepare('SELECT * FROM customers WHERE id = ?').get(customerId);
+      } else {
+        db.prepare('UPDATE customers SET name = ?, visits_count = visits_count + 1, last_seen_at = ? WHERE id = ? AND business_id = ?').run(
+          String(customer_name).trim(), now, customer.id, business.id
+        );
+      }
+
+      const orderId = 'ord_' + crypto.randomBytes(4).toString('hex');
+      const orderNumber = 'ORD-' + new Date().getFullYear() + '-' + Math.floor(1000 + Math.random() * 9000);
+      const orderPaymentStatus = 'pending_verification';
+      const initialOrderStatus = 'pending';
+      db.prepare(`
+        INSERT INTO orders (
+          id, business_id, order_number, customer_id, customer_name, customer_phone,
+          source, items_json, subtotal, discount_amount, discount_code, total, currency,
+          status, delivery_status, delivery_address, assigned_employee_id,
+          payment_status, payment_method, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ETB', ?, 'awaiting_dispatch', ?, null, ?, ?, ?)
+      `).run(
+        orderId,
+        business.id,
+        orderNumber,
+        customer.id,
+        String(customer_name).trim(),
+        String(customer_phone).trim(),
+        orderSource,
+        JSON.stringify(normalizedItems),
+        subtotal,
+        discountAmount,
+        String(discount_code || '').trim(),
+        total,
+        initialOrderStatus,
+        String(delivery_address || '').trim(),
+        orderPaymentStatus,
+        paymentMethod.method_name,
+        now
+      );
+
+      const paymentId = 'pay_' + crypto.randomBytes(4).toString('hex');
+      const refCode = 'TX-' + crypto.randomBytes(3).toString('hex').toUpperCase();
+      db.prepare(`
+        INSERT INTO payments (
+          id, scope, business_id, reference_code, order_id, booking_id,
+          amount, currency, method, provider_tx_id, status, verified_at, verified_by, description, created_at
+        ) VALUES (?, 'business', ?, ?, ?, null, ?, 'ETB', ?, '', 'initiated', null, null, ?, ?)
+      `).run(
+        paymentId,
+        business.id,
+        refCode,
+        orderId,
+        total,
+        paymentMethod.method_name,
+        'Order ' + orderNumber + ' (' + paymentMethod.method_name + ')',
+        now
+      );
+
+      db.prepare(`
+        INSERT INTO payment_instruction_snapshots (payment_id, payment_method_id, method_name, account_name, account_number, created_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `).run(
+        paymentId,
+        paymentMethod.id,
+        paymentMethod.method_name,
+        paymentMethod.account_name,
+        paymentMethod.account_number,
+        now
+      );
+
+      const insertEvent = db.prepare(`
+        INSERT INTO analytics_events (id, business_id, customer_id, session_id, event_type, page_name, product_id, source, device_type, duration_secs, created_at)
+        VALUES (?, ?, ?, 'sess_checkout', ?, 'checkout', null, ?, ?, 110, ?)
+      `);
+      insertEvent.run(
+        'ev_' + crypto.randomBytes(4).toString('hex'),
+        business.id,
+        customer.id,
+        'order_submit',
+        orderSource,
+        orderSource === 'web' ? 'mobile_web' : 'mobile_tg',
+        now
+      );
+      insertEvent.run(
+        'ev_' + crypto.randomBytes(4).toString('hex'),
+        business.id,
+        customer.id,
+        'payment_attempt',
+        orderSource,
+        orderSource === 'web' ? 'mobile_web' : 'mobile_tg',
+        now
+      );
+
+      return {
+        orderId,
+        orderNumber,
+        referenceCode: refCode,
+        total,
+        paymentStatus: orderPaymentStatus,
+        orderStatus: initialOrderStatus,
+        paymentMethod: {
+          id: paymentMethod.id,
+          methodName: paymentMethod.method_name,
+          accountName: paymentMethod.account_name,
+          accountNumber: paymentMethod.account_number,
+        },
+      };
+    });
+
+    const result = createOrder();
+    res.status(201).json(result);
+  } catch (err: any) {
+    const message = err?.message || 'The order could not be submitted.';
+    const status = message.startsWith('STOCK_CHANGED:') ? 409 : 500;
+    res.status(status).json({ error: message.replace(/^STOCK_CHANGED:\s*/, '') });
   }
-
-  const orderId = 'ord_' + crypto.randomBytes(4).toString('hex');
-  const orderNumber = 'ORD-2026-' + Math.floor(1000 + Math.random() * 9000);
-
-  // Requirement 11: Never mark an order as paid merely because the customer clicked a payment button.
-  // Unless a cryptographic Telegram Stars pre-checkout token or verified gateway reference is supplied and validated, it starts as 'pending_verification'.
-  const hasGatewayProof = Boolean(provider_tx_id && String(provider_tx_id).trim().length >= 6);
-  const initialPaymentStatus = hasGatewayProof ? 'paid' : 'pending_verification';
-  const initialOrderStatus = hasGatewayProof ? 'confirmed' : 'pending';
-
-  db.prepare(`
-    INSERT INTO orders (
-      id, business_id, order_number, customer_id, customer_name, customer_phone,
-      source, items_json, subtotal, discount_amount, discount_code, total, currency,
-      status, delivery_status, delivery_address, assigned_employee_id,
-      payment_status, payment_method, created_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ETB', ?, 'awaiting_dispatch', ?, null, ?, ?, ?)
-  `).run(
-    orderId,
-    business.id,
-    orderNumber,
-    customer.id,
-    customer_name,
-    customer_phone,
-    source || 'telegram',
-    JSON.stringify(items),
-    subtotal,
-    discountAmount,
-    discount_code || '',
-    total,
-    initialOrderStatus,
-    delivery_address || 'Addis Ababa',
-    initialPaymentStatus,
-    payment_method || 'telebirr',
-    now
-  );
-
-  const paymentId = 'pay_' + crypto.randomBytes(4).toString('hex');
-  const refCode = 'TX-' + crypto.randomBytes(3).toString('hex').toUpperCase();
-  db.prepare(`
-    INSERT INTO payments (
-      id, scope, business_id, reference_code, order_id, booking_id,
-      amount, currency, method, provider_tx_id, status, verified_at, verified_by, description, created_at
-    ) VALUES (?, 'business', ?, ?, ?, null, ?, 'ETB', ?, ?, ?, ?, ?, ?, ?)
-  `).run(
-    paymentId,
-    business.id,
-    refCode,
-    orderId,
-    total,
-    payment_method || 'telebirr',
-    provider_tx_id || '',
-    hasGatewayProof ? 'verified' : 'initiated',
-    hasGatewayProof ? now : null,
-    hasGatewayProof ? 'Instant Gateway Token' : null,
-    `Order ${orderNumber} (${payment_method || 'telebirr'})`,
-    now
-  );
-
-  // Record Funnel Events: order_submit + payment_attempt (+ payment_confirmed if verified)
-  const insertEv = db.prepare(`
-    INSERT INTO analytics_events (id, business_id, customer_id, session_id, event_type, page_name, product_id, source, device_type, duration_secs, created_at)
-    VALUES (?, ?, ?, 'sess_checkout', ?, 'checkout', null, ?, 'mobile_tg', 110, ?)
-  `);
-  insertEv.run('ev_' + crypto.randomBytes(4).toString('hex'), business.id, customer.id, 'order_submit', source || 'telegram', now);
-  insertEv.run('ev_' + crypto.randomBytes(4).toString('hex'), business.id, customer.id, 'payment_attempt', source || 'telegram', now);
-  if (hasGatewayProof) {
-    insertEv.run('ev_' + crypto.randomBytes(4).toString('hex'), business.id, customer.id, 'payment_confirmed', source || 'telegram', now);
-    insertEv.run('ev_' + crypto.randomBytes(4).toString('hex'), business.id, customer.id, 'purchase_complete', source || 'telegram', now);
-    db.prepare('UPDATE customers SET total_spent = total_spent + ?, loyalty_points = loyalty_points + ? WHERE id = ?').run(total, Math.floor(total / 25), customer.id);
-  }
-
-  res.status(201).json({
-    orderId,
-    orderNumber,
-    referenceCode: refCode,
-    total,
-    paymentStatus: initialPaymentStatus,
-    orderStatus: initialOrderStatus,
-  });
-});
-
-// Submit Real Service Booking / Reservation
+});// Submit Real Service Booking / Reservation
 app.post('/api/storefront/:slug/book', (req: Request, res: Response) => {
   const business = db.prepare('SELECT * FROM businesses WHERE slug = ? OR id = ?').get(req.params.slug, req.params.slug) as any;
   if (!business) {
