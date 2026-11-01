@@ -1,0 +1,6 @@
+{
+  "name": "TeleBiz OS — Telegram-First Business Operating Platform",
+  "description": "Multi-tenant business operating platform for creating, launching, and managing Telegram Mini Apps and web storefronts with done-for-you service, visual builder, AI builder, CRM, support inbox, analytics, and super-admin controls.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
