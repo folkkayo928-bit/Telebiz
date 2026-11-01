@@ -24,6 +24,11 @@ import {
   ExternalLink,
   Search,
   Lock,
+  Pencil,
+  X,
+  AlertCircle,
+  Clock3,
+  Boxes,
 } from 'lucide-react';
 import { translations, LANGUAGE_LABELS, LanguageCode, BUSINESS_CATEGORIES } from './i18n/translations';
 import { MiniAppStorefront } from './components/MiniAppStorefront';
@@ -77,14 +82,20 @@ export default function App() {
   // Product & Service Creation Forms
   const [prodName, setProdName] = useState('');
   const [prodCat, setProdCat] = useState('Signature Offerings');
-  const [prodPrice, setProdPrice] = useState(950);
-  const [prodStock, setProdStock] = useState(30);
+  const [prodPrice, setProdPrice] = useState('');
+  const [prodStock, setProdStock] = useState('');
   const [prodDesc, setProdDesc] = useState('');
   const [prodVariations, setProdVariations] = useState('Standard, Large');
+  const [productSearch, setProductSearch] = useState('');
+  const [productStockFilter, setProductStockFilter] = useState<'all' | 'low' | 'out' | 'hidden'>('all');
+  const [editingProduct, setEditingProduct] = useState<any>(null);
+  const [productSaving, setProductSaving] = useState(false);
+  const [serviceSaving, setServiceSaving] = useState(false);
+  const [commerceError, setCommerceError] = useState('');
 
   const [srvName, setSrvName] = useState('');
   const [srvDuration, setSrvDuration] = useState(60);
-  const [srvPrice, setSrvPrice] = useState(1200);
+  const [srvPrice, setSrvPrice] = useState('');
   const [srvDesc, setSrvDesc] = useState('');
 
   // Support Reply State
@@ -205,6 +216,10 @@ export default function App() {
     if (selectedBusinessId) {
       loadTenantWorkspace(selectedBusinessId);
     }
+    setEditingProduct(null);
+    setProductSearch('');
+    setProductStockFilter('all');
+    setCommerceError('');
   }, [selectedBusinessId, authToken, loadTenantWorkspace]);
 
   const handleSwitchDemoAccount = async (userId: string) => {
@@ -292,43 +307,100 @@ export default function App() {
 
   const handleCreateProduct = async (e: React.FormEvent) => {
     e.preventDefault();
-    const res = await fetch(`/api/businesses/${selectedBusinessId}/products`, {
-      method: 'POST',
-      headers: headersWithAuth(),
-      body: JSON.stringify({
-        name: prodName,
-        category_name: prodCat,
-        price: prodPrice,
-        stock: prodStock,
-        description: prodDesc,
-        variations: prodVariations,
-      }),
-    });
-    if (res.ok) {
+    setProductSaving(true);
+    setCommerceError('');
+    try {
+      const res = await fetch(`/api/businesses/${selectedBusinessId}/products`, {
+        method: 'POST',
+        headers: headersWithAuth(),
+        body: JSON.stringify({
+          name: prodName.trim(),
+          category_name: prodCat.trim(),
+          price: Number(prodPrice),
+          stock: Number(prodStock),
+          description: prodDesc,
+          variations: prodVariations,
+        }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setCommerceError(json.error || 'The product could not be created. Please try again.');
+        return;
+      }
       setProdName('');
+      setProdPrice('');
+      setProdStock('');
       setProdDesc('');
-      loadTenantWorkspace(selectedBusinessId);
-      setStatusBanner('Added product to live catalog.');
+      await loadTenantWorkspace(selectedBusinessId);
+      setStatusBanner('Product added to the catalog.');
+    } catch (err: any) {
+      setCommerceError(err.message || 'Network error. The product was not created.');
+    } finally {
+      setProductSaving(false);
+    }
+  };
+
+  const handleUpdateProduct = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingProduct || productSaving) return;
+    setProductSaving(true);
+    setCommerceError('');
+    try {
+      const res = await fetch(`/api/businesses/${selectedBusinessId}/products/${editingProduct.id}`, {
+        method: 'PATCH',
+        headers: headersWithAuth(),
+        body: JSON.stringify({
+          name: String(editingProduct.name || '').trim(),
+          price: Number(editingProduct.price),
+          stock: Number(editingProduct.stock),
+          available: Boolean(editingProduct.available),
+          featured: Boolean(editingProduct.featured),
+        }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setCommerceError(json.error || 'Product changes could not be saved.');
+        return;
+      }
+      setEditingProduct(null);
+      await loadTenantWorkspace(selectedBusinessId);
+      setStatusBanner('Product details and inventory updated.');
+    } catch (err: any) {
+      setCommerceError(err.message || 'Network error. Product changes were not saved.');
+    } finally {
+      setProductSaving(false);
     }
   };
 
   const handleCreateService = async (e: React.FormEvent) => {
     e.preventDefault();
-    const res = await fetch(`/api/businesses/${selectedBusinessId}/services`, {
-      method: 'POST',
-      headers: headersWithAuth(),
-      body: JSON.stringify({
-        name: srvName,
-        duration_mins: srvDuration,
-        price: srvPrice,
-        description: srvDesc,
-      }),
-    });
-    if (res.ok) {
+    setServiceSaving(true);
+    setCommerceError('');
+    try {
+      const res = await fetch(`/api/businesses/${selectedBusinessId}/services`, {
+        method: 'POST',
+        headers: headersWithAuth(),
+        body: JSON.stringify({
+          name: srvName.trim(),
+          duration_mins: Number(srvDuration),
+          price: Number(srvPrice),
+          description: srvDesc,
+        }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setCommerceError(json.error || 'The service could not be created. Please try again.');
+        return;
+      }
       setSrvName('');
+      setSrvPrice('');
       setSrvDesc('');
-      loadTenantWorkspace(selectedBusinessId);
-      setStatusBanner('Added bookable service listing.');
+      await loadTenantWorkspace(selectedBusinessId);
+      setStatusBanner('Bookable service added.');
+    } catch (err: any) {
+      setCommerceError(err.message || 'Network error. The service was not created.');
+    } finally {
+      setServiceSaving(false);
     }
   };
 
@@ -595,6 +667,22 @@ export default function App() {
   };
 
   const activeBusiness = workspace?.business || businesses[0];
+  const commerceProducts: any[] = workspace?.products || [];
+  const commerceServices: any[] = workspace?.services || [];
+  const lowStockCount = commerceProducts.filter((p: any) => Number(p.stock) > 0 && Number(p.stock) <= 5).length;
+  const outOfStockCount = commerceProducts.filter((p: any) => Number(p.stock) <= 0).length;
+  const visibleCommerceProducts = commerceProducts.filter((p: any) => {
+    const query = productSearch.trim().toLowerCase();
+    const matchesSearch = !query || [p.name, p.sku, p.category_name].some((value) => String(value || '').toLowerCase().includes(query));
+    const isHidden = !Boolean(Number(p.available));
+    const stock = Number(p.stock || 0);
+    const matchesStock =
+      productStockFilter === 'all' ||
+      (productStockFilter === 'low' && stock > 0 && stock <= 5) ||
+      (productStockFilter === 'out' && stock <= 0) ||
+      (productStockFilter === 'hidden' && isHidden);
+    return matchesSearch && matchesStock;
+  });
   const activeConversation = supportThreads.find((c) => c.id === selectedConvId) || supportThreads[0];
   const moduleMeta: Record<ActiveModule, { title: string; description: string }> = {
     overview: { title: 'Business overview', description: 'A clear view of your business performance and daily activity.' },
@@ -1086,183 +1174,293 @@ export default function App() {
             {/* MODULE 3: STORE CATALOG, INVENTORY & BOOKABLE SERVICES */}
             {activeModule === 'commerce' && workspace && (
               <div className="space-y-6">
-                <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-                  {/* Product Catalog List (7 cols) */}
-                  <div className="lg:col-span-7 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 space-y-4">
-                    <h2 className="text-sm font-display font-semibold text-slate-900 dark:text-white">
-                      Products & Inventory Management ({workspace.products.length})
-                    </h2>
-                    <div className="divide-y divide-slate-100 dark:divide-slate-800 text-xs">
-                      {workspace.products.map((p: any) => (
-                        <div key={p.id} className="py-3 flex items-center justify-between gap-4">
-                          <div className="space-y-0.5">
-                            <div className="font-semibold text-slate-900 dark:text-white">
-                              {p.name} · <span className="font-mono text-slate-500">{p.sku}</span>
-                            </div>
-                            <div className="text-slate-500">
-                              Category: {p.category_name} · Views: {p.views_count} · Likes: {p.likes_count} · Purchased:{' '}
-                              {p.purchases_count}
-                            </div>
-                          </div>
-                          <div className="text-right shrink-0 space-y-1">
-                            <div className="font-mono font-semibold text-slate-900 dark:text-white tabular-nums">
-                              {Number(p.price).toLocaleString()} {p.currency}
-                            </div>
-                            <div className="text-[11px] text-slate-500 tabular-nums">Stock: {p.stock} units</div>
-                          </div>
+                <section className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+                  <div>
+                    <div className="text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-400">Catalog management</div>
+                    <h2 className="mt-1 text-2xl font-display font-semibold tracking-tight text-slate-950 dark:text-white">Products & services</h2>
+                    <p className="mt-1 max-w-2xl text-sm leading-6 text-slate-500 dark:text-slate-400">
+                      Keep your storefront accurate, manage stock, and publish the services customers can book.
+                    </p>
+                  </div>
+                  <div className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-2 text-[11px] font-medium text-slate-600 shadow-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300">
+                    <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                    {workspace.business?.name || 'Current business'}
+                  </div>
+                </section>
+
+                {commerceError && (
+                  <div role="alert" className="flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-xs leading-5 text-rose-800 dark:border-rose-900/60 dark:bg-rose-950/30 dark:text-rose-200">
+                    <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                    <span className="flex-1">{commerceError}</span>
+                    <button type="button" onClick={() => setCommerceError('')} aria-label="Dismiss error" className="shrink-0 underline">Dismiss</button>
+                  </div>
+                )}
+
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                  <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+                    <div className="flex items-center justify-between text-xs text-slate-500"><span>Catalog items</span><Package className="h-4 w-4" /></div>
+                    <div className="mt-2 text-2xl font-semibold tabular-nums text-slate-950 dark:text-white">{commerceProducts.length}</div>
+                    <p className="mt-1 text-[11px] text-slate-500">Products currently recorded</p>
+                  </div>
+                  <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+                    <div className="flex items-center justify-between text-xs text-slate-500"><span>Low stock</span><Boxes className="h-4 w-4" /></div>
+                    <div className="mt-2 text-2xl font-semibold tabular-nums text-slate-950 dark:text-white">{lowStockCount}</div>
+                    <p className="mt-1 text-[11px] text-slate-500">Between 1 and 5 units</p>
+                  </div>
+                  <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+                    <div className="flex items-center justify-between text-xs text-slate-500"><span>Out of stock</span><AlertCircle className="h-4 w-4" /></div>
+                    <div className="mt-2 text-2xl font-semibold tabular-nums text-slate-950 dark:text-white">{outOfStockCount}</div>
+                    <p className="mt-1 text-[11px] text-slate-500">Products with zero units recorded</p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 gap-5 xl:grid-cols-12">
+                  <section className="space-y-4 xl:col-span-7">
+                    <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900 sm:p-5">
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                        <div>
+                          <h3 className="text-sm font-semibold text-slate-950 dark:text-white">Product inventory</h3>
+                          <p className="mt-1 text-xs text-slate-500">{visibleCommerceProducts.length} of {commerceProducts.length} products shown</p>
                         </div>
-                      ))}
+                        <div className="relative w-full sm:max-w-xs">
+                          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                          <input
+                            type="search"
+                            value={productSearch}
+                            onChange={(e) => setProductSearch(e.target.value)}
+                            placeholder="Search product, SKU or category"
+                            aria-label="Search products"
+                            className="w-full rounded-xl border border-slate-200 bg-slate-50 py-2.5 pl-9 pr-3 text-xs outline-none transition focus:border-slate-400 focus:bg-white dark:border-slate-700 dark:bg-slate-950 dark:focus:bg-slate-900"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="mt-4 flex flex-wrap gap-2">
+                        {[
+                          { id: 'all', label: 'All products', count: commerceProducts.length },
+                          { id: 'low', label: 'Low stock', count: lowStockCount },
+                          { id: 'out', label: 'Out of stock', count: outOfStockCount },
+                          { id: 'hidden', label: 'Hidden', count: commerceProducts.filter((p: any) => !Boolean(Number(p.available))).length },
+                        ].map((filter) => (
+                          <button
+                            key={filter.id}
+                            type="button"
+                            onClick={() => setProductStockFilter(filter.id as 'all' | 'low' | 'out' | 'hidden')}
+                            aria-pressed={productStockFilter === filter.id}
+                            className={productStockFilter === filter.id
+                              ? 'rounded-full bg-slate-950 px-3 py-1.5 text-[11px] font-semibold text-white dark:bg-white dark:text-slate-950'
+                              : 'rounded-full border border-slate-200 px-3 py-1.5 text-[11px] font-medium text-slate-600 transition hover:border-slate-400 dark:border-slate-700 dark:text-slate-300'}
+                          >
+                            {filter.label} <span className="ml-1 opacity-65">{filter.count}</span>
+                          </button>
+                        ))}
+                      </div>
+
+                      <div className="mt-4 space-y-3">
+                        {visibleCommerceProducts.length === 0 ? (
+                          <div className="rounded-xl border border-dashed border-slate-300 px-4 py-10 text-center dark:border-slate-700">
+                            <Package className="mx-auto h-6 w-6 text-slate-400" />
+                            <p className="mt-2 text-sm font-medium text-slate-800 dark:text-slate-200">
+                              {commerceProducts.length === 0 ? 'Your catalog is ready for its first product' : 'No products match these filters'}
+                            </p>
+                            <p className="mt-1 text-xs text-slate-500">
+                              {commerceProducts.length === 0 ? 'Add a product to begin building your catalog.' : 'Try another search or choose a different inventory filter.'}
+                            </p>
+                          </div>
+                        ) : visibleCommerceProducts.map((product: any) => {
+                          const stock = Number(product.stock || 0);
+                          const hidden = !Boolean(Number(product.available));
+                          const stockLabel = stock <= 0 ? 'Out of stock' : stock <= 5 ? 'Low stock' : 'In stock';
+                          const stockClass = stock <= 0
+                            ? 'bg-rose-50 text-rose-700 dark:bg-rose-950/40 dark:text-rose-300'
+                            : stock <= 5
+                            ? 'bg-amber-50 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300'
+                            : 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300';
+                          return (
+                            <article key={product.id} className="rounded-xl border border-slate-200 p-4 transition hover:border-slate-300 dark:border-slate-800 dark:hover:border-slate-700">
+                              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                                <div className="min-w-0 flex-1">
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <h4 className="truncate text-sm font-semibold text-slate-950 dark:text-white">{product.name}</h4>
+                                    {Boolean(Number(product.featured)) && <span className="rounded-full bg-indigo-50 px-2 py-0.5 text-[10px] font-medium text-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-300">Featured</span>}
+                                  </div>
+                                  <p className="mt-1 text-xs text-slate-500">{product.category_name || 'Uncategorized'} · <span className="font-mono">{product.sku || 'SKU not assigned'}</span></p>
+                                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                                    <span className={"rounded-full px-2.5 py-1 text-[10px] font-semibold " + stockClass}>{stockLabel}</span>
+                                    {hidden && <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[10px] font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300">Hidden from storefront</span>}
+                                  </div>
+                                </div>
+                                <div className="flex items-center justify-between gap-4 sm:flex-col sm:items-end">
+                                  <div className="text-left sm:text-right">
+                                    <div className="text-base font-semibold tabular-nums text-slate-950 dark:text-white">{Number(product.price || 0).toLocaleString()} {product.currency || 'ETB'}</div>
+                                    <div className="mt-1 text-xs text-slate-500">{stock.toLocaleString()} units recorded</div>
+                                  </div>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setCommerceError('');
+                                      setEditingProduct({
+                                        id: product.id,
+                                        name: product.name || '',
+                                        price: String(product.price ?? ''),
+                                        stock: String(product.stock ?? 0),
+                                        available: Boolean(Number(product.available)),
+                                        featured: Boolean(Number(product.featured)),
+                                      });
+                                    }}
+                                    className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-2 text-[11px] font-semibold text-slate-700 transition hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+                                  >
+                                    <Pencil className="h-3.5 w-3.5" /> Edit
+                                  </button>
+                                </div>
+                              </div>
+                              <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 border-t border-slate-100 pt-3 text-[10px] text-slate-400 dark:border-slate-800">
+                                <span>{Number(product.views_count || 0).toLocaleString()} views</span>
+                                <span>{Number(product.likes_count || 0).toLocaleString()} likes</span>
+                                <span>{Number(product.purchases_count || 0).toLocaleString()} purchases</span>
+                              </div>
+                            </article>
+                          );
+                        })}
+                      </div>
                     </div>
 
-                    {/* Bookable Services List */}
-                    <div className="pt-4 border-t border-slate-200 dark:border-slate-800 space-y-3">
-                      <h3 className="text-sm font-display font-semibold text-slate-900 dark:text-white">
-                        Bookable Services & Reservation Packages ({workspace.services.length})
-                      </h3>
-                      <div className="divide-y divide-slate-100 dark:divide-slate-800 text-xs">
-                        {workspace.services.map((s: any) => (
-                          <div key={s.id} className="py-2.5 flex items-center justify-between gap-4">
-                            <div>
-                              <div className="font-semibold text-slate-900 dark:text-white">{s.name}</div>
-                              <div className="text-slate-500">
-                                Duration: {s.duration_mins} mins · Capacity: {s.capacity} guests
+                    <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900 sm:p-5">
+                      <div className="flex items-center justify-between gap-3">
+                        <div>
+                          <h3 className="text-sm font-semibold text-slate-950 dark:text-white">Bookable services</h3>
+                          <p className="mt-1 text-xs text-slate-500">{commerceServices.length} services configured</p>
+                        </div>
+                        <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[10px] font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300">Appointments & reservations</span>
+                      </div>
+                      <div className="mt-4 space-y-2">
+                        {commerceServices.length === 0 ? (
+                          <div className="rounded-xl border border-dashed border-slate-300 px-4 py-8 text-center dark:border-slate-700">
+                            <Clock3 className="mx-auto h-5 w-5 text-slate-400" />
+                            <p className="mt-2 text-xs font-medium text-slate-700 dark:text-slate-300">No bookable services yet</p>
+                            <p className="mt-1 text-[11px] text-slate-500">Add an appointment, tour, or reservation type.</p>
+                          </div>
+                        ) : commerceServices.map((service: any) => (
+                          <div key={service.id} className="flex flex-col gap-2 rounded-xl border border-slate-200 p-3.5 sm:flex-row sm:items-center sm:justify-between dark:border-slate-800">
+                            <div className="min-w-0">
+                              <div className="text-sm font-semibold text-slate-950 dark:text-white">{service.name}</div>
+                              <div className="mt-1 text-xs text-slate-500">
+                                {Number(service.duration_mins || 0)} minutes · Capacity {Number(service.capacity || 1)}
                               </div>
+                              {service.description && <p className="mt-1 text-xs leading-5 text-slate-500">{service.description}</p>}
                             </div>
-                            <div className="font-mono font-semibold tabular-nums">
-                              {Number(s.price).toLocaleString()} {s.currency}
-                            </div>
+                            <div className="text-sm font-semibold tabular-nums text-slate-950 dark:text-white">{Number(service.price || 0).toLocaleString()} {service.currency || 'ETB'}</div>
                           </div>
                         ))}
                       </div>
+                      <p className="mt-3 text-[10px] leading-5 text-slate-400">Service editing is not yet supported by the current backend. This screen can create and display service listings.</p>
                     </div>
-                  </div>
+                  </section>
 
-                  {/* Add Product & Add Service Forms (5 cols) */}
-                  <div className="lg:col-span-5 space-y-6">
-                    <form
-                      onSubmit={handleCreateProduct}
-                      className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 space-y-3 text-xs"
-                    >
-                      <h3 className="text-sm font-display font-semibold text-slate-900 dark:text-white">
-                        Add New Product to Storefront
-                      </h3>
+                  <section className="space-y-4 xl:col-span-5">
+                    {editingProduct && (
+                      <form onSubmit={handleUpdateProduct} className="space-y-4 rounded-2xl border border-slate-300 bg-slate-50 p-4 shadow-sm dark:border-slate-700 dark:bg-slate-900 sm:p-5">
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400">Edit catalog item</div>
+                            <h3 className="mt-1 text-sm font-semibold text-slate-950 dark:text-white">{editingProduct.name}</h3>
+                          </div>
+                          <button type="button" onClick={() => setEditingProduct(null)} aria-label="Close product editor" className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-200 dark:hover:bg-slate-800"><X className="h-4 w-4" /></button>
+                        </div>
+                        <div>
+                          <label className="mb-1 block text-xs font-medium text-slate-700 dark:text-slate-300">Product name</label>
+                          <input required value={editingProduct.name} onChange={(e) => setEditingProduct({ ...editingProduct, name: e.target.value })} className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-xs dark:border-slate-700 dark:bg-slate-950" />
+                        </div>
+                        <div className="grid grid-cols-2 gap-3">
+                          <div>
+                            <label className="mb-1 block text-xs font-medium text-slate-700 dark:text-slate-300">Price (ETB)</label>
+                            <input required type="number" min="0" step="0.01" value={editingProduct.price} onChange={(e) => setEditingProduct({ ...editingProduct, price: e.target.value })} className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-xs dark:border-slate-700 dark:bg-slate-950" />
+                          </div>
+                          <div>
+                            <label className="mb-1 block text-xs font-medium text-slate-700 dark:text-slate-300">Stock units</label>
+                            <input required type="number" min="0" step="1" value={editingProduct.stock} onChange={(e) => setEditingProduct({ ...editingProduct, stock: e.target.value })} className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-xs dark:border-slate-700 dark:bg-slate-950" />
+                          </div>
+                        </div>
+                        <label className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white p-3 text-xs dark:border-slate-700 dark:bg-slate-950">
+                          <span><strong className="block font-semibold text-slate-800 dark:text-slate-200">Available on storefront</strong><span className="text-[10px] text-slate-500">Customers can see and order this product</span></span>
+                          <input type="checkbox" checked={Boolean(editingProduct.available)} onChange={(e) => setEditingProduct({ ...editingProduct, available: e.target.checked })} className="h-4 w-4 accent-slate-900" />
+                        </label>
+                        <label className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white p-3 text-xs dark:border-slate-700 dark:bg-slate-950">
+                          <span><strong className="block font-semibold text-slate-800 dark:text-slate-200">Feature this product</strong><span className="text-[10px] text-slate-500">Highlight it in the catalog</span></span>
+                          <input type="checkbox" checked={Boolean(editingProduct.featured)} onChange={(e) => setEditingProduct({ ...editingProduct, featured: e.target.checked })} className="h-4 w-4 accent-slate-900" />
+                        </label>
+                        <button type="submit" disabled={productSaving} className="w-full rounded-xl bg-slate-950 px-4 py-2.5 text-xs font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-white dark:text-slate-950">
+                          {productSaving ? 'Saving changes...' : 'Save product changes'}
+                        </button>
+                      </form>
+                    )}
+
+                    <form onSubmit={handleCreateProduct} className="space-y-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900 sm:p-5">
                       <div>
-                        <label className="block font-medium text-slate-700 dark:text-slate-300 mb-1">Product Name</label>
-                        <input
-                          type="text"
-                          value={prodName}
-                          onChange={(e) => setProdName(e.target.value)}
-                          placeholder="e.g., Sidama Bensa Natural (500g)"
-                          className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800"
-                          required
-                        />
+                        <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400">New catalog item</div>
+                        <h3 className="mt-1 text-sm font-semibold text-slate-950 dark:text-white">Add a product</h3>
+                        <p className="mt-1 text-xs leading-5 text-slate-500">Set the price and starting stock. The system assigns the product SKU.</p>
+                      </div>
+                      <div>
+                        <label className="mb-1 block text-xs font-medium text-slate-700 dark:text-slate-300">Product name</label>
+                        <input required value={prodName} onChange={(e) => setProdName(e.target.value)} placeholder="e.g. Signature coffee blend" className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-xs dark:border-slate-700 dark:bg-slate-950" />
+                      </div>
+                      <div>
+                        <label className="mb-1 block text-xs font-medium text-slate-700 dark:text-slate-300">Category</label>
+                        <input required value={prodCat} onChange={(e) => setProdCat(e.target.value)} className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-xs dark:border-slate-700 dark:bg-slate-950" />
                       </div>
                       <div className="grid grid-cols-2 gap-3">
                         <div>
-                          <label className="block font-medium text-slate-700 dark:text-slate-300 mb-1">Category</label>
-                          <input
-                            type="text"
-                            value={prodCat}
-                            onChange={(e) => setProdCat(e.target.value)}
-                            className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800"
-                            required
-                          />
+                          <label className="mb-1 block text-xs font-medium text-slate-700 dark:text-slate-300">Price (ETB)</label>
+                          <input required type="number" min="0" step="0.01" value={prodPrice} onChange={(e) => setProdPrice(e.target.value)} className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-xs dark:border-slate-700 dark:bg-slate-950" />
                         </div>
                         <div>
-                          <label className="block font-medium text-slate-700 dark:text-slate-300 mb-1">Price (ETB)</label>
-                          <input
-                            type="number"
-                            value={prodPrice}
-                            onChange={(e) => setProdPrice(Number(e.target.value))}
-                            className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800"
-                            required
-                          />
-                        </div>
-                      </div>
-                      <div className="grid grid-cols-2 gap-3">
-                        <div>
-                          <label className="block font-medium text-slate-700 dark:text-slate-300 mb-1">Initial Stock</label>
-                          <input
-                            type="number"
-                            value={prodStock}
-                            onChange={(e) => setProdStock(Number(e.target.value))}
-                            className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800"
-                          />
-                        </div>
-                        <div>
-                          <label className="block font-medium text-slate-700 dark:text-slate-300 mb-1">Variations</label>
-                          <input
-                            type="text"
-                            value={prodVariations}
-                            onChange={(e) => setProdVariations(e.target.value)}
-                            className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800"
-                          />
+                          <label className="mb-1 block text-xs font-medium text-slate-700 dark:text-slate-300">Starting stock</label>
+                          <input required type="number" min="0" step="1" value={prodStock} onChange={(e) => setProdStock(e.target.value)} className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-xs dark:border-slate-700 dark:bg-slate-950" />
                         </div>
                       </div>
                       <div>
-                        <label className="block font-medium text-slate-700 dark:text-slate-300 mb-1">Description</label>
-                        <textarea
-                          rows={2}
-                          value={prodDesc}
-                          onChange={(e) => setProdDesc(e.target.value)}
-                          className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800"
-                          required
-                        />
+                        <label className="mb-1 block text-xs font-medium text-slate-700 dark:text-slate-300">Variations</label>
+                        <input value={prodVariations} onChange={(e) => setProdVariations(e.target.value)} placeholder="Small, Medium, Large" className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-xs dark:border-slate-700 dark:bg-slate-950" />
                       </div>
-                      <button
-                        type="submit"
-                        className="w-full py-2 rounded-lg bg-sky-600 hover:bg-sky-500 text-white font-semibold"
-                      >
-                        Publish Product
+                      <div>
+                        <label className="mb-1 block text-xs font-medium text-slate-700 dark:text-slate-300">Description (optional)</label>
+                        <textarea rows={2} value={prodDesc} onChange={(e) => setProdDesc(e.target.value)} className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-xs dark:border-slate-700 dark:bg-slate-950" />
+                      </div>
+                      <button type="submit" disabled={productSaving} className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-slate-950 px-4 py-2.5 text-xs font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-white dark:text-slate-950">
+                        <Plus className="h-4 w-4" /> {productSaving ? 'Creating product...' : 'Add product'}
                       </button>
                     </form>
 
-                    <form
-                      onSubmit={handleCreateService}
-                      className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 space-y-3 text-xs"
-                    >
-                      <h3 className="text-sm font-display font-semibold text-slate-900 dark:text-white">
-                        Add Bookable Service / Appointment Type
-                      </h3>
+                    <form onSubmit={handleCreateService} className="space-y-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900 sm:p-5">
                       <div>
-                        <label className="block font-medium text-slate-700 dark:text-slate-300 mb-1">Service Name</label>
-                        <input
-                          type="text"
-                          value={srvName}
-                          onChange={(e) => setSrvName(e.target.value)}
-                          placeholder="e.g., Executive Consultation or Roastery Tour"
-                          className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800"
-                          required
-                        />
+                        <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400">Appointments & reservations</div>
+                        <h3 className="mt-1 text-sm font-semibold text-slate-950 dark:text-white">Add a bookable service</h3>
+                        <p className="mt-1 text-xs leading-5 text-slate-500">Create the service customers can request through your storefront.</p>
+                      </div>
+                      <div>
+                        <label className="mb-1 block text-xs font-medium text-slate-700 dark:text-slate-300">Service name</label>
+                        <input required value={srvName} onChange={(e) => setSrvName(e.target.value)} placeholder="e.g. Consultation or room reservation" className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-xs dark:border-slate-700 dark:bg-slate-950" />
                       </div>
                       <div className="grid grid-cols-2 gap-3">
                         <div>
-                          <label className="block font-medium text-slate-700 dark:text-slate-300 mb-1">Duration (Mins)</label>
-                          <input
-                            type="number"
-                            value={srvDuration}
-                            onChange={(e) => setSrvDuration(Number(e.target.value))}
-                            className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800"
-                          />
+                          <label className="mb-1 block text-xs font-medium text-slate-700 dark:text-slate-300">Duration (minutes)</label>
+                          <input type="number" min="1" value={srvDuration} onChange={(e) => setSrvDuration(Number(e.target.value))} className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-xs dark:border-slate-700 dark:bg-slate-950" />
                         </div>
                         <div>
-                          <label className="block font-medium text-slate-700 dark:text-slate-300 mb-1">Price (ETB)</label>
-                          <input
-                            type="number"
-                            value={srvPrice}
-                            onChange={(e) => setSrvPrice(Number(e.target.value))}
-                            className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800"
-                          />
+                          <label className="mb-1 block text-xs font-medium text-slate-700 dark:text-slate-300">Price (ETB)</label>
+                          <input required type="number" min="0" step="0.01" value={srvPrice} onChange={(e) => setSrvPrice(e.target.value)} className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-xs dark:border-slate-700 dark:bg-slate-950" />
                         </div>
                       </div>
-                      <button
-                        type="submit"
-                        className="w-full py-2 rounded-lg bg-slate-900 dark:bg-white text-white dark:text-slate-900 font-semibold"
-                      >
-                        Create Bookable Service
+                      <div>
+                        <label className="mb-1 block text-xs font-medium text-slate-700 dark:text-slate-300">Description (optional)</label>
+                        <textarea rows={2} value={srvDesc} onChange={(e) => setSrvDesc(e.target.value)} className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-xs dark:border-slate-700 dark:bg-slate-950" />
+                      </div>
+                      <button type="submit" disabled={serviceSaving} className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-slate-950 px-4 py-2.5 text-xs font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-white dark:text-slate-950">
+                        <Plus className="h-4 w-4" /> {serviceSaving ? 'Creating service...' : 'Add service'}
                       </button>
                     </form>
-                  </div>
+                  </section>
                 </div>
               </div>
             )}
