@@ -183,3 +183,156 @@
     animation-duration: 0.01ms !important;
   }
 }
+
+
+/* TeleBiz customer storefront design system */
+.telebiz-storefront {
+  color: #0f172a;
+  isolation: isolate;
+}
+
+.telebiz-store-header {
+  background: rgba(255, 255, 255, 0.96);
+  backdrop-filter: blur(16px);
+}
+
+.telebiz-store-content {
+  min-width: 0;
+  min-height: 460px;
+  scroll-behavior: smooth;
+}
+
+.telebiz-store-hero {
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.telebiz-product-art {
+  isolation: isolate;
+}
+
+.telebiz-art-orb {
+  transition: transform 500ms ease;
+}
+
+.telebiz-customer-card {
+  transition: transform 180ms ease, border-color 180ms ease, box-shadow 180ms ease;
+}
+
+.telebiz-customer-card:hover {
+  transform: translateY(-3px);
+  border-color: #c7d2fe;
+  box-shadow: 0 16px 34px rgba(30, 41, 59, 0.08);
+}
+
+.telebiz-customer-card:hover .telebiz-art-orb:first-child {
+  transform: scale(1.08);
+}
+
+.telebiz-customer-card button:focus-visible,
+.telebiz-storefront button:focus-visible,
+.telebiz-storefront a:focus-visible {
+  outline: 3px solid rgba(99, 102, 241, 0.32);
+  outline-offset: 2px;
+}
+
+.telebiz-store-label {
+  display: block;
+  margin-bottom: 0.4rem;
+  color: #475569;
+  font-size: 0.7rem;
+  font-weight: 700;
+}
+
+.telebiz-store-input {
+  min-height: 44px;
+  border: 1px solid #e2e8f0;
+  border-radius: 0.85rem;
+  background: #fff;
+  padding: 0.72rem 0.9rem;
+  color: #0f172a;
+  font-size: 0.78rem;
+  outline: none;
+  transition: border-color 150ms ease, box-shadow 150ms ease;
+}
+
+.telebiz-store-input::placeholder {
+  color: #94a3b8;
+}
+
+.telebiz-store-input:focus {
+  border-color: #818cf8;
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.12);
+}
+
+.telebiz-store-input:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.telebiz-store-mobile-nav {
+  padding-bottom: max(0.55rem, env(safe-area-inset-bottom));
+}
+
+.telebiz-cart-summary {
+  box-shadow: 0 -8px 24px rgba(15, 23, 42, 0.045);
+}
+
+.telebiz-checkout-backdrop {
+  overscroll-behavior: contain;
+}
+
+.telebiz-checkout-panel {
+  overscroll-behavior: contain;
+}
+
+.dark .telebiz-storefront {
+  color: #e2e8f0;
+}
+
+.dark .telebiz-store-header {
+  background: rgba(2, 6, 23, 0.96);
+}
+
+.dark .telebiz-store-label {
+  color: #cbd5e1;
+}
+
+.dark .telebiz-store-input {
+  border-color: #334155;
+  background: #0f172a;
+  color: #f8fafc;
+}
+
+.dark .telebiz-store-input::placeholder {
+  color: #64748b;
+}
+
+.dark .telebiz-customer-card:hover {
+  border-color: #4f46e5;
+  box-shadow: 0 16px 34px rgba(0, 0, 0, 0.28);
+}
+
+@media (max-width: 639px) {
+  .telebiz-store-content {
+    padding-bottom: 1.25rem;
+  }
+
+  .telebiz-storefront {
+    border-radius: 1.35rem;
+  }
+
+  .telebiz-store-mobile-nav {
+    padding-left: max(0.375rem, env(safe-area-inset-left));
+    padding-right: max(0.375rem, env(safe-area-inset-right));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .telebiz-storefront *,
+  .telebiz-storefront *::before,
+  .telebiz-storefront *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
+}
