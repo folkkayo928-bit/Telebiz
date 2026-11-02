@@ -18,16 +18,42 @@ import { MiniAppStorefront } from './MiniAppStorefront';
 
 interface BuilderStudioProps {
   business: any;
+  businesses?: any[];
   versions: any[];
   authToken: string;
   onRefresh: () => void;
+  onSelectBusiness?: (businessId: string) => void;
+  onOpenFullPreview?: () => void;
 }
+
+const COLOR_PRESETS = [
+  { id: 'indigo', name: 'Royal Indigo', primary: '#1E1B4B', accent: '#4F46E5' },
+  { id: 'ocean', name: 'Midnight Sky', primary: '#0F172A', accent: '#0284C7' },
+  { id: 'emerald', name: 'Botanical Emerald', primary: '#064E3B', accent: '#059669' },
+  { id: 'rose', name: 'Velvet Rose', primary: '#18181B', accent: '#E11D48' },
+  { id: 'amber', name: 'Roastery Espresso', primary: '#27170E', accent: '#D97706' },
+  { id: 'teal', name: 'Resort Lagoon', primary: '#134E4A', accent: '#0D9488' },
+  { id: 'violet', name: 'Electric Studio', primary: '#2E1065', accent: '#7C3AED' },
+  { id: 'coral', name: 'Sunset Coral', primary: '#1F2937', accent: '#EA580C' },
+];
+
+const FONT_OPTIONS = [
+  { id: 'Plus Jakarta Sans', label: 'Plus Jakarta Sans', style: 'Modern Geometric', sample: 'Clean & Crisp' },
+  { id: 'Outfit', label: 'Outfit', style: 'Friendly Contemporary', sample: 'Smooth & Bold' },
+  { id: 'Playfair Display', label: 'Playfair Display', style: 'Luxury Editorial Serif', sample: 'Timeless Elegance' },
+  { id: 'Fraunces', label: 'Fraunces', style: 'Artisan Soft Serif', sample: 'Warm & Crafted' },
+  { id: 'Space Grotesk', label: 'Space Grotesk', style: 'Tech & Streetwear', sample: 'Sharp & Kinetic' },
+  { id: 'JetBrains Mono', label: 'JetBrains Mono', style: 'Precision Technical', sample: '0123-CODE' },
+];
 
 export const BuilderStudio: React.FC<BuilderStudioProps> = ({
   business,
+  businesses = [],
   versions,
   authToken,
   onRefresh,
+  onSelectBusiness,
+  onOpenFullPreview,
 }) => {
   const [mode, setMode] = useState<'visual' | 'ai' | 'dfy'>(
     business.creation_method === 'done_for_you'
@@ -36,8 +62,17 @@ export const BuilderStudio: React.FC<BuilderStudioProps> = ({
       ? 'ai'
       : 'visual'
   );
+  const [builderWorkspaceTab, setBuilderWorkspaceTab] = useState<'editor' | 'preview'>('editor');
 
   const latestVer = versions[0];
+  const parsedLatestTheme = (() => {
+    try {
+      return latestVer ? JSON.parse(latestVer.theme_json || '{}') : {};
+    } catch {
+      return {};
+    }
+  })();
+
   const [sections, setSections] = useState<any[]>(() => {
     try {
       return latestVer ? JSON.parse(latestVer.layout_json) : [];
@@ -47,6 +82,9 @@ export const BuilderStudio: React.FC<BuilderStudioProps> = ({
   });
   const [primaryColor, setPrimaryColor] = useState(business.primary_color || '#0F172A');
   const [accentColor, setAccentColor] = useState(business.accent_color || '#0284C7');
+  const [fontFamily, setFontFamily] = useState(business.font_family || parsedLatestTheme.fontFamily || 'Plus Jakarta Sans');
+  const [buttonStyle, setButtonStyle] = useState<'3d' | 'pill' | 'sharp'>(parsedLatestTheme.buttonStyle || '3d');
+  const [cardRadius, setCardRadius] = useState(parsedLatestTheme.cardRadius || '20px');
   const [versionNote, setVersionNote] = useState('');
   const [saving, setSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState('');
@@ -68,15 +106,24 @@ export const BuilderStudio: React.FC<BuilderStudioProps> = ({
 
   useEffect(() => {
     const v = versions[0];
+    let themeObj: any = {};
     if (v) {
       try {
         setSections(JSON.parse(v.layout_json));
       } catch {
         // ignore
       }
+      try {
+        themeObj = JSON.parse(v.theme_json || '{}');
+      } catch {
+        themeObj = {};
+      }
     }
     setPrimaryColor(business.primary_color || '#0F172A');
     setAccentColor(business.accent_color || '#0284C7');
+    setFontFamily(business.font_family || themeObj.fontFamily || 'Plus Jakarta Sans');
+    setButtonStyle(themeObj.buttonStyle || '3d');
+    setCardRadius(themeObj.cardRadius || '20px');
     setDfyNotes(business.dfy_notes || '');
     setDfyStatus(business.dfy_status || 'requested');
     setAiGenerationsUsed(Number(business.ai_generations_used || 0));
@@ -184,7 +231,7 @@ export const BuilderStudio: React.FC<BuilderStudioProps> = ({
         },
         body: JSON.stringify({
           layout: sections,
-          theme: { primaryColor, accentColor, cardRadius: '12px' },
+          theme: { primaryColor, accentColor, fontFamily, buttonStyle, cardRadius },
           pages: [
             { slug: 'home', title: 'Storefront', enabled: true },
             { slug: 'catalog', title: 'Products', enabled: true },
@@ -324,77 +371,342 @@ export const BuilderStudio: React.FC<BuilderStudioProps> = ({
           <div className="space-y-1">
             <div className="text-[10px] font-semibold uppercase tracking-[0.22em] text-slate-400">TeleBiz Studio</div>
             <h2 className="text-2xl font-display font-semibold tracking-tight text-slate-950 dark:text-white sm:text-[28px]">
-              Build your storefront
+              Build & Style: {business.name}
             </h2>
             <p className="max-w-2xl text-sm leading-6 text-slate-500 dark:text-slate-400">
-              Shape your customer experience, then save a draft or publish when it is ready.
+              Customize colors, fonts, 3D tactile buttons, and page sections—then save a draft or publish live.
             </p>
           </div>
           <div className="inline-flex w-fit items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-medium text-slate-600 shadow-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300">
-            <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-            {business.name}
+            <span className="h-2 w-2 rounded-full bg-emerald-500" />
+            {business.name} · {fontFamily}
           </div>
         </div>
-        <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
           <button type="button" onClick={() => setMode('visual')} aria-pressed={mode === 'visual'}
-            className={`group rounded-2xl border p-4 text-left transition-all ${mode === 'visual' ? 'border-slate-950 bg-white shadow-md ring-1 ring-slate-950/5 dark:border-white dark:bg-slate-900 dark:ring-white/10' : 'border-slate-200 bg-white/70 hover:border-slate-300 hover:bg-white dark:border-slate-800 dark:bg-slate-900/50 dark:hover:border-slate-700'}`}>
+            className={`group rounded-2xl border p-4 text-left transition-all ${mode === 'visual' ? 'card-3d border-indigo-600 ring-2 ring-indigo-600/15' : 'border-slate-200 bg-white/80 hover:border-slate-300 hover:bg-white dark:border-slate-800 dark:bg-slate-900/50'}`}>
             <div className="flex items-center justify-between">
-              <span className={`flex h-9 w-9 items-center justify-center rounded-xl ${mode === 'visual' ? 'bg-slate-950 text-white dark:bg-white dark:text-slate-950' : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300'}`}><Layers className="h-4 w-4" /></span>
+              <span className={`flex h-10 w-10 items-center justify-center rounded-xl ${mode === 'visual' ? 'btn-3d-primary' : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300'}`}><Layers className="h-4 w-4" /></span>
               {mode === 'visual' && <CheckCircle2 className="h-4 w-4 text-emerald-600" />}
             </div>
-            <div className="mt-3 text-sm font-semibold text-slate-950 dark:text-white">Visual builder</div>
-            <p className="mt-1 text-xs leading-5 text-slate-500 dark:text-slate-400">Arrange sections, choose a template, and refine your brand.</p>
+            <div className="mt-3 text-sm font-bold text-slate-950 dark:text-white">1. Visual & Theme Builder</div>
+            <p className="mt-1 text-xs leading-5 text-slate-500 dark:text-slate-400">Choose custom colors, fonts, 3D styles, and section order.</p>
           </button>
           <button type="button" onClick={() => setMode('ai')} aria-pressed={mode === 'ai'}
-            className={`group rounded-2xl border p-4 text-left transition-all ${mode === 'ai' ? 'border-slate-950 bg-white shadow-md ring-1 ring-slate-950/5 dark:border-white dark:bg-slate-900 dark:ring-white/10' : 'border-slate-200 bg-white/70 hover:border-slate-300 hover:bg-white dark:border-slate-800 dark:bg-slate-900/50 dark:hover:border-slate-700'}`}>
+            className={`group rounded-2xl border p-4 text-left transition-all ${mode === 'ai' ? 'card-3d border-indigo-600 ring-2 ring-indigo-600/15' : 'border-slate-200 bg-white/80 hover:border-slate-300 hover:bg-white dark:border-slate-800 dark:bg-slate-900/50'}`}>
             <div className="flex items-center justify-between">
-              <span className={`flex h-9 w-9 items-center justify-center rounded-xl ${mode === 'ai' ? 'bg-slate-950 text-white dark:bg-white dark:text-slate-950' : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300'}`}><Sparkles className="h-4 w-4" /></span>
-              <span className="text-[10px] font-medium tabular-nums text-slate-400">{aiGenerationsUsed}/{business.ai_generations_limit ?? 0} uses</span>
+              <span className={`flex h-10 w-10 items-center justify-center rounded-xl ${mode === 'ai' ? 'btn-3d-primary' : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300'}`}><Sparkles className="h-4 w-4" /></span>
+              <span className="text-[10px] font-bold tabular-nums text-slate-400">{aiGenerationsUsed}/{business.ai_generations_limit ?? 0} uses</span>
             </div>
-            <div className="mt-3 text-sm font-semibold text-slate-950 dark:text-white">AI builder</div>
-            <p className="mt-1 text-xs leading-5 text-slate-500 dark:text-slate-400">Describe what you need and get a tailored layout to review.</p>
+            <div className="mt-3 text-sm font-bold text-slate-950 dark:text-white">2. AI Storefront Architect</div>
+            <p className="mt-1 text-xs leading-5 text-slate-500 dark:text-slate-400">Describe what you need and generate a tailored layout.</p>
           </button>
           <button type="button" onClick={() => setMode('dfy')} aria-pressed={mode === 'dfy'}
-            className={`group rounded-2xl border p-4 text-left transition-all ${mode === 'dfy' ? 'border-slate-950 bg-white shadow-md ring-1 ring-slate-950/5 dark:border-white dark:bg-slate-900 dark:ring-white/10' : 'border-slate-200 bg-white/70 hover:border-slate-300 hover:bg-white dark:border-slate-800 dark:bg-slate-900/50 dark:hover:border-slate-700'}`}>
+            className={`group rounded-2xl border p-4 text-left transition-all ${mode === 'dfy' ? 'card-3d border-indigo-600 ring-2 ring-indigo-600/15' : 'border-slate-200 bg-white/80 hover:border-slate-300 hover:bg-white dark:border-slate-800 dark:bg-slate-900/50'}`}>
             <div className="flex items-center justify-between">
-              <span className={`flex h-9 w-9 items-center justify-center rounded-xl ${mode === 'dfy' ? 'bg-slate-950 text-white dark:bg-white dark:text-slate-950' : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300'}`}><Wrench className="h-4 w-4" /></span>
-              {business.dfy_status && business.dfy_status !== 'not_applicable' && <span className="rounded-full bg-slate-100 px-2 py-1 text-[10px] font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300">{String(business.dfy_status).replace(/_/g, ' ')}</span>}
+              <span className={`flex h-10 w-10 items-center justify-center rounded-xl ${mode === 'dfy' ? 'btn-3d-primary' : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300'}`}><Wrench className="h-4 w-4" /></span>
+              {business.dfy_status && business.dfy_status !== 'not_applicable' && <span className="rounded-full bg-slate-100 px-2 py-1 text-[10px] font-semibold text-slate-600 dark:bg-slate-800 dark:text-slate-300">{String(business.dfy_status).replace(/_/g, ' ')}</span>}
             </div>
-            <div className="mt-3 text-sm font-semibold text-slate-950 dark:text-white">Done for you</div>
-            <p className="mt-1 text-xs leading-5 text-slate-500 dark:text-slate-400">Send your brief to the TeleBiz team for assisted setup.</p>
+            <div className="mt-3 text-sm font-bold text-slate-950 dark:text-white">3. Done-For-You Service</div>
+            <p className="mt-1 text-xs leading-5 text-slate-500 dark:text-slate-400">Send your brief to the TeleBiz team for full concierge setup.</p>
           </button>
         </div>
       </section>
 
       {saveMessage || actionError ? (
-        <div role="status" className={`flex items-center justify-between gap-3 rounded-xl border px-4 py-3 text-xs font-medium ${actionError ? 'border-rose-200 bg-rose-50 text-rose-800 dark:border-rose-900/60 dark:bg-rose-950/30 dark:text-rose-200' : 'border-emerald-200 bg-emerald-50 text-emerald-900 dark:border-emerald-900/60 dark:bg-emerald-950/30 dark:text-emerald-200'}`}>
+        <div role="status" className={`flex items-center justify-between gap-3 rounded-xl border px-4 py-3 text-xs font-semibold ${actionError ? 'border-rose-200 bg-rose-50 text-rose-800 dark:border-rose-900/60 dark:bg-rose-950/30 dark:text-rose-200' : 'border-emerald-200 bg-emerald-50 text-emerald-900 dark:border-emerald-900/60 dark:bg-emerald-950/30 dark:text-emerald-200'}`}>
           <span>{actionError || saveMessage}</span>
           <button type="button" onClick={() => { setSaveMessage(''); setActionError(''); }} className="shrink-0 text-current underline-offset-2 hover:underline">Dismiss</button>
         </div>
       ) : null}
 
-      {saveMessage && (
-        <div className="p-3.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800/60 text-xs font-medium text-emerald-900 dark:text-emerald-200 flex items-center justify-between">
-          <span>{saveMessage}</span>
-          <button type="button" onClick={() => setSaveMessage('')} className="text-emerald-700 hover:underline">
-            Dismiss
-          </button>
+      {/* SEPARATED WORKSPACE SWITCHER: STORE EDITION vs. STORE PREVIEW */}
+      <div className="card-3d rounded-2xl bg-white dark:bg-slate-900 p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div>
+          <div className="text-[10px] font-extrabold uppercase tracking-[0.18em] text-indigo-600 dark:text-indigo-400">
+            Structured Workspace Mode
+          </div>
+          <h3 className="text-sm font-display font-extrabold text-slate-950 dark:text-white">
+            {builderWorkspaceTab === 'editor'
+              ? `1. Store Edition Studio — Editing ${business.name}`
+              : `2. Dedicated Customer Storefront Preview — ${business.name}`}
+          </h3>
+          <p className="text-xs text-slate-500">
+            Store Editing and Store Preview are cleanly separated so your workspace stays uncluttered and focused.
+          </p>
         </div>
-      )}
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="inline-flex rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-100 dark:bg-slate-950 p-1">
+            <button
+              type="button"
+              onClick={() => setBuilderWorkspaceTab('editor')}
+              className={`px-3.5 py-2 rounded-lg text-xs font-extrabold transition flex items-center gap-1.5 ${
+                builderWorkspaceTab === 'editor'
+                  ? 'bg-slate-950 text-white shadow-sm dark:bg-indigo-600'
+                  : 'text-slate-600 dark:text-slate-300 hover:text-slate-900'
+              }`}
+            >
+              <Wrench className="w-3.5 h-3.5" />
+              1. Store Edition Controls
+            </button>
+            <button
+              type="button"
+              onClick={() => setBuilderWorkspaceTab('preview')}
+              className={`px-3.5 py-2 rounded-lg text-xs font-extrabold transition flex items-center gap-1.5 ${
+                builderWorkspaceTab === 'preview'
+                  ? 'bg-emerald-800 text-white shadow-sm'
+                  : 'text-slate-600 dark:text-slate-300 hover:text-slate-900'
+              }`}
+            >
+              <Eye className="w-3.5 h-3.5" />
+              2. Dedicated Store Preview
+            </button>
+          </div>
+          {onOpenFullPreview && (
+            <button
+              type="button"
+              onClick={onOpenFullPreview}
+              className="btn-3d-white px-3.5 py-2 rounded-xl text-xs font-bold"
+            >
+              Full-Screen Customer View ↗
+            </button>
+          )}
+        </div>
+      </div>
 
+      {builderWorkspaceTab === 'preview' ? (
+        <div className="space-y-4">
+          <div className="card-3d p-4 bg-white dark:bg-slate-900 flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-emerald-700 dark:text-emerald-400">
+                Dedicated Storefront Preview Mode
+              </div>
+              <h3 className="mt-0.5 text-base font-display font-extrabold text-slate-950 dark:text-white">
+                {business.name} — Live Customer Experience
+              </h3>
+              <p className="text-xs text-slate-500">
+                Previewing with <span className="font-mono font-semibold">{primaryColor}</span> / <span className="font-mono font-semibold">{accentColor}</span> and <span className="font-semibold">{fontFamily}</span> typography.
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setBuilderWorkspaceTab('editor')}
+                className="btn-3d-white rounded-xl px-3.5 py-2 text-xs font-bold flex items-center gap-1.5"
+              >
+                <Wrench className="w-3.5 h-3.5 text-indigo-600" />
+                Back to Store Edition Controls
+              </button>
+              <button
+                type="button"
+                disabled={saving}
+                onClick={() => handleSaveVersion('published')}
+                className="btn-3d-emerald rounded-xl px-4 py-2 text-xs font-extrabold text-white flex items-center gap-1.5"
+              >
+                <Save className="w-3.5 h-3.5" />
+                {saving ? 'Publishing...' : 'Publish Store Changes'}
+              </button>
+            </div>
+          </div>
+          <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-xl dark:border-slate-800 dark:bg-slate-950">
+            <MiniAppStorefront
+              slug={business.slug}
+              mode="embedded_preview"
+              overrideTheme={{ primaryColor, accentColor, fontFamily, buttonStyle, cardRadius }}
+              onOrderCreated={onRefresh}
+            />
+          </div>
+        </div>
+      ) : (
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-        {/* Left Column: Active Builder Controls (7 cols) */}
-        <div className="lg:col-span-7 space-y-6">
+        {/* Left Column: Active Builder Controls (8 cols) */}
+        <div className="lg:col-span-8 space-y-6">
           {/* METHOD B: SELF-SERVICE VISUAL BUILDER */}
           {mode === 'visual' && (
             <div className="space-y-6">
-              {/* Ready-Made 9 Category Templates */}
-              <div className="p-5 sm:p-6 bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 rounded-2xl shadow-sm space-y-3">
+              {/* Branding, Custom Color Palettes & Typography */}
+              <div className="card-3d p-5 sm:p-6 space-y-5">
                 <div className="flex items-center justify-between">
-                  <h3 className="text-sm font-display font-semibold text-slate-900 dark:text-white">
+                  <div>
+                    <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-indigo-600 dark:text-indigo-400">
+                      Storefront Identity
+                    </div>
+                    <h3 className="text-base font-display font-bold text-slate-900 dark:text-white">
+                      Custom Colors, Typography & 3D Feel
+                    </h3>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="h-5 w-5 rounded-full border border-slate-200 shadow-inner" style={{ backgroundColor: primaryColor }} />
+                    <span className="h-5 w-5 rounded-full border border-slate-200 shadow-inner" style={{ backgroundColor: accentColor }} />
+                  </div>
+                </div>
+
+                {/* Curated 1-Click Color Palettes */}
+                <div className="space-y-2">
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
+                    1-Click Color Palettes (Or pick any custom color below)
+                  </label>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                    {COLOR_PRESETS.map((preset) => {
+                      const active = primaryColor.toLowerCase() === preset.primary.toLowerCase() && accentColor.toLowerCase() === preset.accent.toLowerCase();
+                      return (
+                        <button
+                          key={preset.id}
+                          type="button"
+                          onClick={() => {
+                            setPrimaryColor(preset.primary);
+                            setAccentColor(preset.accent);
+                          }}
+                          className={`flex items-center gap-2 rounded-xl border p-2 text-left text-xs font-semibold transition ${
+                            active
+                              ? 'border-indigo-600 bg-indigo-50/60 text-indigo-950 ring-1 ring-indigo-600 dark:bg-indigo-950/40 dark:text-white'
+                              : 'border-slate-200 hover:border-slate-300 dark:border-slate-800'
+                          }`}
+                        >
+                          <span className="flex shrink-0 -space-x-1.5">
+                            <span className="h-4 w-4 rounded-full border border-white" style={{ backgroundColor: preset.primary }} />
+                            <span className="h-4 w-4 rounded-full border border-white" style={{ backgroundColor: preset.accent }} />
+                          </span>
+                          <span className="truncate text-[11px]">{preset.name}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Custom Hex & Color Pickers */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
+                      Hero / Primary Surface Color
+                    </label>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="color"
+                        value={primaryColor}
+                        onChange={(e) => setPrimaryColor(e.target.value)}
+                        className="w-10 h-10 rounded-xl border border-slate-200 cursor-pointer shadow-sm"
+                      />
+                      <input
+                        type="text"
+                        value={primaryColor}
+                        onChange={(e) => setPrimaryColor(e.target.value)}
+                        className="flex-1 px-3 py-2 text-xs font-mono rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
+                      Buttons & Interactive Accent Color
+                    </label>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="color"
+                        value={accentColor}
+                        onChange={(e) => setAccentColor(e.target.value)}
+                        className="w-10 h-10 rounded-xl border border-slate-200 cursor-pointer shadow-sm"
+                      />
+                      <input
+                        type="text"
+                        value={accentColor}
+                        onChange={(e) => setAccentColor(e.target.value)}
+                        className="flex-1 px-3 py-2 text-xs font-mono rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Storefront Font Family Selector */}
+                <div className="space-y-2">
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
+                    Storefront Font Family (6 Distinct Typography Styles)
+                  </label>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                    {FONT_OPTIONS.map((f) => {
+                      const selected = fontFamily === f.id;
+                      return (
+                        <button
+                          key={f.id}
+                          type="button"
+                          onClick={() => setFontFamily(f.id)}
+                          style={{ fontFamily: f.id }}
+                          className={`rounded-xl border p-3 text-left transition ${
+                            selected
+                              ? 'border-indigo-600 bg-indigo-50/70 ring-1 ring-indigo-600 dark:bg-indigo-950/50'
+                              : 'border-slate-200 hover:border-slate-300 dark:border-slate-800'
+                          }`}
+                        >
+                          <div className="text-xs font-bold text-slate-900 dark:text-white">{f.label}</div>
+                          <div className="mt-0.5 text-[10px] text-slate-500">{f.style}</div>
+                          <div className="mt-1.5 text-sm font-semibold text-indigo-600 dark:text-indigo-400">{f.sample}</div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Button & Card 3D Elevation Options */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-1">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1.5">
+                      Button & Card Tactile Style
+                    </label>
+                    <div className="grid grid-cols-3 gap-1.5">
+                      {[
+                        { id: '3d', label: '3D Tactile' },
+                        { id: 'pill', label: 'Rounded Pill' },
+                        { id: 'sharp', label: 'Crisp Modern' },
+                      ].map((bs) => (
+                        <button
+                          key={bs.id}
+                          type="button"
+                          onClick={() => setButtonStyle(bs.id as any)}
+                          className={`py-2 px-2.5 rounded-xl border text-[11px] font-bold ${
+                            buttonStyle === bs.id
+                              ? 'btn-3d-primary'
+                              : 'border-slate-200 text-slate-600 hover:bg-slate-50 dark:border-slate-800 dark:text-slate-300'
+                          }`}
+                        >
+                          {bs.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1.5">
+                      Card Corner Softness
+                    </label>
+                    <div className="grid grid-cols-3 gap-1.5">
+                      {[
+                        { id: '12px', label: '12px Classic' },
+                        { id: '20px', label: '20px Modern' },
+                        { id: '28px', label: '28px Sculpted' },
+                      ].map((cr) => (
+                        <button
+                          key={cr.id}
+                          type="button"
+                          onClick={() => setCardRadius(cr.id)}
+                          className={`py-2 px-2.5 rounded-xl border text-[11px] font-bold ${
+                            cardRadius === cr.id
+                              ? 'btn-3d-dark'
+                              : 'border-slate-200 text-slate-600 hover:bg-slate-50 dark:border-slate-800 dark:text-slate-300'
+                          }`}
+                        >
+                          {cr.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Ready-Made 9 Category Templates */}
+              <div className="card-3d p-5 sm:p-6 space-y-3">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-sm font-display font-bold text-slate-900 dark:text-white">
                     Ready-Made Industry Templates (9 Categories)
                   </h3>
-                  <span className="text-xs text-slate-500">Active category: {business.category}</span>
+                  <span className="text-xs font-semibold text-indigo-600 dark:text-indigo-400">Active: {business.category}</span>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                   {BUSINESS_CATEGORIES.map((cat) => (
@@ -402,59 +714,12 @@ export const BuilderStudio: React.FC<BuilderStudioProps> = ({
                       key={cat.id}
                       type="button"
                       onClick={() => applyTemplateCategory(cat.id)}
-                      className="p-2.5 text-left rounded-lg border border-slate-200 dark:border-slate-800 hover:border-sky-500 transition-colors space-y-1"
+                      className="p-2.5 text-left rounded-xl border border-slate-200 dark:border-slate-800 hover:border-indigo-500 transition-colors space-y-1"
                     >
-                      <div className="text-xs font-semibold text-slate-900 dark:text-white truncate">{cat.label}</div>
+                      <div className="text-xs font-bold text-slate-900 dark:text-white truncate">{cat.label}</div>
                       <div className="text-[11px] text-slate-500 line-clamp-1">{cat.sampleModules.join(' · ')}</div>
                     </button>
                   ))}
-                </div>
-              </div>
-
-              {/* Branding & Color Customization */}
-              <div className="p-5 sm:p-6 bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 rounded-2xl shadow-sm space-y-4">
-                <h3 className="text-sm font-display font-semibold text-slate-900 dark:text-white">
-                  Branding & Color Palette
-                </h3>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">
-                      Header / Primary Surface Color
-                    </label>
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="color"
-                        value={primaryColor}
-                        onChange={(e) => setPrimaryColor(e.target.value)}
-                        className="w-9 h-9 rounded border border-slate-200 cursor-pointer"
-                      />
-                      <input
-                        type="text"
-                        value={primaryColor}
-                        onChange={(e) => setPrimaryColor(e.target.value)}
-                        className="flex-1 px-3 py-1.5 text-xs font-mono rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800"
-                      />
-                    </div>
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">
-                      Interactive CTA / Accent Color
-                    </label>
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="color"
-                        value={accentColor}
-                        onChange={(e) => setAccentColor(e.target.value)}
-                        className="w-9 h-9 rounded border border-slate-200 cursor-pointer"
-                      />
-                      <input
-                        type="text"
-                        value={accentColor}
-                        onChange={(e) => setAccentColor(e.target.value)}
-                        className="flex-1 px-3 py-1.5 text-xs font-mono rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800"
-                      />
-                    </div>
-                  </div>
                 </div>
               </div>
 
@@ -780,27 +1045,94 @@ export const BuilderStudio: React.FC<BuilderStudioProps> = ({
           )}
         </div>
 
-        {/* Customer-facing storefront: current published version */}
-        <aside className="space-y-3 lg:sticky lg:top-5">
-          <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-            <div className="flex items-center justify-between gap-3">
+        {/* Right Column in Editor Mode: Clean Theme & Structure Summary Card (No cramped inline storefront) */}
+        <aside className="lg:col-span-4 space-y-4 lg:sticky lg:top-5">
+          <div className="card-3d p-5 bg-white dark:bg-slate-900 space-y-4">
+            <div className="flex items-center justify-between gap-2">
               <div>
-                <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400">Customer view</div>
-                <h3 className="mt-1 text-sm font-semibold text-slate-950 dark:text-white">Published storefront</h3>
+                <div className="text-[10px] font-extrabold uppercase tracking-[0.18em] text-indigo-600 dark:text-indigo-400">
+                  Active Store Blueprint
+                </div>
+                <h3 className="mt-0.5 text-base font-display font-extrabold text-slate-950 dark:text-white">
+                  {business.name}
+                </h3>
               </div>
-              <span className={`rounded-full px-2.5 py-1 text-[10px] font-semibold ${business.mini_app_published ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300' : 'bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300'}`}>
-                {business.mini_app_published ? 'Live' : 'Not published'}
+              <span className={`rounded-full px-2.5 py-1 text-[10px] font-bold ${business.mini_app_published ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300' : 'bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300'}`}>
+                {business.mini_app_published ? `Live v${business.mini_app_version}` : 'Draft'}
               </span>
             </div>
-            <p className="mt-2 text-xs leading-5 text-slate-500 dark:text-slate-400">
-              This is the latest published customer experience. Your edits stay private until you publish them.
-            </p>
-          </div>
-          <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-950">
-            <MiniAppStorefront slug={business.slug} mode="embedded_preview" onOrderCreated={onRefresh} />
+
+            {/* Live Swatch & Typography Card */}
+            <div
+              className="rounded-2xl p-4 text-white shadow-md space-y-2 transition-all"
+              style={{
+                background: `linear-gradient(135deg, ${primaryColor} 0%, ${accentColor} 100%)`,
+                fontFamily,
+              }}
+            >
+              <div className="text-[10px] font-bold uppercase tracking-widest opacity-80">
+                Theme & Typography Swatch
+              </div>
+              <div className="text-lg font-extrabold leading-tight">
+                {business.name}
+              </div>
+              <div className="text-xs opacity-90">
+                Font: {fontFamily} · Style: {buttonStyle.toUpperCase()} · Radius: {cardRadius}
+              </div>
+              <div className="pt-2 flex items-center gap-2">
+                <span className="px-3 py-1 rounded-full bg-white text-slate-900 text-[11px] font-extrabold shadow-xs">
+                  Shop Now →
+                </span>
+                <span className="px-2.5 py-1 rounded-full bg-black/25 text-white text-[10px] font-mono">
+                  {primaryColor} / {accentColor}
+                </span>
+              </div>
+            </div>
+
+            <div className="space-y-2 text-xs border-t border-slate-100 dark:border-slate-800 pt-3">
+              <div className="flex items-center justify-between">
+                <span className="text-slate-500">Active Layout Sections</span>
+                <span className="font-bold text-slate-900 dark:text-white">
+                  {sections.filter((s) => s.visible !== false).length} visible / {sections.length} total
+                </span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-slate-500">Storefront Slug</span>
+                <span className="font-mono font-semibold text-indigo-600 dark:text-indigo-400">
+                  /{business.slug}
+                </span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-slate-500">Owner Unique ID</span>
+                <span className="font-mono font-bold text-emerald-700 dark:text-emerald-400">
+                  {business.owner_uid || 'OWN-ASSIGNED'}
+                </span>
+              </div>
+            </div>
+
+            <div className="space-y-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setBuilderWorkspaceTab('preview')}
+                className="btn-3d-emerald w-full py-3 rounded-xl text-xs font-extrabold text-white flex items-center justify-center gap-2"
+              >
+                <Eye className="w-4 h-4" />
+                Switch to Dedicated Store Preview
+              </button>
+              {onOpenFullPreview && (
+                <button
+                  type="button"
+                  onClick={onOpenFullPreview}
+                  className="btn-3d-white w-full py-2.5 rounded-xl text-xs font-bold flex items-center justify-center gap-2"
+                >
+                  Open Full-Screen Customer View ↗
+                </button>
+              )}
+            </div>
           </div>
         </aside>
       </div>
+      )}
     </div>
   );
 };

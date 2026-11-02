@@ -4,16 +4,14 @@ import {
   ArrowUpRight,
   Ban,
   Building2,
-  CalendarPlus,
   CheckCircle2,
   CreditCard,
   Eye,
-  Gift,
-  KeyRound,
   LifeBuoy,
-  MessageSquare,
+  Package,
   Plus,
   PauseCircle,
+  PlayCircle,
   RefreshCw,
   Search,
   ScrollText,
@@ -21,6 +19,7 @@ import {
   ShieldCheck,
   ShoppingCart,
   Sparkles,
+  Tag,
   Trash2,
   Users,
 } from 'lucide-react';
@@ -28,11 +27,27 @@ import {
 interface SuperAdminProps {
   authToken: string;
   onRefreshBusinesses: () => void;
+  onPreviewBusiness?: (biz: any) => void;
+  onEditBusinessCatalog?: (biz: any) => void;
+  onOpenCreateBusiness?: () => void;
 }
 
 const panelClass = 'rounded-2xl border border-slate-200/80 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900';
 const fieldClass = 'w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm text-slate-900 outline-none transition focus:border-indigo-400 focus:ring-4 focus:ring-indigo-500/10 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100';
 const labelClass = 'mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400';
+
+const CATEGORY_LABELS: Record<string, string> = {
+  all: 'All Categories',
+  retail: 'Retail & Boutique',
+  coffee_shop: 'Coffee & Roastery',
+  restaurant: 'Restaurant & Dining',
+  hotel: 'Hotel & Hospitality',
+  salon: 'Salon & Wellness',
+  real_estate: 'Real Estate',
+  digital: 'Digital Products',
+  education: 'Education',
+  services: 'Services',
+};
 
 function StatusPill({ status }: { status?: string }) {
   const value = String(status || 'unknown');
@@ -41,7 +56,7 @@ function StatusPill({ status }: { status?: string }) {
     ? 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/50 dark:text-emerald-300'
     : /(grace|pending|requested|open|review|configur)/.test(normalized)
       ? 'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900 dark:bg-amber-950/50 dark:text-amber-300'
-      : /(paused|suspended|blocked|failed|rejected|expired)/.test(normalized)
+      : /(paused|suspended|blocked|failed|rejected|expired|cancelled)/.test(normalized)
         ? 'border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-900 dark:bg-rose-950/50 dark:text-rose-300'
         : 'border-slate-200 bg-slate-100 text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300';
 
@@ -97,12 +112,17 @@ function EmptyState({ title, detail }: { title: string; detail: string }) {
 export const SuperAdminConsole: React.FC<SuperAdminProps> = ({
   authToken,
   onRefreshBusinesses,
+  onPreviewBusiness,
+  onEditBusinessCatalog,
+  onOpenCreateBusiness,
 }) => {
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
-  const [subTab, setSubTab] = useState<'businesses' | 'addons' | 'employees' | 'audit' | 'support'>('businesses');
+  const [subTab, setSubTab] = useState<'businesses' | 'users' | 'addons' | 'employees' | 'audit' | 'support'>('businesses');
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
+  const [categoryFilter, setCategoryFilter] = useState('all');
+  const [userSearch, setUserSearch] = useState('');
 
   // Administrative Control Action Modal/Panel State
   const [selectedBiz, setSelectedBiz] = useState<any>(null);
@@ -133,8 +153,11 @@ export const SuperAdminConsole: React.FC<SuperAdminProps> = ({
       const json = await res.json();
       if (res.ok) {
         setData(json);
-        if (!selectedBiz && json.businesses?.length > 0) {
-          setSelectedBiz(json.businesses[0]);
+        if (json.businesses?.length > 0) {
+          setSelectedBiz((prev: any) => {
+            if (!prev) return json.businesses[0];
+            return json.businesses.find((b: any) => b.id === prev.id) || json.businesses[0];
+          });
         }
       }
     } finally {
@@ -160,17 +183,98 @@ export const SuperAdminConsole: React.FC<SuperAdminProps> = ({
     );
   }
 
-  const { metrics = {}, businesses = [], addons = [], allEmployees = [], auditLogs = [], platformSupport = [] } = data;
+  const {
+    metrics = {},
+    businesses = [],
+    allUsers = [],
+    allCustomers = [],
+    addons = [],
+    allEmployees = [],
+    auditLogs = [],
+    platformSupport = [],
+  } = data;
+
+  const availableCategories: string[] = Array.from(
+    new Set(['all', ...businesses.map((b: any) => String(b.category || 'retail'))])
+  );
 
   const filteredBusinesses = businesses.filter((b: any) => {
     const matchesStatus = statusFilter === 'all' || b.status === statusFilter || b.subscription_status === statusFilter;
+    const matchesCat = categoryFilter === 'all' || b.category === categoryFilter;
     const matchesSearch =
       !searchQuery ||
       String(b.name || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
       String(b.slug || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
-      String(b.category || '').toLowerCase().includes(searchQuery.toLowerCase());
-    return matchesStatus && matchesSearch;
+      String(b.category || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+      String(b.owner_name || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+      String(b.owner_uid || '').toLowerCase().includes(searchQuery.toLowerCase());
+    return matchesStatus && matchesCat && matchesSearch;
   });
+
+  const handleQuickBizAction = async (biz: any, actionType: 'SUSPEND_BUSINESS' | 'PAUSE_BUSINESS' | 'RESTORE_ACCESS' | 'DELETE_BUSINESS') => {
+    setActionError('');
+    setActionFeedback('');
+    const res = await fetch('/api/superadmin/businesses/' + biz.id + '/control', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: 'Bearer ' + authToken,
+      },
+      body: JSON.stringify({
+        controlAction: actionType,
+        payload: {},
+        reason: `Admin quick governance action (${actionType})`,
+        confirmBusinessSlug: actionType === 'DELETE_BUSINESS' ? biz.slug : '',
+      }),
+    });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      setActionError(json.error || 'Action failed');
+    } else {
+      setActionFeedback(`Executed ${actionType.replace(/_/g, ' ')} on "${biz.name}".`);
+      await fetchOverview();
+      onRefreshBusinesses();
+    }
+  };
+
+  const handleUserControl = async (user: any, action: 'BLOCK_USER' | 'UNBLOCK_USER' | 'DELETE_USER') => {
+    setActionError('');
+    setActionFeedback('');
+    const res = await fetch(`/api/superadmin/users/${user.id}/control`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: 'Bearer ' + authToken,
+      },
+      body: JSON.stringify({
+        action,
+        reason: `Platform Admin ${action} on ${user.name}`,
+      }),
+    });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      setActionError(json.error || 'User control action failed');
+    } else {
+      setActionFeedback(`Updated user "${user.name}" (${action.replace(/_/g, ' ')}).`);
+      await fetchOverview();
+      onRefreshBusinesses();
+    }
+  };
+
+  const handleCustomerControl = async (customer: any, action: 'BLOCK_CUSTOMER' | 'UNBLOCK_CUSTOMER' | 'DELETE_CUSTOMER') => {
+    const res = await fetch(`/api/superadmin/customers/${customer.id}/control`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: 'Bearer ' + authToken,
+      },
+      body: JSON.stringify({ action }),
+    });
+    if (res.ok) {
+      setActionFeedback(`Updated customer "${customer.name}" (${action.replace(/_/g, ' ')}).`);
+      await fetchOverview();
+    }
+  };
 
   const handleExecuteControl = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -251,22 +355,22 @@ export const SuperAdminConsole: React.FC<SuperAdminProps> = ({
     {
       label: 'Registered businesses',
       value: Number(metrics.totalBusinesses || 0).toLocaleString(),
-      detail: String(metrics.activeBusinesses || 0) + ' active · ' + String(metrics.pausedOrSuspendedBusinesses || 0) + ' paused or restricted',
+      detail: String(metrics.activeBusinesses || 0) + ' active · ' + String(metrics.pausedOrSuspendedBusinesses || 0) + ' paused/suspended',
       Icon: Building2,
       accent: 'bg-indigo-50 text-indigo-600 dark:bg-indigo-950/60 dark:text-indigo-300',
     },
     {
-      label: 'Subscription revenue',
-      value: Number(metrics.subscriptionRevenue || 0).toLocaleString() + ' ETB',
-      detail: 'Verified platform plans',
-      Icon: CreditCard,
+      label: 'Store owners & users',
+      value: Number(metrics.totalStoreOwners || 0).toLocaleString() + ' Owners',
+      detail: Number(metrics.totalCustomers || 0).toLocaleString() + ' tracked store customers',
+      Icon: Users,
       accent: 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300',
     },
     {
-      label: 'Add-on & service revenue',
-      value: Number(metrics.addonRevenue || 0).toLocaleString() + ' ETB',
-      detail: 'Marketplace and done-for-you services',
-      Icon: Sparkles,
+      label: 'Platform revenue',
+      value: Number((metrics.subscriptionRevenue || 0) + (metrics.addonRevenue || 0)).toLocaleString() + ' ETB',
+      detail: 'Subscriptions + add-on services',
+      Icon: CreditCard,
       accent: 'bg-violet-50 text-violet-700 dark:bg-violet-950/60 dark:text-violet-300',
     },
     {
@@ -286,9 +390,10 @@ export const SuperAdminConsole: React.FC<SuperAdminProps> = ({
   ];
 
   const tabs = [
-    { id: 'businesses', label: 'Businesses', count: businesses.length, Icon: Building2 },
+    { id: 'businesses', label: 'Businesses by Category & Catalog', count: businesses.length, Icon: Building2 },
+    { id: 'users', label: 'Store Owners & Customers', count: allUsers.length + allCustomers.length, Icon: Users },
     { id: 'addons', label: 'Add-ons', count: addons.length, Icon: Sparkles },
-    { id: 'employees', label: 'Team oversight', count: allEmployees.length, Icon: Users },
+    { id: 'employees', label: 'Team oversight', count: allEmployees.length, Icon: ShieldCheck },
     { id: 'support', label: 'Support desk', count: platformSupport.length, Icon: LifeBuoy },
     { id: 'audit', label: 'Audit trail', count: auditLogs.length, Icon: ScrollText },
   ];
@@ -302,18 +407,24 @@ export const SuperAdminConsole: React.FC<SuperAdminProps> = ({
           <div className="max-w-2xl">
             <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.16em] text-indigo-200">
               <ShieldCheck className="h-3.5 w-3.5" />
-              TeleBiz platform control
+              Role 1 · Platform Super Admin Command Center
             </div>
-            <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">Command center</h1>
+            <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">Full Platform Governance & Store Inspector</h1>
             <p className="mt-2 max-w-xl text-sm leading-6 text-slate-300">
-              Manage business accounts, subscriptions, platform services, support and administrative activity from one workspace.
+              Browse all businesses by category, click any business to preview its live storefront and inspect what they are selling, or block, add, and delete businesses and users.
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <span className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs text-slate-300">
-              <Activity className="h-4 w-4 text-emerald-300" />
-              Platform administration
-            </span>
+            {onOpenCreateBusiness && (
+              <button
+                type="button"
+                onClick={onOpenCreateBusiness}
+                className="inline-flex items-center justify-center gap-2 rounded-xl bg-indigo-600 px-4 py-2.5 text-xs font-semibold text-white transition hover:bg-indigo-500"
+              >
+                <Plus className="h-4 w-4" />
+                Add New Business
+              </button>
+            )}
             <button
               type="button"
               onClick={fetchOverview}
@@ -332,6 +443,25 @@ export const SuperAdminConsole: React.FC<SuperAdminProps> = ({
           <MetricCard key={metric.label} {...metric} />
         ))}
       </section>
+
+      {actionFeedback && (
+        <div className="flex items-center justify-between gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-xs font-semibold text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-200">
+          <span className="flex items-center gap-2">
+            <CheckCircle2 className="h-4 w-4 shrink-0" /> {actionFeedback}
+          </span>
+          <button type="button" onClick={() => setActionFeedback('')} className="underline">
+            Dismiss
+          </button>
+        </div>
+      )}
+      {actionError && (
+        <div className="flex items-center justify-between gap-2 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-xs font-semibold text-rose-800 dark:border-rose-900 dark:bg-rose-950/40 dark:text-rose-200">
+          <span>{actionError}</span>
+          <button type="button" onClick={() => setActionError('')} className="underline">
+            Dismiss
+          </button>
+        </div>
+      )}
 
       <section className="space-y-4">
         <div className="flex gap-2 overflow-x-auto pb-1">
@@ -361,252 +491,674 @@ export const SuperAdminConsole: React.FC<SuperAdminProps> = ({
         </div>
 
         {subTab === 'businesses' && (
-          <div className="grid items-start gap-5 2xl:grid-cols-12">
-            <section className={panelClass + ' min-w-0 overflow-hidden 2xl:col-span-7'}>
-              <div className="border-b border-slate-100 px-5 py-4 dark:border-slate-800 sm:px-6">
-                <div className="flex flex-col justify-between gap-3 lg:flex-row lg:items-center">
-                  <div>
-                    <h2 className="text-base font-semibold text-slate-950 dark:text-white">Business directory</h2>
-                    <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Select a business to review its account and apply an administrative action.</p>
-                  </div>
-                  <div className="flex flex-col gap-2 sm:flex-row">
-                    <div className="relative min-w-0 sm:min-w-56">
-                      <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                      <input
-                        type="search"
-                        value={searchQuery}
-                        onChange={(e) => setSearchQuery(e.target.value)}
-                        placeholder="Search businesses..."
-                        className={fieldClass + ' pl-9'}
-                        aria-label="Search businesses"
-                      />
-                    </div>
-                    <select
-                      value={statusFilter}
-                      onChange={(e) => setStatusFilter(e.target.value)}
-                      className={fieldClass + ' sm:w-40'}
-                      aria-label="Filter businesses by status"
+          <div className="space-y-4">
+            {/* Category Filter Bar for Admin */}
+            <div className={panelClass + ' p-4'}>
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-3">
+                <div className="flex items-center gap-2">
+                  <Tag className="h-4 w-4 text-indigo-600" />
+                  <span className="text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-200">
+                    Browse Business Lists by Category
+                  </span>
+                </div>
+                <span className="text-[11px] text-slate-500">
+                  Click any category below to filter stores, then click a business to preview its page and see what they are selling.
+                </span>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {availableCategories.map((cat) => {
+                  const count = cat === 'all' ? businesses.length : businesses.filter((b: any) => b.category === cat).length;
+                  const active = categoryFilter === cat;
+                  return (
+                    <button
+                      key={cat}
+                      type="button"
+                      onClick={() => setCategoryFilter(cat)}
+                      className={
+                        'inline-flex items-center gap-2 rounded-xl px-3.5 py-2 text-xs font-semibold transition ' +
+                        (active
+                          ? 'bg-indigo-600 text-white shadow-sm'
+                          : 'border border-slate-200 bg-slate-50 text-slate-700 hover:bg-white dark:border-slate-800 dark:bg-slate-950 dark:text-slate-300')
+                      }
                     >
-                      <option value="all">All statuses</option>
-                      <option value="active">Active</option>
-                      <option value="grace_period">Grace period</option>
-                      <option value="paused">Paused</option>
-                      <option value="suspended">Suspended</option>
-                    </select>
+                      <span>{CATEGORY_LABELS[cat] || cat.replace(/_/g, ' ')}</span>
+                      <span className={'rounded-full px-2 py-0.5 text-[10px] font-bold ' + (active ? 'bg-white/20 text-white' : 'bg-slate-200/80 text-slate-700 dark:bg-slate-800 dark:text-slate-300')}>
+                        {count}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="grid items-start gap-5 2xl:grid-cols-12">
+              <section className={panelClass + ' min-w-0 overflow-hidden 2xl:col-span-6'}>
+                <div className="border-b border-slate-100 px-5 py-4 dark:border-slate-800 sm:px-6">
+                  <div className="flex flex-col justify-between gap-3 lg:flex-row lg:items-center">
+                    <div>
+                      <h2 className="text-base font-semibold text-slate-950 dark:text-white">
+                        {CATEGORY_LABELS[categoryFilter] || categoryFilter} ({filteredBusinesses.length})
+                      </h2>
+                      <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                        Click any business row to inspect what they sell, preview their store, or block/delete.
+                      </p>
+                    </div>
+                    <div className="flex flex-col gap-2 sm:flex-row">
+                      <div className="relative min-w-0 sm:min-w-48">
+                        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                        <input
+                          type="search"
+                          value={searchQuery}
+                          onChange={(e) => setSearchQuery(e.target.value)}
+                          placeholder="Search store or owner..."
+                          className={fieldClass + ' pl-9'}
+                          aria-label="Search businesses"
+                        />
+                      </div>
+                      <select
+                        value={statusFilter}
+                        onChange={(e) => setStatusFilter(e.target.value)}
+                        className={fieldClass + ' sm:w-36'}
+                        aria-label="Filter businesses by status"
+                      >
+                        <option value="all">All statuses</option>
+                        <option value="active">Active</option>
+                        <option value="grace_period">Grace period</option>
+                        <option value="paused">Paused</option>
+                        <option value="suspended">Suspended</option>
+                      </select>
+                    </div>
                   </div>
+                </div>
+
+                {filteredBusinesses.length === 0 ? (
+                  <div className="p-5 sm:p-6">
+                    <EmptyState title="No businesses found" detail="Try another category, search term, or status filter." />
+                  </div>
+                ) : (
+                  <div className="divide-y divide-slate-100 dark:divide-slate-800">
+                    {filteredBusinesses.map((b: any) => {
+                      const selected = selectedBiz?.id === b.id;
+                      const isBlocked = b.status === 'suspended' || b.status === 'paused';
+                      return (
+                        <div
+                          key={b.id}
+                          onClick={() => setSelectedBiz(b)}
+                          className={
+                            'cursor-pointer px-5 py-4 transition sm:px-6 ' +
+                            (selected
+                              ? 'bg-indigo-50/80 dark:bg-indigo-950/30'
+                              : 'hover:bg-slate-50/80 dark:hover:bg-slate-800/40')
+                          }
+                        >
+                          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                            <div className="flex min-w-0 items-start gap-3">
+                              <div
+                                className={
+                                  'flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl text-sm font-bold text-white shadow-xs '
+                                }
+                                style={{ backgroundColor: b.primary_color || '#4f46e5' }}
+                              >
+                                {String(b.name || 'B').slice(0, 2).toUpperCase()}
+                              </div>
+                              <div className="min-w-0">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <p className="truncate text-sm font-bold text-slate-900 dark:text-white">{b.name}</p>
+                                  <span className="rounded-lg bg-slate-100 px-2 py-0.5 text-[10px] font-bold uppercase text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+                                    {CATEGORY_LABELS[b.category] || b.category}
+                                  </span>
+                                  <StatusPill status={b.status} />
+                                </div>
+                                <p className="mt-1 text-xs text-slate-500">
+                                  Owner: <span className="font-semibold text-slate-700 dark:text-slate-200">{b.owner_name}</span>{' '}
+                                  <span className="font-mono text-[10px] text-indigo-600 dark:text-indigo-400">({b.owner_uid})</span>
+                                </p>
+                                <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-500">
+                                  <span className="font-semibold text-emerald-700 dark:text-emerald-400">
+                                    {Number(b.verifiedRevenue || 0).toLocaleString()} ETB sales
+                                  </span>
+                                  <span>·</span>
+                                  <span>{b.productsCount || 0} products</span>
+                                  <span>·</span>
+                                  <span>{b.finishedOrdersCount || 0} finished</span>
+                                  <span>·</span>
+                                  <span>{b.pendingPaymentRequestsCount || 0} payment reqs</span>
+                                  <span>·</span>
+                                  <span className="text-rose-600">{b.rejectedOrdersCount || 0} rejected</span>
+                                </div>
+                              </div>
+                            </div>
+
+                            <div className="flex shrink-0 flex-wrap items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
+                              {onPreviewBusiness && (
+                                <button
+                                  type="button"
+                                  onClick={() => onPreviewBusiness(b)}
+                                  className="inline-flex items-center gap-1 rounded-xl bg-emerald-600 px-3 py-2 text-xs font-semibold text-white shadow-xs transition hover:bg-emerald-500"
+                                >
+                                  <Eye className="h-3.5 w-3.5" />
+                                  Preview Store
+                                </button>
+                              )}
+                              {isBlocked ? (
+                                <button
+                                  type="button"
+                                  onClick={() => handleQuickBizAction(b, 'RESTORE_ACCESS')}
+                                  className="inline-flex items-center gap-1 rounded-xl border border-emerald-200 bg-emerald-50 px-2.5 py-2 text-xs font-semibold text-emerald-700 hover:bg-emerald-100"
+                                >
+                                  <PlayCircle className="h-3.5 w-3.5" />
+                                  Unblock
+                                </button>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => handleQuickBizAction(b, 'SUSPEND_BUSINESS')}
+                                  className="inline-flex items-center gap-1 rounded-xl border border-amber-200 bg-amber-50 px-2.5 py-2 text-xs font-semibold text-amber-800 hover:bg-amber-100"
+                                >
+                                  <Ban className="h-3.5 w-3.5" />
+                                  Block
+                                </button>
+                              )}
+                              <button
+                                type="button"
+                                onClick={() => setSelectedBiz(b)}
+                                className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:border-indigo-200 hover:bg-indigo-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"
+                              >
+                                Inspect
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </section>
+
+              {/* RIGHT COLUMN: SELECTED BUSINESS FULL CATALOG INSPECTOR & GOVERNANCE */}
+              <section className={panelClass + ' 2xl:col-span-6'}>
+                {selectedBiz ? (
+                  <>
+                    <div className="border-b border-slate-100 px-5 py-4 dark:border-slate-800 sm:px-6">
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                        <div className="min-w-0">
+                          <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-indigo-600 dark:text-indigo-300">
+                            Admin Store Inspector · {CATEGORY_LABELS[selectedBiz.category] || selectedBiz.category}
+                          </p>
+                          <h2 className="mt-1 break-words text-lg font-bold text-slate-950 dark:text-white">
+                            {selectedBiz.name}
+                          </h2>
+                          <p className="mt-1 text-xs text-slate-500">
+                            Owner: <span className="font-semibold text-slate-800 dark:text-slate-200">{selectedBiz.owner_name}</span> ({selectedBiz.owner_email}) ·{' '}
+                            <span className="font-mono text-[11px] font-bold text-indigo-600">{selectedBiz.owner_uid}</span>
+                          </p>
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          {onPreviewBusiness && (
+                            <button
+                              type="button"
+                              onClick={() => onPreviewBusiness(selectedBiz)}
+                              className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-600 px-3.5 py-2 text-xs font-bold text-white shadow-sm hover:bg-emerald-500"
+                            >
+                              <Eye className="h-4 w-4" />
+                              Preview Live Storefront Page
+                            </button>
+                          )}
+                          {onEditBusinessCatalog && (
+                            <button
+                              type="button"
+                              onClick={() => onEditBusinessCatalog(selectedBiz)}
+                              className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+                            >
+                              <Package className="h-4 w-4 text-indigo-600" />
+                              Edit Store Catalog
+                            </button>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Store Order & Sales Breakdown */}
+                      <div className="mt-4 grid grid-cols-2 gap-2.5 sm:grid-cols-4">
+                        <div className="rounded-xl bg-slate-50 p-3 dark:bg-slate-950">
+                          <div className="text-[10px] font-semibold uppercase text-slate-400">Verified Sales</div>
+                          <div className="mt-1 text-sm font-bold text-emerald-700 dark:text-emerald-400">
+                            {Number(selectedBiz.verifiedRevenue || 0).toLocaleString()} ETB
+                          </div>
+                        </div>
+                        <div className="rounded-xl bg-amber-50/70 p-3 dark:bg-amber-950/30">
+                          <div className="text-[10px] font-semibold uppercase text-amber-700 dark:text-amber-300">Payment Requests</div>
+                          <div className="mt-1 text-sm font-bold text-amber-800 dark:text-amber-200">
+                            {selectedBiz.pendingPaymentRequestsCount || 0} Pending
+                          </div>
+                        </div>
+                        <div className="rounded-xl bg-emerald-50/70 p-3 dark:bg-emerald-950/30">
+                          <div className="text-[10px] font-semibold uppercase text-emerald-700 dark:text-emerald-300">Finished Orders</div>
+                          <div className="mt-1 text-sm font-bold text-emerald-800 dark:text-emerald-200">
+                            {selectedBiz.finishedOrdersCount || 0} Completed
+                          </div>
+                        </div>
+                        <div className="rounded-xl bg-rose-50/70 p-3 dark:bg-rose-950/30">
+                          <div className="text-[10px] font-semibold uppercase text-rose-700 dark:text-rose-300">Rejected / Failed</div>
+                          <div className="mt-1 text-sm font-bold text-rose-800 dark:text-rose-200">
+                            {selectedBiz.rejectedOrdersCount || 0} Rejected
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* WHAT THEY ARE SELLING (PRODUCTS & SERVICES CATALOG) */}
+                    <div className="border-b border-slate-100 px-5 py-4 dark:border-slate-800 sm:px-6">
+                      <div className="flex items-center justify-between mb-3">
+                        <div>
+                          <h3 className="text-xs font-bold uppercase tracking-wider text-slate-800 dark:text-slate-200">
+                            What {selectedBiz.name} Is Selling ({(selectedBiz.catalogProducts || []).length} Products · {(selectedBiz.catalogServices || []).length} Services)
+                          </h3>
+                          <p className="text-[11px] text-slate-500">
+                            Live inventory, categories, and pricing listed on this business’s storefront.
+                          </p>
+                        </div>
+                      </div>
+
+                      {(selectedBiz.catalogProducts || []).length === 0 ? (
+                        <p className="text-xs text-slate-400 py-3">No products listed in this store yet.</p>
+                      ) : (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 max-h-64 overflow-y-auto pr-1">
+                          {(selectedBiz.catalogProducts || []).map((prod: any) => (
+                            <div
+                              key={prod.id}
+                              className="flex items-center justify-between gap-2.5 rounded-xl border border-slate-200/80 bg-slate-50/60 p-2.5 text-xs dark:border-slate-800 dark:bg-slate-950/50"
+                            >
+                              <div className="min-w-0">
+                                <div className="font-bold text-slate-900 dark:text-white truncate">{prod.name}</div>
+                                <div className="text-[10px] text-slate-500">
+                                  Category: <span className="font-semibold text-indigo-600 dark:text-indigo-400">{prod.category_name}</span> · Stock: {prod.stock}
+                                </div>
+                              </div>
+                              <div className="shrink-0 text-right">
+                                <div className="font-mono font-bold text-slate-900 dark:text-white">
+                                  {Number(prod.price).toLocaleString()} {prod.currency || 'ETB'}
+                                </div>
+                                {Number(prod.discount_percent) > 0 && (
+                                  <span className="inline-block rounded bg-emerald-100 px-1.5 py-0.5 text-[9px] font-bold text-emerald-800">
+                                    {prod.discount_percent}% OFF
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Administrative Governance Controls */}
+                    <div className="space-y-4 p-5 sm:p-6">
+                      <div className="flex flex-wrap gap-2 pb-2 border-b border-slate-100 dark:border-slate-800">
+                        <button
+                          type="button"
+                          onClick={() => handleQuickBizAction(selectedBiz, 'SUSPEND_BUSINESS')}
+                          className="inline-flex items-center gap-1.5 rounded-xl bg-amber-600 px-3 py-2 text-xs font-semibold text-white hover:bg-amber-500"
+                        >
+                          <Ban className="h-3.5 w-3.5" />
+                          Block / Suspend Store
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleQuickBizAction(selectedBiz, 'PAUSE_BUSINESS')}
+                          className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+                        >
+                          <PauseCircle className="h-3.5 w-3.5" />
+                          Pause Store
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleQuickBizAction(selectedBiz, 'RESTORE_ACCESS')}
+                          className="inline-flex items-center gap-1.5 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-700 hover:bg-emerald-100"
+                        >
+                          <PlayCircle className="h-3.5 w-3.5" />
+                          Restore / Activate Store
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleQuickBizAction(selectedBiz, 'DELETE_BUSINESS')}
+                          className="inline-flex items-center gap-1.5 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700 hover:bg-rose-100"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                          Delete Store
+                        </button>
+                      </div>
+
+                      <form onSubmit={handleExecuteControl} className="space-y-4">
+                        <div>
+                          <label className={labelClass}>Advanced administrative action</label>
+                          <select value={controlAction} onChange={(e) => setControlAction(e.target.value)} className={fieldClass}>
+                            <option value="PAUSE_BUSINESS">Pause business temporarily</option>
+                            <option value="RESTRICT_FUNCTIONALITY">Restrict selected features</option>
+                            <option value="SUSPEND_BUSINESS">Suspend business — preserve records</option>
+                            <option value="RESTORE_ACCESS">Restore full access</option>
+                            <option value="EXTEND_SUBSCRIPTION">Extend subscription</option>
+                            <option value="CHANGE_PLAN">Change subscription plan</option>
+                            <option value="GRANT_FREE_SERVICE">Grant promotional service / trial</option>
+                            <option value="TOGGLE_ADDON_ADMIN">Enable or assign an add-on</option>
+                            <option value="RESET_OWNER_ACCESS">Reset owner access and revoke sessions</option>
+                            <option value="UPDATE_DFY_STATUS">Update done-for-you build stage</option>
+                            <option value="DELETE_BUSINESS">Permanently delete business</option>
+                          </select>
+                        </div>
+
+                        {controlAction === 'EXTEND_SUBSCRIPTION' && (
+                          <div>
+                            <label className={labelClass}>Days to extend</label>
+                            <input type="number" min="1" value={extendDays} onChange={(e) => setExtendDays(Number(e.target.value))} className={fieldClass} />
+                          </div>
+                        )}
+
+                        {controlAction === 'CHANGE_PLAN' && (
+                          <div>
+                            <label className={labelClass}>Target plan</label>
+                            <select value={targetPlan} onChange={(e) => setTargetPlan(e.target.value)} className={fieldClass}>
+                              <option value="free">Free plan</option>
+                              <option value="growth">Growth plan</option>
+                              <option value="enterprise">Enterprise plan</option>
+                            </select>
+                          </div>
+                        )}
+
+                        {(controlAction === 'GRANT_FREE_SERVICE' || controlAction === 'TOGGLE_ADDON_ADMIN') && (
+                          <div>
+                            <label className={labelClass}>Add-on service</label>
+                            <select value={targetAddonId} onChange={(e) => setTargetAddonId(e.target.value)} className={fieldClass}>
+                              {addons.map((a: any) => <option key={a.id} value={a.id}>{a.name} ({a.monthly_price} ETB/mo)</option>)}
+                            </select>
+                          </div>
+                        )}
+
+                        {controlAction === 'RESTRICT_FUNCTIONALITY' && (
+                          <div className="rounded-xl border border-slate-200 p-3.5 dark:border-slate-700">
+                            <label className={labelClass}>Features to restrict</label>
+                            <div className="space-y-3">
+                              {['ai_builder', 'broadcast_campaigns', 'custom_domain'].map((feat) => (
+                                <label key={feat} className="flex cursor-pointer items-center gap-2.5 text-xs text-slate-700 dark:text-slate-200">
+                                  <input
+                                    type="checkbox"
+                                    checked={restrictedList.includes(feat)}
+                                    onChange={(e) => setRestrictedList((prev) => e.target.checked ? [...prev, feat] : prev.filter((x) => x !== feat))}
+                                    className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                                  />
+                                  <span>{feat.replace(/_/g, ' ')}</span>
+                                </label>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {controlAction === 'UPDATE_DFY_STATUS' && (
+                          <div>
+                            <label className={labelClass}>Done-for-you stage</label>
+                            <select value={dfyTargetStatus} onChange={(e) => setDfyTargetStatus(e.target.value)} className={fieldClass}>
+                              <option value="requested">Requested</option>
+                              <option value="in_review">In review</option>
+                              <option value="configuring">Configuring</option>
+                              <option value="ready_for_preview">Ready for preview</option>
+                              <option value="published">Published live</option>
+                            </select>
+                          </div>
+                        )}
+
+                        {controlAction === 'DELETE_BUSINESS' && (
+                          <div className="rounded-xl border border-rose-200 bg-rose-50 p-4 dark:border-rose-900 dark:bg-rose-950/30">
+                            <div className="flex items-center gap-2 text-xs font-bold text-rose-800 dark:text-rose-200">
+                              <Trash2 className="h-4 w-4" /> Permanent deletion safeguard
+                            </div>
+                            <p className="mt-2 text-[11px] leading-5 text-rose-700 dark:text-rose-300">This is a destructive action. Type the exact business slug to confirm: <span className="font-mono font-bold">{selectedBiz.slug}</span></p>
+                            <input type="text" value={confirmSlug} onChange={(e) => setConfirmSlug(e.target.value)} placeholder={selectedBiz.slug} className={fieldClass + ' mt-3 border-rose-200 font-mono dark:border-rose-900'} />
+                          </div>
+                        )}
+
+                        <div>
+                          <label className={labelClass}>Reason for audit log</label>
+                          <input
+                            type="text"
+                            value={reason}
+                            onChange={(e) => setReason(e.target.value)}
+                            placeholder="Explain why this action is needed..."
+                            className={fieldClass}
+                            required
+                          />
+                        </div>
+
+                        <button
+                          type="submit"
+                          className={'flex w-full items-center justify-center gap-2 rounded-xl px-4 py-3 text-xs font-semibold text-white shadow-sm transition hover:-translate-y-0.5 ' + (controlAction === 'DELETE_BUSINESS' ? 'bg-rose-600 hover:bg-rose-500' : 'bg-slate-950 hover:bg-indigo-700 dark:bg-indigo-600 dark:hover:bg-indigo-500')}
+                        >
+                          {controlAction === 'DELETE_BUSINESS' ? <Trash2 className="h-4 w-4" /> : <ShieldAlert className="h-4 w-4" />}
+                          Execute action and record audit
+                        </button>
+                      </form>
+                    </div>
+                  </>
+                ) : (
+                  <div className="p-5 sm:p-6"><EmptyState title="Select a business" detail="Choose a business from the directory to review its catalog, preview its storefront, and manage its account." /></div>
+                )}
+              </section>
+            </div>
+          </div>
+        )}
+
+        {/* TAB 2: STORE OWNERS & CUSTOMERS GOVERNANCE */}
+        {subTab === 'users' && (
+          <div className="space-y-6">
+            <section className={panelClass + ' overflow-hidden'}>
+              <div className="border-b border-slate-100 px-5 py-4 dark:border-slate-800 sm:px-6 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div>
+                  <h2 className="text-base font-semibold text-slate-950 dark:text-white">
+                    Store Owners & Platform Administrators ({allUsers.length})
+                  </h2>
+                  <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                    Each Store Owner is isolated to their own store(s) via their Unique Owner UID. As Admin, you can block, unblock, or delete any user.
+                  </p>
+                </div>
+                <div className="relative sm:w-64">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                  <input
+                    type="search"
+                    value={userSearch}
+                    onChange={(e) => setUserSearch(e.target.value)}
+                    placeholder="Search owners or customers..."
+                    className={fieldClass + ' pl-9'}
+                  />
                 </div>
               </div>
-
-              {filteredBusinesses.length === 0 ? (
-                <div className="p-5 sm:p-6">
-                  <EmptyState title="No businesses found" detail="Try another search term or change the status filter." />
-                </div>
-              ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full min-w-[690px] text-left">
-                    <thead className="bg-slate-50/80 text-[10px] font-semibold uppercase tracking-wider text-slate-500 dark:bg-slate-950/60 dark:text-slate-400">
-                      <tr>
-                        <th className="px-5 py-3.5 sm:px-6">Business</th>
-                        <th className="px-3 py-3.5">Creation</th>
-                        <th className="px-3 py-3.5">Plan</th>
-                        <th className="px-5 py-3.5 text-right sm:px-6">Manage</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                      {filteredBusinesses.map((b: any) => {
-                        const selected = selectedBiz?.id === b.id;
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[820px] text-left">
+                  <thead className="bg-slate-50 text-[10px] font-semibold uppercase tracking-wider text-slate-500 dark:bg-slate-950/60 dark:text-slate-400">
+                    <tr>
+                      <th className="px-5 py-3.5">User / Store Owner</th>
+                      <th className="px-3 py-3.5">Role & Unique ID</th>
+                      <th className="px-3 py-3.5">Owned Store(s)</th>
+                      <th className="px-3 py-3.5">Status</th>
+                      <th className="px-5 py-3.5 text-right">Admin Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 text-xs dark:divide-slate-800">
+                    {allUsers
+                      .filter(
+                        (u: any) =>
+                          !userSearch ||
+                          String(u.name || '').toLowerCase().includes(userSearch.toLowerCase()) ||
+                          String(u.email || '').toLowerCase().includes(userSearch.toLowerCase()) ||
+                          String(u.owner_uid || '').toLowerCase().includes(userSearch.toLowerCase())
+                      )
+                      .map((u: any) => {
+                        const isBlocked = u.account_status === 'blocked';
                         return (
-                          <tr
-                            key={b.id}
-                            onClick={() => setSelectedBiz(b)}
-                            className={'cursor-pointer transition ' + (selected ? 'bg-indigo-50/70 dark:bg-indigo-950/20' : 'hover:bg-slate-50/80 dark:hover:bg-slate-800/40')}
-                          >
-                            <td className="px-5 py-4 sm:px-6">
-                              <div className="flex min-w-0 items-center gap-3">
-                                <div className={'flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-sm font-bold ' + (selected ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300')}>
-                                  {String(b.name || 'B').slice(0, 1).toUpperCase()}
-                                </div>
-                                <div className="min-w-0">
-                                  <p className="truncate text-sm font-semibold text-slate-900 dark:text-white">{b.name}</p>
-                                  <p className="mt-0.5 truncate text-[11px] text-slate-500 dark:text-slate-400">{b.category} · {b.telegram_bot_username || 'No bot connected'}</p>
-                                  <div className="mt-2"><StatusPill status={b.status} /></div>
-                                </div>
+                          <tr key={u.id} className="hover:bg-slate-50/70 dark:hover:bg-slate-800/30">
+                            <td className="px-5 py-4">
+                              <p className="font-semibold text-slate-900 dark:text-white">{u.name}</p>
+                              <p className="mt-0.5 text-[11px] text-slate-500">
+                                {u.email} {u.telegram_username ? `· ${u.telegram_username}` : ''}
+                              </p>
+                            </td>
+                            <td className="px-3 py-4">
+                              <span
+                                className={
+                                  'inline-block rounded-lg px-2.5 py-1 text-[10px] font-bold uppercase ' +
+                                  (u.platform_role === 'super_admin'
+                                    ? 'bg-indigo-100 text-indigo-800 dark:bg-indigo-950/60 dark:text-indigo-300'
+                                    : 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300')
+                                }
+                              >
+                                {u.platform_role === 'super_admin' ? '1. Platform Admin' : '2. Store Owner'}
+                              </span>
+                              <div className="mt-1 font-mono text-[11px] font-bold text-slate-600 dark:text-slate-300">
+                                {u.owner_uid}
                               </div>
                             </td>
                             <td className="px-3 py-4">
-                              <p className="text-xs font-medium text-slate-700 dark:text-slate-200">{String(b.creation_method || '').replace(/_/g, ' ')}</p>
-                              {b.creation_method === 'done_for_you' && <p className="mt-1 text-[11px] text-indigo-600 dark:text-indigo-300">Build: {String(b.dfy_status || 'requested').replace(/_/g, ' ')}</p>}
+                              {(u.ownedBusinesses || []).length === 0 ? (
+                                <span className="text-slate-400">
+                                  {u.platform_role === 'super_admin' ? 'All Platform Stores (Admin)' : 'No stores yet'}
+                                </span>
+                              ) : (
+                                <div className="flex flex-wrap gap-1.5">
+                                  {u.ownedBusinesses.map((ob: any) => (
+                                    <span
+                                      key={ob.id}
+                                      className="rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-semibold text-slate-800 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"
+                                    >
+                                      {ob.name} ({ob.category})
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
                             </td>
                             <td className="px-3 py-4">
-                              <p className="text-xs font-semibold uppercase text-slate-800 dark:text-slate-100">{b.plan_id || '—'}</p>
-                              <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">{String(b.subscription_status || 'unknown').replace(/_/g, ' ')}</p>
-                              <p className="mt-1 text-[10px] text-slate-400">Expires {b.subscription_expires_at ? String(b.subscription_expires_at).slice(0, 10) : '—'}</p>
+                              <StatusPill status={u.account_status || 'active'} />
                             </td>
-                            <td className="px-5 py-4 text-right sm:px-6">
-                              <button
-                                type="button"
-                                onClick={(e) => { e.stopPropagation(); setSelectedBiz(b); }}
-                                className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-indigo-950/40"
-                              >
-                                Manage
-                              </button>
+                            <td className="px-5 py-4 text-right">
+                              {u.platform_role !== 'super_admin' && (
+                                <div className="inline-flex items-center gap-2">
+                                  {isBlocked ? (
+                                    <button
+                                      type="button"
+                                      onClick={() => handleUserControl(u, 'UNBLOCK_USER')}
+                                      className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700 hover:bg-emerald-100"
+                                    >
+                                      Unblock Owner
+                                    </button>
+                                  ) : (
+                                    <button
+                                      type="button"
+                                      onClick={() => handleUserControl(u, 'BLOCK_USER')}
+                                      className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-800 hover:bg-amber-100"
+                                    >
+                                      Block Owner
+                                    </button>
+                                  )}
+                                  <button
+                                    type="button"
+                                    onClick={() => handleUserControl(u, 'DELETE_USER')}
+                                    className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-1.5 text-xs font-semibold text-rose-700 hover:bg-rose-100"
+                                  >
+                                    Delete
+                                  </button>
+                                </div>
+                              )}
                             </td>
                           </tr>
                         );
                       })}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-              <div className="flex items-center justify-between border-t border-slate-100 px-5 py-3 text-[11px] text-slate-500 dark:border-slate-800 dark:text-slate-400 sm:px-6">
-                <span>Showing {filteredBusinesses.length} of {businesses.length} businesses</span>
-                <span className="inline-flex items-center gap-1"><ShieldCheck className="h-3.5 w-3.5" /> Administrative access</span>
+                  </tbody>
+                </table>
               </div>
             </section>
 
-            <section className={panelClass + ' 2xl:col-span-5'}>
-              {selectedBiz ? (
-                <>
-                  <div className="border-b border-slate-100 px-5 py-4 dark:border-slate-800 sm:px-6">
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-indigo-600 dark:text-indigo-300">Business controls</p>
-                        <h2 className="mt-1 break-words text-base font-semibold text-slate-950 dark:text-white">{selectedBiz.name}</h2>
-                        <p className="mt-1 break-all font-mono text-[10px] text-slate-400">{selectedBiz.slug}</p>
-                      </div>
-                      <div className="rounded-xl bg-indigo-50 p-2.5 text-indigo-600 dark:bg-indigo-950/60 dark:text-indigo-300"><Building2 className="h-5 w-5" /></div>
-                    </div>
-                    <div className="mt-4 flex flex-wrap gap-2">
-                      <StatusPill status={selectedBiz.status} />
-                      <StatusPill status={selectedBiz.subscription_status} />
-                    </div>
-                    <p className="mt-3 text-[11px] text-slate-500 dark:text-slate-400">Grace period: <span className="font-semibold text-slate-700 dark:text-slate-200">{selectedBiz.grace_period_days || 0} days</span></p>
-                  </div>
-
-                  <div className="space-y-4 p-5 sm:p-6">
-                    {actionFeedback && (
-                      <div className="flex items-start gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3.5 py-3 text-xs leading-5 text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-200">
-                        <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" /> {actionFeedback}
-                      </div>
-                    )}
-                    {actionError && (
-                      <div className="rounded-xl border border-rose-200 bg-rose-50 px-3.5 py-3 text-xs leading-5 text-rose-800 dark:border-rose-900 dark:bg-rose-950/40 dark:text-rose-200">
-                        {actionError}
-                      </div>
-                    )}
-
-                    <form onSubmit={handleExecuteControl} className="space-y-4">
-                      <div>
-                        <label className={labelClass}>Administrative action</label>
-                        <select value={controlAction} onChange={(e) => setControlAction(e.target.value)} className={fieldClass}>
-                          <option value="PAUSE_BUSINESS">Pause business temporarily</option>
-                          <option value="RESTRICT_FUNCTIONALITY">Restrict selected features</option>
-                          <option value="SUSPEND_BUSINESS">Suspend business — preserve records</option>
-                          <option value="RESTORE_ACCESS">Restore full access</option>
-                          <option value="EXTEND_SUBSCRIPTION">Extend subscription</option>
-                          <option value="CHANGE_PLAN">Change subscription plan</option>
-                          <option value="GRANT_FREE_SERVICE">Grant promotional service / trial</option>
-                          <option value="TOGGLE_ADDON_ADMIN">Enable or assign an add-on</option>
-                          <option value="RESET_OWNER_ACCESS">Reset owner access and revoke sessions</option>
-                          <option value="UPDATE_DFY_STATUS">Update done-for-you build stage</option>
-                          <option value="DELETE_BUSINESS">Permanently delete business</option>
-                        </select>
-                      </div>
-
-                      {controlAction === 'EXTEND_SUBSCRIPTION' && (
-                        <div>
-                          <label className={labelClass}>Days to extend</label>
-                          <input type="number" min="1" value={extendDays} onChange={(e) => setExtendDays(Number(e.target.value))} className={fieldClass} />
-                        </div>
-                      )}
-
-                      {controlAction === 'CHANGE_PLAN' && (
-                        <div>
-                          <label className={labelClass}>Target plan</label>
-                          <select value={targetPlan} onChange={(e) => setTargetPlan(e.target.value)} className={fieldClass}>
-                            <option value="free">Free plan</option>
-                            <option value="growth">Growth plan</option>
-                            <option value="enterprise">Enterprise plan</option>
-                          </select>
-                        </div>
-                      )}
-
-                      {(controlAction === 'GRANT_FREE_SERVICE' || controlAction === 'TOGGLE_ADDON_ADMIN') && (
-                        <div>
-                          <label className={labelClass}>Add-on service</label>
-                          <select value={targetAddonId} onChange={(e) => setTargetAddonId(e.target.value)} className={fieldClass}>
-                            {addons.map((a: any) => <option key={a.id} value={a.id}>{a.name} ({a.monthly_price} ETB/mo)</option>)}
-                          </select>
-                        </div>
-                      )}
-
-                      {controlAction === 'RESTRICT_FUNCTIONALITY' && (
-                        <div className="rounded-xl border border-slate-200 p-3.5 dark:border-slate-700">
-                          <label className={labelClass}>Features to restrict</label>
-                          <div className="space-y-3">
-                            {['ai_builder', 'broadcast_campaigns', 'custom_domain'].map((feat) => (
-                              <label key={feat} className="flex cursor-pointer items-center gap-2.5 text-xs text-slate-700 dark:text-slate-200">
-                                <input
-                                  type="checkbox"
-                                  checked={restrictedList.includes(feat)}
-                                  onChange={(e) => setRestrictedList((prev) => e.target.checked ? [...prev, feat] : prev.filter((x) => x !== feat))}
-                                  className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
-                                />
-                                <span>{feat.replace(/_/g, ' ')}</span>
-                              </label>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-
-                      {controlAction === 'UPDATE_DFY_STATUS' && (
-                        <div>
-                          <label className={labelClass}>Done-for-you stage</label>
-                          <select value={dfyTargetStatus} onChange={(e) => setDfyTargetStatus(e.target.value)} className={fieldClass}>
-                            <option value="requested">Requested</option>
-                            <option value="in_review">In review</option>
-                            <option value="configuring">Configuring</option>
-                            <option value="ready_for_preview">Ready for preview</option>
-                            <option value="published">Published live</option>
-                          </select>
-                        </div>
-                      )}
-
-                      {controlAction === 'DELETE_BUSINESS' && (
-                        <div className="rounded-xl border border-rose-200 bg-rose-50 p-4 dark:border-rose-900 dark:bg-rose-950/30">
-                          <div className="flex items-center gap-2 text-xs font-bold text-rose-800 dark:text-rose-200">
-                            <Trash2 className="h-4 w-4" /> Permanent deletion safeguard
-                          </div>
-                          <p className="mt-2 text-[11px] leading-5 text-rose-700 dark:text-rose-300">This is a destructive action. Type the exact business slug to confirm: <span className="font-mono font-bold">{selectedBiz.slug}</span></p>
-                          <input type="text" value={confirmSlug} onChange={(e) => setConfirmSlug(e.target.value)} placeholder={selectedBiz.slug} className={fieldClass + ' mt-3 border-rose-200 font-mono dark:border-rose-900'} />
-                        </div>
-                      )}
-
-                      <div>
-                        <label className={labelClass}>Reason for audit log</label>
-                        <input
-                          type="text"
-                          value={reason}
-                          onChange={(e) => setReason(e.target.value)}
-                          placeholder="Explain why this action is needed..."
-                          className={fieldClass}
-                          required
-                        />
-                      </div>
-
-                      <button
-                        type="submit"
-                        className={'flex w-full items-center justify-center gap-2 rounded-xl px-4 py-3 text-xs font-semibold text-white shadow-sm transition hover:-translate-y-0.5 ' + (controlAction === 'DELETE_BUSINESS' ? 'bg-rose-600 hover:bg-rose-500' : 'bg-slate-950 hover:bg-indigo-700 dark:bg-indigo-600 dark:hover:bg-indigo-500')}
-                      >
-                        {controlAction === 'DELETE_BUSINESS' ? <Trash2 className="h-4 w-4" /> : <ShieldAlert className="h-4 w-4" />}
-                        Execute action and record audit
-                      </button>
-                    </form>
-                  </div>
-                </>
-              ) : (
-                <div className="p-5 sm:p-6"><EmptyState title="Select a business" detail="Choose a business from the directory to review its status and manage its account." /></div>
-              )}
+            {/* Customers Directory */}
+            <section className={panelClass + ' overflow-hidden'}>
+              <div className="border-b border-slate-100 px-5 py-4 dark:border-slate-800 sm:px-6">
+                <h2 className="text-base font-semibold text-slate-950 dark:text-white">
+                  3. Store Customers Directory ({allCustomers.length})
+                </h2>
+                <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                  Customers are automatically recognized 24/7 via Customer UID (`CUS-247-...`) and attributed to the specific store they visit.
+                </p>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[820px] text-left">
+                  <thead className="bg-slate-50 text-[10px] font-semibold uppercase tracking-wider text-slate-500 dark:bg-slate-950/60 dark:text-slate-400">
+                    <tr>
+                      <th className="px-5 py-3.5">Customer</th>
+                      <th className="px-3 py-3.5">Customer UID & Store Owner UID</th>
+                      <th className="px-3 py-3.5">Store Visited</th>
+                      <th className="px-3 py-3.5">Spent & Visits</th>
+                      <th className="px-3 py-3.5">Status</th>
+                      <th className="px-5 py-3.5 text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 text-xs dark:divide-slate-800">
+                    {allCustomers
+                      .filter(
+                        (c: any) =>
+                          !userSearch ||
+                          String(c.name || '').toLowerCase().includes(userSearch.toLowerCase()) ||
+                          String(c.business_name || '').toLowerCase().includes(userSearch.toLowerCase()) ||
+                          String(c.customer_uid || '').toLowerCase().includes(userSearch.toLowerCase())
+                      )
+                      .map((c: any) => {
+                        const isBlocked = c.status === 'blocked';
+                        return (
+                          <tr key={c.id} className="hover:bg-slate-50/70 dark:hover:bg-slate-800/30">
+                            <td className="px-5 py-4">
+                              <p className="font-semibold text-slate-900 dark:text-white">{c.name}</p>
+                              <p className="mt-0.5 text-[11px] text-slate-500">{c.phone}</p>
+                            </td>
+                            <td className="px-3 py-4 font-mono text-[11px]">
+                              <div className="font-bold text-indigo-600 dark:text-indigo-400">{c.customer_uid || 'CUS-247'}</div>
+                              <div className="text-[10px] text-slate-400">Owner: {c.owner_uid}</div>
+                            </td>
+                            <td className="px-3 py-4 font-semibold text-slate-800 dark:text-slate-200">{c.business_name}</td>
+                            <td className="px-3 py-4 tabular-nums">
+                              <span className="font-bold text-emerald-700 dark:text-emerald-400">
+                                {Number(c.total_spent || 0).toLocaleString()} ETB
+                              </span>{' '}
+                              · {c.visits_count || 1} visits
+                            </td>
+                            <td className="px-3 py-4">
+                              <StatusPill status={c.status || 'active'} />
+                            </td>
+                            <td className="px-5 py-4 text-right">
+                              <div className="inline-flex items-center gap-2">
+                                {isBlocked ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleCustomerControl(c, 'UNBLOCK_CUSTOMER')}
+                                    className="rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-700"
+                                  >
+                                    Unblock
+                                  </button>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleCustomerControl(c, 'BLOCK_CUSTOMER')}
+                                    className="rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1 text-[11px] font-semibold text-amber-800"
+                                  >
+                                    Block
+                                  </button>
+                                )}
+                                <button
+                                  type="button"
+                                  onClick={() => handleCustomerControl(c, 'DELETE_CUSTOMER')}
+                                  className="rounded-lg border border-rose-200 bg-rose-50 px-2.5 py-1 text-[11px] font-semibold text-rose-700"
+                                >
+                                  Delete
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                  </tbody>
+                </table>
+              </div>
             </section>
           </div>
         )}
@@ -781,7 +1333,7 @@ export const SuperAdminConsole: React.FC<SuperAdminProps> = ({
                         <td className="px-3 py-4"><p className="font-semibold text-slate-800 dark:text-slate-100">{log.actor_name}</p><p className="mt-1 text-[10px] text-slate-500">{log.actor_role}</p></td>
                         <td className="px-3 py-4"><span className="rounded-lg bg-indigo-50 px-2 py-1.5 font-mono text-[10px] font-semibold text-indigo-700 dark:bg-indigo-950/50 dark:text-indigo-300">{log.action}</span></td>
                         <td className="max-w-sm whitespace-normal px-3 py-4 text-[11px] leading-5 text-slate-600 dark:text-slate-300">{log.previous_value ? <span>{log.previous_value} <ArrowUpRight className="mx-1 inline h-3 w-3" /> </span> : null}{log.new_value || '—'}</td>
-                        <td className="max-w-xs whitespace-normal px-5 py-4 text-[11px] leading-5 text-slate-500">{log.reason || '—'}</td>
+                        <td className="max-w-xs whitespace-normal px-3 py-4 text-[11px] leading-5 text-slate-500">{log.reason || '—'}</td>
                       </tr>
                     ))}
                   </tbody>

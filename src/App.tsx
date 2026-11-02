@@ -29,6 +29,25 @@ import {
   AlertCircle,
   Clock3,
   Boxes,
+  Settings,
+  Globe,
+  KeyRound,
+  UserPlus,
+  Sparkles,
+  Trophy,
+  Eye,
+  PauseCircle,
+  PlayCircle,
+  Trash2,
+  FolderPlus,
+  Tag,
+  TrendingUp,
+  ImagePlus,
+  Upload,
+  Percent,
+  Fingerprint,
+  HardDrive,
+  ShoppingBag,
 } from 'lucide-react';
 import { translations, LANGUAGE_LABELS, LanguageCode, BUSINESS_CATEGORIES } from './i18n/translations';
 import { MiniAppStorefront } from './components/MiniAppStorefront';
@@ -46,14 +65,15 @@ type ActiveModule =
   | 'marketing'
   | 'telegram'
   | 'subscriptions'
-  | 'superadmin';
+  | 'superadmin'
+  | 'more';
 
 export default function App() {
   const [authToken, setAuthToken] = useState<string>(() => localStorage.getItem('telebiz_token') || '');
   const [currentUser, setCurrentUser] = useState<any>(null);
   const [availableAccounts, setAvailableAccounts] = useState<any[]>([]);
   const [businesses, setBusinesses] = useState<any[]>([]);
-  const [selectedBusinessId, setSelectedBusinessId] = useState<string>('biz_kaffa');
+  const [selectedBusinessId, setSelectedBusinessId] = useState<string>('biz_boutique');
   const [workspace, setWorkspace] = useState<any>(null);
   const [analyticsData, setAnalyticsData] = useState<any>(null);
   const [supportThreads, setSupportThreads] = useState<any[]>([]);
@@ -66,6 +86,7 @@ export default function App() {
   // Modals & Interactive States
   const [fullStorefrontOpen, setFullStorefrontOpen] = useState(false);
   const [newBizModalOpen, setNewBizModalOpen] = useState(false);
+  const [launchGuideOpen, setLaunchGuideOpen] = useState(false);
   const [authModalOpen, setAuthModalOpen] = useState(false);
   const [statusBanner, setStatusBanner] = useState('');
   const [paymentMethodName, setPaymentMethodName] = useState('');
@@ -82,6 +103,7 @@ export default function App() {
   // New Business Form State
   const [newBizName, setNewBizName] = useState('');
   const [newBizCategory, setNewBizCategory] = useState('retail');
+  const [newBizTemplate, setNewBizTemplate] = useState<string>('royal_boutique');
   const [newBizMethod, setNewBizMethod] = useState<'self_service' | 'done_for_you' | 'ai_builder'>('self_service');
   const [newBizDesc, setNewBizDesc] = useState('');
   const [newBizPhone, setNewBizPhone] = useState('+251 911 223 344');
@@ -93,9 +115,15 @@ export default function App() {
   const [prodName, setProdName] = useState('');
   const [prodCat, setProdCat] = useState('Signature Offerings');
   const [prodPrice, setProdPrice] = useState('');
+  const [prodComparePrice, setProdComparePrice] = useState('');
+  const [prodDiscountPct, setProdDiscountPct] = useState('');
   const [prodStock, setProdStock] = useState('');
   const [prodDesc, setProdDesc] = useState('');
   const [prodVariations, setProdVariations] = useState('Standard, Large');
+  const [prodImageUrl, setProdImageUrl] = useState('');
+  const [prodGallery, setProdGallery] = useState<string[]>([]);
+  const [photoUploading, setPhotoUploading] = useState(false);
+  const [lastUploadStats, setLastUploadStats] = useState<{ savedPercent: number; byteSize: number; sha256: string } | null>(null);
   const [productSearch, setProductSearch] = useState('');
   const [productStockFilter, setProductStockFilter] = useState<'all' | 'low' | 'out' | 'hidden'>('all');
   const [editingProduct, setEditingProduct] = useState<any>(null);
@@ -146,12 +174,51 @@ export default function App() {
   const [tgChannelUsername, setTgChannelUsername] = useState('');
   const [customDomainInput, setCustomDomainInput] = useState('');
 
-  // Auth Login/Register State
-  const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
+  // Auth Login/Register/Telegram/Recovery State (Store Owners Only)
+  const [authMode, setAuthMode] = useState<'login' | 'register' | 'telegram' | 'recover'>('login');
   const [authEmail, setAuthEmail] = useState('');
   const [authPassword, setAuthPassword] = useState('');
   const [authName, setAuthName] = useState('');
+  const [authTgUsername, setAuthTgUsername] = useState('');
+  const [authRecoveryPasscode, setAuthRecoveryPasscode] = useState('');
+  const [authRecoveryHint, setAuthRecoveryHint] = useState('');
+  const [authRecoverNewPassword, setAuthRecoverNewPassword] = useState('');
   const [authError, setAuthError] = useState('');
+  const [authSuccessMsg, setAuthSuccessMsg] = useState('');
+
+  // Menu & Settings Drawer + 3-Dot Brand List Menu + Category Manager State
+  const [menuDrawerOpen, setMenuDrawerOpen] = useState(false);
+  const [menuTab, setMenuTab] = useState<'general' | 'account' | 'security' | 'admins'>('general');
+  const [workspaceFont, setWorkspaceFont] = useState<'jakarta' | 'outfit' | 'playfair' | 'fraunces' | 'space'>('jakarta');
+  const [openBrandMenuId, setOpenBrandMenuId] = useState<string | null>(null);
+  const [newCategoryInput, setNewCategoryInput] = useState('');
+  const [renamingCategory, setRenamingCategory] = useState<{ oldName: string; newName: string } | null>(null);
+  const [categorySaving, setCategorySaving] = useState(false);
+  const [selectedCategoryFilter, setSelectedCategoryFilter] = useState<string>('all');
+
+  // Admin / Owner Account & Security Settings State
+  const [profileNameInput, setProfileNameInput] = useState('');
+  const [profileEmailInput, setProfileEmailInput] = useState('');
+  const [profileTgInput, setProfileTgInput] = useState('');
+  const [currentPasswordInput, setCurrentPasswordInput] = useState('');
+  const [newPasswordInput, setNewPasswordInput] = useState('');
+  const [passcodeInput, setPasscodeInput] = useState('');
+  const [isPasscodeLocked, setIsPasscodeLocked] = useState(false);
+  const [unlockPinInput, setUnlockPinInput] = useState('');
+  const [unlockError, setUnlockError] = useState('');
+  const [coAdminName, setCoAdminName] = useState('');
+  const [coAdminEmail, setCoAdminEmail] = useState('');
+  const [coAdminPassword, setCoAdminPassword] = useState('');
+  const [coAdminsList, setCoAdminsList] = useState<any[]>([]);
+  const [settingsMessage, setSettingsMessage] = useState('');
+  const [settingsError, setSettingsError] = useState('');
+
+  // 3-Role Access Control & Store/Order Filtering State
+  const [storefrontCustomerOnly, setStorefrontCustomerOnly] = useState(false);
+  const [adminCategoryFilter, setAdminCategoryFilter] = useState<string>('all');
+  const [expandedCatalogBizId, setExpandedCatalogBizId] = useState<string | null>(null);
+  const [orderStatusFilter, setOrderStatusFilter] = useState<'all' | 'payment_requests' | 'finished' | 'rejected'>('all');
+  const [roleGuideModalOpen, setRoleGuideModalOpen] = useState(false);
 
   const t = translations[lang] || translations.en;
 
@@ -167,6 +234,9 @@ export default function App() {
       const data = await res.json();
       if (res.ok && data.user) {
         setCurrentUser(data.user);
+        setProfileNameInput(data.user.name || '');
+        setProfileEmailInput(data.user.email || '');
+        setProfileTgInput(data.user.telegram_username || '');
         setLang((data.user.preferred_language as LanguageCode) || 'en');
         setAvailableAccounts(data.availableAccounts || []);
         setBusinesses(data.businesses || []);
@@ -176,6 +246,10 @@ export default function App() {
             setSelectedBusinessId(data.businesses[0].id);
           }
         }
+      }
+      const admRes = await fetch('/api/superadmin/admins', { headers: headersWithAuth() });
+      if (admRes.ok) {
+        setCoAdminsList(await admRes.json());
       }
     } catch {
       // ignore
@@ -240,7 +314,7 @@ export default function App() {
     setOrderManagementError('');
   }, [selectedBusinessId, authToken, loadTenantWorkspace]);
 
-  const handleSwitchDemoAccount = async (userId: string) => {
+  const handleSwitchDemoAccount = async (userId: string, openModule?: ActiveModule) => {
     const res = await fetch('/api/auth/switch-account', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -251,10 +325,15 @@ export default function App() {
       localStorage.setItem('telebiz_token', data.token);
       setAuthToken(data.token);
       setCurrentUser(data.user);
-      setStatusBanner(`Switched active session to ${data.user.name} (${data.user.platform_role})`);
-      if (data.user.platform_role === 'super_admin') {
+      setStorefrontCustomerOnly(false);
+      setFullStorefrontOpen(false);
+      const roleLabel = data.user.platform_role === 'super_admin' ? 'Platform Admin (Full Access)' : 'Store Owner (Isolated to Own Store Only)';
+      setStatusBanner(`Switched active role to ${data.user.name} — ${roleLabel}`);
+      if (openModule) {
+        setActiveModule(openModule);
+      } else if (data.user.platform_role === 'super_admin') {
         setActiveModule('superadmin');
-      } else if (activeModule === 'superadmin') {
+      } else {
         setActiveModule('overview');
       }
     }
@@ -272,6 +351,61 @@ export default function App() {
   const handleAuthSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setAuthError('');
+    setAuthSuccessMsg('');
+
+    if (authMode === 'telegram') {
+      const res = await fetch('/api/auth/telegram', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          telegram_username: authTgUsername,
+          name: authName,
+          recovery_passcode: authRecoveryPasscode,
+          language: lang,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setAuthError(data.error || 'Telegram sign-in failed');
+        return;
+      }
+      localStorage.setItem('telebiz_token', data.token);
+      setAuthToken(data.token);
+      setCurrentUser(data.user);
+      setAuthModalOpen(false);
+      setStatusBanner(
+        `Signed in via Telegram (${data.user.telegram_username}) · Store Owner ID: ${data.user.owner_uid}`
+      );
+      loadAccountAndBusinesses();
+      return;
+    }
+
+    if (authMode === 'recover') {
+      const res = await fetch('/api/auth/recover', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          identifier: authEmail,
+          recovery_passcode: authRecoveryPasscode,
+          new_password: authRecoverNewPassword,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setAuthError(data.error || 'Account recovery failed. Check your Recovery Passcode.');
+        return;
+      }
+      localStorage.setItem('telebiz_token', data.token);
+      setAuthToken(data.token);
+      setCurrentUser(data.user);
+      setAuthModalOpen(false);
+      setStatusBanner(
+        data.message || `Account recovered! Welcome back ${data.user.name} (${data.user.owner_uid}).`
+      );
+      loadAccountAndBusinesses();
+      return;
+    }
+
     const endpoint = authMode === 'login' ? '/api/auth/login' : '/api/auth/register';
     const res = await fetch(endpoint, {
       method: 'POST',
@@ -280,10 +414,13 @@ export default function App() {
         name: authName,
         email: authEmail,
         password: authPassword,
+        telegram_username: authTgUsername,
+        recovery_passcode: authRecoveryPasscode,
+        recovery_hint: authRecoveryHint,
         language: lang,
       }),
     });
-    const data = await res.json();
+    const data = await res.json().catch(() => ({}));
     if (!res.ok) {
       setAuthError(data.error || 'Authentication failed');
     } else {
@@ -291,7 +428,109 @@ export default function App() {
       setAuthToken(data.token);
       setCurrentUser(data.user);
       setAuthModalOpen(false);
+      setStatusBanner(
+        authMode === 'register'
+          ? `Store Owner Account Created! Your Unique Store Owner ID is ${data.user.owner_uid}. Recovery Passcode is active.`
+          : `Signed in as ${data.user.name} (${data.user.owner_uid || 'Store Owner'})`
+      );
       loadAccountAndBusinesses();
+    }
+  };
+
+  // Client-side HTML5 Canvas WebP/JPEG Photo Compressor + SHA-256 Deduplicated Upload
+  const compressAndUploadDevicePhotos = async (
+    fileList: FileList | null,
+    target: 'new' | 'edit'
+  ) => {
+    if (!fileList || fileList.length === 0) return;
+    setPhotoUploading(true);
+    setCommerceError('');
+    try {
+      const uploadedUrls: string[] = [];
+      for (let i = 0; i < Math.min(fileList.length, 4); i++) {
+        const file = fileList[i];
+        const compressed = await new Promise<{
+          dataUrl: string;
+          width: number;
+          height: number;
+          originalSize: number;
+        }>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onerror = () => reject(new Error('Failed to read image file'));
+          reader.onload = () => {
+            const img = new Image();
+            img.onerror = () => reject(new Error('Invalid image format'));
+            img.onload = () => {
+              const maxDim = 960;
+              let w = img.width;
+              let h = img.height;
+              if (w > maxDim || h > maxDim) {
+                if (w > h) {
+                  h = Math.round((h * maxDim) / w);
+                  w = maxDim;
+                } else {
+                  w = Math.round((w * maxDim) / h);
+                  h = maxDim;
+                }
+              }
+              const canvas = document.createElement('canvas');
+              canvas.width = w;
+              canvas.height = h;
+              const ctx = canvas.getContext('2d');
+              if (ctx) {
+                ctx.drawImage(img, 0, 0, w, h);
+              }
+              let dataUrl = canvas.toDataURL('image/webp', 0.82);
+              if (!dataUrl.startsWith('data:image/webp')) {
+                dataUrl = canvas.toDataURL('image/jpeg', 0.82);
+              }
+              resolve({ dataUrl, width: w, height: h, originalSize: file.size });
+            };
+            img.src = String(reader.result);
+          };
+          reader.readAsDataURL(file);
+        });
+
+        const res = await fetch(`/api/businesses/${selectedBusinessId}/media/upload`, {
+          method: 'POST',
+          headers: headersWithAuth(),
+          body: JSON.stringify({
+            dataUrl: compressed.dataUrl,
+            width: compressed.width,
+            height: compressed.height,
+            originalSize: compressed.originalSize,
+          }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          throw new Error(data.error || 'Photo upload failed');
+        }
+        uploadedUrls.push(data.url);
+        setLastUploadStats({
+          savedPercent: data.savedPercent ?? 0,
+          byteSize: data.byteSize ?? 0,
+          sha256: data.sha256 ?? '',
+        });
+      }
+
+      if (uploadedUrls.length > 0) {
+        if (target === 'new') {
+          setProdImageUrl((prev) => prev || uploadedUrls[0]);
+          setProdGallery((prev) => Array.from(new Set([...prev, ...uploadedUrls])).slice(0, 4));
+        } else if (editingProduct) {
+          const existingGallery = Array.isArray(editingProduct.gallery) ? editingProduct.gallery : [];
+          const nextGallery = Array.from(new Set([...existingGallery, ...uploadedUrls])).slice(0, 4);
+          setEditingProduct({
+            ...editingProduct,
+            image_url: editingProduct.image_url || uploadedUrls[0],
+            gallery: nextGallery,
+          });
+        }
+      }
+    } catch (err: any) {
+      setCommerceError(err.message || 'Could not optimize and upload photo.');
+    } finally {
+      setPhotoUploading(false);
     }
   };
 
@@ -303,6 +542,7 @@ export default function App() {
       body: JSON.stringify({
         name: newBizName,
         category: newBizCategory,
+        template_id: newBizTemplate,
         creation_method: newBizMethod,
         description: newBizDesc,
         contact_phone: newBizPhone,
@@ -318,8 +558,10 @@ export default function App() {
       setNewBizDesc('');
       await loadAccountAndBusinesses();
       setSelectedBusinessId(created.id);
-      setActiveModule('builder');
-      setStatusBanner(`Created new business "${created.name}" via ${newBizMethod.replace(/_/g, ' ')}.`);
+      setFullStorefrontOpen(true);
+      setStatusBanner(
+        `Created "${created.name}" with the ${newBizTemplate.replace(/_/g, ' ')} visual template, starter products & categories! You are now viewing your live storefront preview.`
+      );
     }
   };
 
@@ -335,9 +577,13 @@ export default function App() {
           name: prodName.trim(),
           category_name: prodCat.trim(),
           price: Number(prodPrice),
+          compare_at_price: prodComparePrice ? Number(prodComparePrice) : null,
+          discount_percent: prodDiscountPct ? Number(prodDiscountPct) : 0,
           stock: Number(prodStock),
           description: prodDesc,
           variations: prodVariations,
+          image_url: prodImageUrl,
+          gallery: prodGallery.length > 0 ? prodGallery : prodImageUrl ? [prodImageUrl] : [],
         }),
       });
       const json = await res.json().catch(() => ({}));
@@ -347,10 +593,14 @@ export default function App() {
       }
       setProdName('');
       setProdPrice('');
+      setProdComparePrice('');
+      setProdDiscountPct('');
       setProdStock('');
       setProdDesc('');
+      setProdImageUrl('');
+      setProdGallery([]);
       await loadTenantWorkspace(selectedBusinessId);
-      setStatusBanner('Product added to the catalog.');
+      setStatusBanner('Product with optimized photos and pricing added to the catalog.');
     } catch (err: any) {
       setCommerceError(err.message || 'Network error. The product was not created.');
     } finally {
@@ -369,8 +619,15 @@ export default function App() {
         headers: headersWithAuth(),
         body: JSON.stringify({
           name: String(editingProduct.name || '').trim(),
+          category_name: String(editingProduct.category_name || 'Signature Offerings').trim(),
+          description: String(editingProduct.description || ''),
+          variations: String(editingProduct.variations || ''),
           price: Number(editingProduct.price),
+          compare_at_price: editingProduct.compare_at_price ? Number(editingProduct.compare_at_price) : null,
+          discount_percent: editingProduct.discount_percent ? Number(editingProduct.discount_percent) : 0,
           stock: Number(editingProduct.stock),
+          image_url: editingProduct.image_url || '',
+          gallery: Array.isArray(editingProduct.gallery) ? editingProduct.gallery : [],
           available: Boolean(editingProduct.available),
           featured: Boolean(editingProduct.featured),
         }),
@@ -382,12 +639,219 @@ export default function App() {
       }
       setEditingProduct(null);
       await loadTenantWorkspace(selectedBusinessId);
-      setStatusBanner('Product details and inventory updated.');
+      await loadAccountAndBusinesses();
+      setStatusBanner('Product details, photos, discount, and inventory updated.');
     } catch (err: any) {
       setCommerceError(err.message || 'Network error. Product changes were not saved.');
     } finally {
       setProductSaving(false);
     }
+  };
+
+  const handleAddCategory = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newCategoryInput.trim() || categorySaving) return;
+    setCategorySaving(true);
+    setCommerceError('');
+    try {
+      const res = await fetch(`/api/businesses/${selectedBusinessId}/categories`, {
+        method: 'POST',
+        headers: headersWithAuth(),
+        body: JSON.stringify({ category_name: newCategoryInput.trim() }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setCommerceError(json.error || 'Could not add category.');
+        return;
+      }
+      setProdCat(newCategoryInput.trim());
+      setNewCategoryInput('');
+      await loadTenantWorkspace(selectedBusinessId);
+      setStatusBanner(`Category "${json.categories?.slice(-1)[0] || 'New'}" added to store.`);
+    } finally {
+      setCategorySaving(false);
+    }
+  };
+
+  const handleRenameCategory = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!renamingCategory || !renamingCategory.newName.trim() || categorySaving) return;
+    setCategorySaving(true);
+    setCommerceError('');
+    try {
+      const res = await fetch(`/api/businesses/${selectedBusinessId}/categories`, {
+        method: 'PATCH',
+        headers: headersWithAuth(),
+        body: JSON.stringify({
+          old_name: renamingCategory.oldName,
+          new_name: renamingCategory.newName.trim(),
+        }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setCommerceError(json.error || 'Could not rename category.');
+        return;
+      }
+      setRenamingCategory(null);
+      await loadTenantWorkspace(selectedBusinessId);
+      setStatusBanner('Category renamed and products updated.');
+    } finally {
+      setCategorySaving(false);
+    }
+  };
+
+  const handleDeleteCategory = async (categoryName: string) => {
+    if (categorySaving) return;
+    setCategorySaving(true);
+    setCommerceError('');
+    try {
+      const res = await fetch(`/api/businesses/${selectedBusinessId}/categories`, {
+        method: 'DELETE',
+        headers: headersWithAuth(),
+        body: JSON.stringify({
+          category_name: categoryName,
+          fallback_category: 'General',
+        }),
+      });
+      if (res.ok) {
+        if (selectedCategoryFilter === categoryName) setSelectedCategoryFilter('all');
+        await loadTenantWorkspace(selectedBusinessId);
+        setStatusBanner(`Removed category "${categoryName}" (products moved to General).`);
+      }
+    } finally {
+      setCategorySaving(false);
+    }
+  };
+
+  const handleBrandQuickAction = async (bizId: string, action: 'pause' | 'resume' | 'delete') => {
+    setOpenBrandMenuId(null);
+    const res = await fetch(`/api/businesses/${bizId}/quick-action`, {
+      method: 'POST',
+      headers: headersWithAuth(),
+      body: JSON.stringify({ action }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.ok) {
+      await loadAccountAndBusinesses();
+      if (bizId === selectedBusinessId && action !== 'delete') {
+        await loadTenantWorkspace(bizId);
+      }
+      setStatusBanner(
+        action === 'pause'
+          ? 'Business service paused.'
+          : action === 'resume'
+          ? 'Business service resumed and active.'
+          : 'Business removed from platform.'
+      );
+    } else {
+      setStatusBanner(data.error || 'Action could not be completed.');
+    }
+  };
+
+  const handleSaveProfile = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSettingsError('');
+    setSettingsMessage('');
+    const res = await fetch('/api/auth/profile', {
+      method: 'PATCH',
+      headers: headersWithAuth(),
+      body: JSON.stringify({
+        name: profileNameInput,
+        email: profileEmailInput,
+        telegram_username: profileTgInput,
+        preferred_language: lang,
+      }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      setSettingsError(data.error || 'Failed to update profile.');
+      return;
+    }
+    await loadAccountAndBusinesses();
+    setSettingsMessage('Admin / Account profile updated.');
+  };
+
+  const handleChangePassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSettingsError('');
+    setSettingsMessage('');
+    const res = await fetch('/api/auth/password', {
+      method: 'POST',
+      headers: headersWithAuth(),
+      body: JSON.stringify({
+        currentPassword: currentPasswordInput,
+        newPassword: newPasswordInput,
+      }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      setSettingsError(data.error || 'Could not update password.');
+      return;
+    }
+    setCurrentPasswordInput('');
+    setNewPasswordInput('');
+    setSettingsMessage('Password updated.');
+  };
+
+  const handleSavePasscode = async (action: 'set' | 'clear') => {
+    setSettingsError('');
+    setSettingsMessage('');
+    const res = await fetch('/api/auth/passcode', {
+      method: 'POST',
+      headers: headersWithAuth(),
+      body: JSON.stringify({ action, passcode: passcodeInput }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      setSettingsError(data.error || 'Passcode update failed.');
+      return;
+    }
+    setPasscodeInput('');
+    await loadAccountAndBusinesses();
+    setSettingsMessage(action === 'clear' ? 'Security passcode removed.' : 'Security passcode enabled.');
+  };
+
+  const handleUnlockPasscode = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setUnlockError('');
+    const res = await fetch('/api/auth/passcode', {
+      method: 'POST',
+      headers: headersWithAuth(),
+      body: JSON.stringify({ action: 'verify', passcode: unlockPinInput }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.ok && data.verified) {
+      setIsPasscodeLocked(false);
+      setUnlockPinInput('');
+    } else {
+      setUnlockError(data.error || 'Invalid security passcode.');
+    }
+  };
+
+  const handleAddCoAdmin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSettingsError('');
+    setSettingsMessage('');
+    const res = await fetch('/api/superadmin/admins', {
+      method: 'POST',
+      headers: headersWithAuth(),
+      body: JSON.stringify({
+        name: coAdminName,
+        email: coAdminEmail,
+        password: coAdminPassword,
+        platform_role: 'super_admin',
+      }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      setSettingsError(data.error || 'Could not add administrator.');
+      return;
+    }
+    setCoAdminName('');
+    setCoAdminEmail('');
+    setCoAdminPassword('');
+    await loadAccountAndBusinesses();
+    setSettingsMessage(`Added platform administrator "${data.admin?.name}".`);
   };
 
   const handleCreateService = async (e: React.FormEvent) => {
@@ -786,6 +1250,19 @@ export default function App() {
   const activeBusiness = workspace?.business || businesses[0];
   const commerceProducts: any[] = workspace?.products || [];
   const commerceServices: any[] = workspace?.services || [];
+  const storeCategories: string[] = React.useMemo(() => {
+    let customCats: string[] = [];
+    try {
+      customCats = JSON.parse(workspace?.business?.categories_json || '[]');
+    } catch {
+      customCats = [];
+    }
+    const productCats = commerceProducts.map((p: any) => p.category_name).filter(Boolean);
+    return Array.from(new Set([...customCats, ...productCats, 'Signature Offerings']));
+  }, [workspace?.business?.categories_json, commerceProducts]);
+  const sortedBusinessesBySales = React.useMemo(() => {
+    return [...businesses].sort((a, b) => Number(b.verifiedRevenue || 0) - Number(a.verifiedRevenue || 0));
+  }, [businesses]);
   const lowStockCount = commerceProducts.filter((p: any) => Number(p.stock) > 0 && Number(p.stock) <= 5).length;
   const outOfStockCount = commerceProducts.filter((p: any) => Number(p.stock) <= 0).length;
   const visibleCommerceProducts = commerceProducts.filter((p: any) => {
@@ -798,7 +1275,8 @@ export default function App() {
       (productStockFilter === 'low' && stock > 0 && stock <= 5) ||
       (productStockFilter === 'out' && stock <= 0) ||
       (productStockFilter === 'hidden' && isHidden);
-    return matchesSearch && matchesStock;
+    const matchesCat = selectedCategoryFilter === 'all' || p.category_name === selectedCategoryFilter;
+    return matchesSearch && matchesStock && matchesCat;
   });
   const activeConversation = supportThreads.find((c) => c.id === selectedConvId) || supportThreads[0];
   const moduleMeta: Record<ActiveModule, { title: string; description: string }> = {
@@ -813,129 +1291,242 @@ export default function App() {
     telegram: { title: 'Channels & connections', description: 'Connect your Telegram bot, optionally link a channel, and manage web access.' },
     subscriptions: { title: 'Plans & add-ons', description: 'Manage your platform plan and activate optional services.' },
     superadmin: { title: 'Platform administration', description: 'Manage the businesses and services across TeleBiz.' },
+    more: { title: 'More & My Business List', description: 'Manage all your businesses, create new stores, preview storefronts, and configure language & platform tools in one clean place.' },
   };
 
   return (
-    <div className="telebiz-app min-h-screen flex flex-col bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100">
-      <header className="telebiz-topbar sticky top-0 z-40 flex items-center justify-between gap-4 px-4 py-3 sm:px-6 lg:px-8">
-        <a
-          href="#overview"
-          onClick={(e) => { e.preventDefault(); setActiveModule('overview'); setMobileMoreOpen(false); }}
-          className="flex min-w-0 items-center gap-3"
-          aria-label="TeleBiz workspace home"
-        >
-          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-slate-950 text-white shadow-sm dark:bg-indigo-500">
-            <Building2 className="h-5 w-5" />
-          </span>
-          <span className="min-w-0">
-            <span className="block truncate text-base font-bold tracking-tight text-slate-950 dark:text-white">{t.platformTitle}</span>
-            <span className="hidden text-[10px] font-medium uppercase tracking-[0.16em] text-slate-400 sm:block">Business workspace</span>
-          </span>
-        </a>
-
-        <div className="hidden min-w-0 flex-1 items-center justify-center lg:flex">
-          <div className="flex max-w-md items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-4 py-2 text-xs text-slate-500 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-400">
-            <span className="h-2 w-2 rounded-full bg-emerald-500" />
-            <span className="font-medium text-slate-700 dark:text-slate-200">{activeBusiness?.name || 'Select a business'}</span>
-            <span className="text-slate-300 dark:text-slate-700">/</span>
-            <span className="truncate">Business management</span>
-          </div>
-        </div>
-
-        <div className="flex shrink-0 items-center gap-2 sm:gap-3">
-          <span className="hidden text-right sm:block">
-            <span className="block max-w-32 truncate text-xs font-semibold text-slate-800 dark:text-slate-100">{currentUser?.name || 'Workspace user'}</span>
-            <span className="block text-[10px] text-slate-400">{currentUser?.platform_role === 'super_admin' ? 'Platform administrator' : 'Business workspace'}</span>
-          </span>
-          <button
-            type="button"
-            onClick={() => setFullStorefrontOpen((prev) => !prev)}
-            className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-3.5 py-2.5 text-xs font-semibold text-white shadow-sm transition hover:bg-indigo-500 sm:px-4"
+    <div className={`telebiz-app font-preset-${workspaceFont} min-h-screen flex flex-col bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100`}>
+      {!fullStorefrontOpen && (
+        <header className="telebiz-topbar sticky top-0 z-40 flex items-center justify-between gap-4 px-4 py-3 sm:px-6 lg:px-8">
+          <a
+            href="#overview"
+            onClick={(e) => { e.preventDefault(); setActiveModule('overview'); setMobileMoreOpen(false); }}
+            className="flex min-w-0 items-center gap-3"
+            aria-label="TeleBiz workspace home"
           >
-            <ExternalLink className="h-3.5 w-3.5" />
-            <span className="hidden sm:inline">{fullStorefrontOpen ? 'Back to workspace' : 'Preview store'}</span>
-            <span className="sm:hidden">{fullStorefrontOpen ? 'Back' : 'Preview'}</span>
-          </button>
-        </div>
-      </header>
-
-      <div className="telebiz-contextbar flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-6 lg:px-8">
-        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2.5">
-          <div className="min-w-0 flex-1 sm:max-w-sm">
-            <label htmlFor="active-business-select" className="mb-1 block text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">Active business</label>
-            <select
-              id="active-business-select"
-              value={selectedBusinessId}
-              onChange={(e) => setSelectedBusinessId(e.target.value)}
-              className="telebiz-select w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-xs font-semibold text-slate-800 outline-none transition focus:border-indigo-400 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
-            >
-              {businesses.map((b: any) => (
-                <option key={b.id} value={b.id}>{b.name} · {b.category}</option>
-              ))}
-            </select>
-          </div>
-          <button
-            type="button"
-            onClick={() => setNewBizModalOpen(true)}
-            className="mt-4 inline-flex shrink-0 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-xs font-semibold text-slate-700 shadow-sm transition hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-indigo-950/40"
-          >
-            <Plus className="h-4 w-4" />
-            <span className="hidden sm:inline">{t.createNewBusiness}</span>
-            <span className="sm:hidden">New</span>
-          </button>
-        </div>
-
-        <div className="flex items-center justify-between gap-3 sm:justify-end">
-          {activeBusiness && (
-            <span className="hidden items-center gap-2 rounded-full bg-emerald-50 px-3 py-2 text-[11px] font-semibold text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300 md:inline-flex">
-              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-              {String(activeBusiness.status || 'active').replace(/_/g, ' ')}
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-indigo-600 to-violet-600 text-white shadow-md">
+              <Building2 className="h-5 w-5" />
             </span>
-          )}
-          <div className="flex items-center gap-1 rounded-xl border border-slate-200 bg-white p-1 dark:border-slate-800 dark:bg-slate-900" aria-label="Language">
-            {(['en', 'am', 'om'] as LanguageCode[]).map((code) => (
-              <button
-                key={code}
-                type="button"
-                onClick={() => handleLanguageChange(code)}
-                className={'rounded-lg px-2.5 py-1.5 text-[10px] font-semibold transition ' + (
-                  lang === code
-                    ? 'bg-slate-950 text-white dark:bg-indigo-500'
-                    : 'text-slate-500 hover:bg-slate-100 hover:text-slate-900 dark:hover:bg-slate-800 dark:hover:text-white'
-                )}
-              >
-                {LANGUAGE_LABELS[code]}
-              </button>
-            ))}
+            <span className="min-w-0">
+              <span className="block truncate text-base font-extrabold tracking-tight text-slate-950 dark:text-white">{t.platformTitle}</span>
+              <span className="hidden text-[10px] font-bold uppercase tracking-[0.16em] text-indigo-600 dark:text-indigo-400 sm:block">3D Multi-Store Operating Platform</span>
+            </span>
+          </a>
+
+          <div className="hidden min-w-0 flex-1 items-center justify-center lg:flex">
+            <button
+              type="button"
+              onClick={() => setActiveModule('more')}
+              className="flex max-w-md items-center gap-2 rounded-full border border-slate-200/90 bg-white px-4 py-2 text-xs text-slate-600 shadow-sm hover:border-indigo-300 transition dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300"
+              title="Click to switch business or open My Business List in More"
+            >
+              <span className="h-2.5 w-2.5 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.6)]" />
+              <span className="font-bold text-slate-900 dark:text-white">{activeBusiness?.name || 'Select a business'}</span>
+              <span className="text-slate-300 dark:text-slate-700">·</span>
+              <span className="text-[11px] font-semibold text-indigo-600 dark:text-indigo-400">My Business List →</span>
+            </button>
           </div>
-          <button
-            type="button"
-            onClick={() => setAuthModalOpen(true)}
-            className="text-xs font-semibold text-slate-500 transition hover:text-indigo-600 dark:text-slate-400 dark:hover:text-indigo-300"
-          >
-            {currentUser?.name ? 'Account' : 'Sign in'}
-          </button>
+
+          <div className="flex shrink-0 items-center gap-2 sm:gap-2.5">
+            <span className="hidden text-right sm:block">
+              <span className="block max-w-40 truncate text-xs font-bold text-slate-900 dark:text-slate-100">
+                {currentUser?.name || 'Workspace user'}
+              </span>
+              <span className="block text-[10px] font-mono font-bold text-emerald-700 dark:text-emerald-400">
+                {currentUser?.owner_uid || 'OWN-ID'} · {currentUser?.platform_role === 'super_admin' ? 'Super Admin' : 'Store Owner'}
+              </span>
+            </span>
+            <button
+              type="button"
+              onClick={() => {
+                setAuthError('');
+                setAuthSuccessMsg('');
+                setAuthModalOpen(true);
+              }}
+              className="btn-3d-white inline-flex items-center gap-1.5 rounded-xl px-3 py-2.5 text-xs font-bold text-indigo-700"
+              title="Store Owner Login / Telegram Login / Account Recovery"
+            >
+              <Send className="h-3.5 w-3.5 text-sky-600" />
+              <span className="hidden md:inline">Owner Sign In</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setActiveModule('more');
+                setMobileMoreOpen(false);
+              }}
+              className={
+                activeModule === 'more'
+                  ? 'btn-3d-primary inline-flex items-center gap-2 rounded-xl px-3.5 py-2.5 text-xs font-bold text-white'
+                  : 'btn-3d-white inline-flex items-center gap-2 rounded-xl px-3.5 py-2.5 text-xs font-bold text-slate-800'
+              }
+              aria-label="Open More and My Business List"
+            >
+              <MoreHorizontal className="h-4 w-4 text-indigo-600" />
+              <span>More</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setMenuDrawerOpen(true)}
+              className="btn-3d-white inline-flex items-center gap-2 rounded-xl px-3.5 py-2.5 text-xs font-bold"
+              aria-label="Open Menu and Settings"
+            >
+              <Settings className="h-4 w-4 text-indigo-600" />
+              <span className="hidden sm:inline">Settings</span>
+            </button>
+          </div>
+        </header>
+      )}
+
+      {/* 3-Category Role Recognition & Strict Access Bar (1. Platform Admin, 2. Store Owner, 3. Customer) */}
+      {!fullStorefrontOpen && (
+        <div className="border-b border-slate-200/90 bg-slate-900 text-white px-4 py-2.5 sm:px-6 lg:px-8">
+          <div className="mx-auto max-w-[1480px] flex flex-col lg:flex-row lg:items-center justify-between gap-2.5 text-xs">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-indigo-500/20 border border-indigo-400/30 text-indigo-200 font-extrabold text-[10px] uppercase tracking-wider">
+                <ShieldAlert className="w-3.5 h-3.5 text-indigo-400" />
+                3-Role Isolation Engine
+              </span>
+
+              {/* Role 1: Platform Admin */}
+              <button
+                type="button"
+                onClick={() => handleSwitchDemoAccount('usr_superadmin', 'superadmin')}
+                className={`px-3 py-1.5 rounded-xl font-bold text-[11px] transition flex items-center gap-1.5 ${
+                  currentUser?.platform_role === 'super_admin'
+                    ? 'bg-indigo-600 text-white shadow-sm ring-2 ring-indigo-400/40'
+                    : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                }`}
+              >
+                <span>1. Platform Admin</span>
+                <span className="text-[10px] px-1.5 py-0.5 rounded bg-black/25 text-indigo-200">
+                  All Categories & Stores
+                </span>
+              </button>
+
+              {/* Role 2: Store Owners (Isolated to their own store only) */}
+              <div className="inline-flex items-center gap-1.5 bg-slate-800 rounded-xl p-1 border border-slate-700">
+                <span className={`px-2 py-0.5 rounded-lg font-bold text-[11px] ${
+                  currentUser?.platform_role !== 'super_admin'
+                    ? 'bg-emerald-600 text-white'
+                    : 'text-slate-300'
+                }`}>
+                  2. Store Owner:
+                </span>
+                <select
+                  aria-label="Switch Store Owner Account"
+                  value={currentUser?.platform_role !== 'super_admin' ? currentUser?.id : ''}
+                  onChange={(e) => {
+                    if (e.target.value) handleSwitchDemoAccount(e.target.value, 'overview');
+                  }}
+                  className="bg-slate-900 text-white text-[11px] font-bold rounded-lg px-2.5 py-1 border border-slate-700 focus:outline-none"
+                >
+                  <option value="" disabled>
+                    {currentUser?.platform_role === 'super_admin' ? 'Select a Store Owner to test isolation...' : 'Switch Store Owner'}
+                  </option>
+                  {availableAccounts
+                    .filter((acc: any) => acc.platform_role !== 'super_admin')
+                    .map((acc: any) => (
+                      <option key={acc.id} value={acc.id}>
+                        {acc.name} ({acc.owner_uid || 'OWNER'}) — Sees Own Store Only
+                      </option>
+                    ))}
+                </select>
+              </div>
+
+              {/* Role 3: Their Customers */}
+              <button
+                type="button"
+                onClick={() => {
+                  setStorefrontCustomerOnly(true);
+                  setFullStorefrontOpen(true);
+                }}
+                className="px-3 py-1.5 rounded-xl font-bold text-[11px] bg-slate-800 text-amber-300 hover:bg-slate-700 border border-amber-500/30 transition flex items-center gap-1.5"
+              >
+                <ShoppingBag className="w-3.5 h-3.5 text-amber-400" />
+                <span>3. Customer View ({activeBusiness?.name || 'Store'})</span>
+              </button>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-[11px] text-slate-300">
+                Active Scope:{' '}
+                {currentUser?.platform_role === 'super_admin' ? (
+                  <strong className="text-indigo-300">Platform Admin — Viewing all {businesses.length} stores across all categories</strong>
+                ) : (
+                  <strong className="text-emerald-300">Store Owner — Strictly isolated to {businesses.length} owned store(s) ({businesses.map((b: any) => b.name).join(', ')})</strong>
+                )}
+              </span>
+              <button
+                type="button"
+                onClick={() => setRoleGuideModalOpen(true)}
+                className="px-2.5 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-white font-bold text-[11px] transition"
+              >
+                How Role Algorithm Works →
+              </button>
+            </div>
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Status Notification Banner */}
       {statusBanner && (
-        <div className="mx-4 my-3 flex items-center justify-between rounded-xl border border-indigo-100 bg-indigo-50 px-4 py-3 text-xs text-indigo-900 sm:mx-6 lg:mx-8 dark:border-indigo-900/60 dark:bg-indigo-950/40 dark:text-indigo-200">
+        <div className="mx-4 my-3 flex items-center justify-between rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-3 text-xs font-semibold text-indigo-950 shadow-sm sm:mx-6 lg:mx-8 dark:border-indigo-900/60 dark:bg-indigo-950/40 dark:text-indigo-200">
           <span>{statusBanner}</span>
-          <button type="button" onClick={() => setStatusBanner('')} className="underline ml-4">
+          <button type="button" onClick={() => setStatusBanner('')} className="underline ml-4 font-bold">
             Dismiss
           </button>
         </div>
       )}
 
-      {/* Full Storefront Customer View Mode */}
+      {/* Full Storefront Customer View Mode (Customer-only when storefrontCustomerOnly=true, or with Quick Edit Bar for Owner/Admin) */}
       {fullStorefrontOpen && activeBusiness ? (
-        <div className="flex-1 px-6 py-4">
+        <div className="flex-1 px-4 py-4 sm:px-6 space-y-3">
+          {storefrontCustomerOnly && (
+            <div className="mx-auto max-w-5xl rounded-2xl bg-slate-900 text-white px-4 py-3 flex flex-wrap items-center justify-between gap-3 text-xs shadow-md">
+              <div className="flex items-center gap-2">
+                <span className="px-2.5 py-0.5 rounded-full bg-amber-500/20 border border-amber-400/40 text-amber-300 font-extrabold text-[10px] uppercase">
+                  Role 3 · Customer View
+                </span>
+                <span>
+                  Viewing <strong>{activeBusiness.name}</strong> strictly as a Customer. Admin & Store Owner dashboards and edit buttons are hidden.
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setStorefrontCustomerOnly(false);
+                  setFullStorefrontOpen(false);
+                }}
+                className="px-3 py-1.5 rounded-xl bg-white text-slate-950 font-extrabold text-xs"
+              >
+                Exit Customer View
+              </button>
+            </div>
+          )}
           <MiniAppStorefront
             slug={activeBusiness.slug}
             mode="full_storefront"
-            onOrderCreated={() => loadTenantWorkspace(selectedBusinessId)}
-            onClose={() => setFullStorefrontOpen(false)}
+            canQuickEdit={!storefrontCustomerOnly}
+            authToken={authToken}
+            onOrderCreated={() => {
+              loadTenantWorkspace(selectedBusinessId);
+              loadAccountAndBusinesses();
+            }}
+            onClose={() => {
+              setStorefrontCustomerOnly(false);
+              setFullStorefrontOpen(false);
+            }}
+            onOpenBuilder={() => {
+              setStorefrontCustomerOnly(false);
+              setFullStorefrontOpen(false);
+              setActiveModule('builder');
+            }}
+            onOpenCatalog={() => {
+              setStorefrontCustomerOnly(false);
+              setFullStorefrontOpen(false);
+              setActiveModule('commerce');
+            }}
           />
         </div>
       ) : (
@@ -960,6 +1551,7 @@ export default function App() {
                   { id: 'marketing', label: t.marketing, icon: Megaphone },
                   { id: 'telegram', label: t.telegramSetup, icon: Send },
                   { id: 'subscriptions', label: t.subscriptions, icon: CreditCard },
+                  { id: 'more', label: 'More & My Businesses', icon: MoreHorizontal },
                 ].map((item) => {
                   const Icon = item.icon;
                   const active = activeModule === item.id;
@@ -1064,192 +1656,567 @@ export default function App() {
             {/* MODULE 1: EXECUTIVE OVERVIEW DASHBOARD */}
             {activeModule === 'overview' && analyticsData && workspace && (
               <div className="space-y-6">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                  <div>
-                    <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-indigo-600 dark:text-indigo-300">Business overview</p>
-                    <h1 className="mt-1 text-2xl font-bold tracking-tight text-slate-950 dark:text-white">
-                      {activeBusiness.name}
-                    </h1>
-                    <p className="mt-1.5 text-xs text-slate-500">
-                      {activeBusiness.category} · {String(activeBusiness.creation_method || '').replace(/_/g, ' ')} · Mini app v{activeBusiness.mini_app_version}
-                    </p>
+                {/* 1. Role-Aware Store Header: Admin sees Cross-Business Leaderboard; Store Owner sees Strictly Isolated Own-Store Hub */}
+                {currentUser?.platform_role === 'super_admin' ? (
+                  <section className="card-3d rounded-2xl bg-white dark:bg-slate-900 p-5 space-y-4">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                      <div>
+                        <div className="inline-flex items-center gap-1.5 text-[11px] font-extrabold uppercase tracking-[0.16em] text-indigo-600 dark:text-indigo-400">
+                          <Trophy className="w-3.5 h-3.5 text-amber-500" />
+                          Platform Admin · Cross-Business Sales Performance
+                        </div>
+                        <h2 className="mt-1 text-lg font-display font-extrabold text-slate-950 dark:text-white">
+                          Which Business Is Doing More Sales ({businesses.length} Total Stores)
+                        </h2>
+                        <p className="text-xs text-slate-500">
+                          As Platform Admin, you can inspect every business on the platform, filter by category, preview their store, or open the Super Admin Console.
+                        </p>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setActiveModule('superadmin')}
+                          className="btn-3d-primary px-3.5 py-2 rounded-xl text-xs font-bold text-white flex items-center gap-1.5"
+                        >
+                          <ShieldAlert className="w-3.5 h-3.5" />
+                          Super Admin Console
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleExportCsvReport}
+                          className="btn-3d-white px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5"
+                        >
+                          <Download className="w-3.5 h-3.5" />
+                          {t.exportReport}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setActiveModule('more')}
+                          className="btn-3d-white px-3.5 py-2 rounded-xl text-xs font-bold text-indigo-700 flex items-center gap-1.5"
+                        >
+                          <Building2 className="w-3.5 h-3.5" />
+                          Businesses by Category
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Ranked Business Sales Cards */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5">
+                      {sortedBusinessesBySales.map((biz: any, idx: number) => {
+                        const isSelected = biz.id === selectedBusinessId;
+                        const topRevenue = Math.max(1, Number(sortedBusinessesBySales[0]?.verifiedRevenue || 1));
+                        const sharePct = Math.min(100, Math.round((Number(biz.verifiedRevenue || 0) / topRevenue) * 100));
+                        return (
+                          <button
+                            key={biz.id}
+                            type="button"
+                            onClick={() => setSelectedBusinessId(biz.id)}
+                            className={`text-left rounded-2xl p-4 transition-all border ${
+                              isSelected
+                                ? 'border-indigo-500 bg-gradient-to-br from-indigo-50/90 via-white to-violet-50/70 dark:from-indigo-950/50 dark:via-slate-900 dark:to-slate-900 shadow-lg ring-2 ring-indigo-500/20 -translate-y-0.5'
+                                : 'border-slate-200/90 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-950/50 hover:bg-white hover:border-slate-300 shadow-sm'
+                            }`}
+                          >
+                            <div className="flex items-start justify-between gap-2">
+                              <div className="flex items-center gap-2.5 min-w-0">
+                                <span
+                                  className="w-8 h-8 rounded-xl flex items-center justify-center text-white font-extrabold text-xs shadow-sm shrink-0"
+                                  style={{ backgroundColor: biz.primary_color || '#4f46e5' }}
+                                >
+                                  #{idx + 1}
+                                </span>
+                                <div className="min-w-0">
+                                  <div className="font-display font-extrabold text-sm text-slate-950 dark:text-white truncate">
+                                    {biz.name}
+                                  </div>
+                                  <div className="text-[11px] text-slate-500 capitalize truncate">
+                                    {biz.category} · {biz.productsCount || 0} products · Owner: {biz.owner_name || 'Assigned'}
+                                  </div>
+                                </div>
+                              </div>
+                              {idx === 0 && (
+                                <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-900 text-[10px] font-extrabold shrink-0">
+                                  Top Seller
+                                </span>
+                              )}
+                            </div>
+
+                            <div className="mt-3 flex items-baseline justify-between">
+                              <div>
+                                <div className="text-[10px] uppercase tracking-wider font-bold text-slate-400">Verified Sales</div>
+                                <div className="text-base font-display font-extrabold text-slate-950 dark:text-white tabular-nums">
+                                  {Number(biz.verifiedRevenue || 0).toLocaleString()} ETB
+                                </div>
+                              </div>
+                              <div className="text-right">
+                                <div className="text-[10px] uppercase tracking-wider font-bold text-slate-400">Order Breakdown</div>
+                                <div className="text-[11px] font-bold text-emerald-600 dark:text-emerald-400 tabular-nums">
+                                  {biz.finishedOrdersCount || 0} finished · {biz.pendingPaymentRequestsCount || 0} pay req · {biz.rejectedOrdersCount || 0} rejected
+                                </div>
+                              </div>
+                            </div>
+
+                            <div className="mt-2.5 w-full h-2 rounded-full bg-slate-200/80 dark:bg-slate-800 overflow-hidden">
+                              <div
+                                className="h-full rounded-full transition-all"
+                                style={{
+                                  width: `${Math.max(8, sharePct)}%`,
+                                  backgroundColor: biz.primary_color || '#4f46e5',
+                                }}
+                              />
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </section>
+                ) : (
+                  <section className="card-3d rounded-2xl bg-white dark:bg-slate-900 p-5 space-y-4 border-l-4 border-l-emerald-500">
+                    <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+                      <div>
+                        <div className="inline-flex items-center gap-2 text-[11px] font-extrabold uppercase tracking-[0.16em] text-emerald-600 dark:text-emerald-400">
+                          <CheckCircle2 className="w-4 h-4" />
+                          Store Owner Workspace · Strict Multi-Tenant Isolation Active
+                        </div>
+                        <h2 className="mt-1 text-lg font-display font-extrabold text-slate-950 dark:text-white">
+                          Welcome, {currentUser?.name} ({currentUser?.owner_uid}) — {activeBusiness.name}
+                        </h2>
+                        <p className="text-xs text-slate-500">
+                          You only see your own store ({businesses.map((b: any) => b.name).join(', ')}). Other store owners&apos; businesses, catalogs, and sales are completely hidden from your account.
+                        </p>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={handleExportCsvReport}
+                          className="btn-3d-white px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5"
+                        >
+                          <Download className="w-3.5 h-3.5" />
+                          Export My Sales Report
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setStorefrontCustomerOnly(false);
+                            setFullStorefrontOpen(true);
+                          }}
+                          className="btn-3d-emerald px-3.5 py-2 rounded-xl text-xs font-bold text-white flex items-center gap-1.5"
+                        >
+                          <Eye className="w-3.5 h-3.5" />
+                          Preview My Storefront
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Store Owner Dedicated Breakdown: Payment Requests, Finished Orders, Rejected Orders, Messages, Categories */}
+                    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setOrderStatusFilter('payment_requests');
+                          setActiveModule('orders');
+                        }}
+                        className="text-left p-3.5 rounded-2xl border border-amber-200 bg-amber-50/70 hover:bg-amber-100/70 transition dark:border-amber-900/50 dark:bg-amber-950/30"
+                      >
+                        <div className="text-[10px] font-extrabold uppercase tracking-wider text-amber-800 dark:text-amber-300">
+                          Payment Requests
+                        </div>
+                        <div className="mt-1 text-2xl font-display font-extrabold text-amber-950 dark:text-white tabular-nums">
+                          {workspace.orders.filter((o: any) => o.payment_status === 'pending_verification').length}
+                        </div>
+                        <div className="mt-0.5 text-[11px] font-semibold text-amber-700 dark:text-amber-400">
+                          Awaiting receipt verification →
+                        </div>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setOrderStatusFilter('finished');
+                          setActiveModule('orders');
+                        }}
+                        className="text-left p-3.5 rounded-2xl border border-emerald-200 bg-emerald-50/70 hover:bg-emerald-100/70 transition dark:border-emerald-900/50 dark:bg-emerald-950/30"
+                      >
+                        <div className="text-[10px] font-extrabold uppercase tracking-wider text-emerald-800 dark:text-emerald-300">
+                          Finished Orders
+                        </div>
+                        <div className="mt-1 text-2xl font-display font-extrabold text-emerald-950 dark:text-white tabular-nums">
+                          {workspace.orders.filter((o: any) => o.status === 'completed').length}
+                        </div>
+                        <div className="mt-0.5 text-[11px] font-semibold text-emerald-700 dark:text-emerald-400">
+                          Completed & delivered →
+                        </div>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setOrderStatusFilter('rejected');
+                          setActiveModule('orders');
+                        }}
+                        className="text-left p-3.5 rounded-2xl border border-rose-200 bg-rose-50/70 hover:bg-rose-100/70 transition dark:border-rose-900/50 dark:bg-rose-950/30"
+                      >
+                        <div className="text-[10px] font-extrabold uppercase tracking-wider text-rose-800 dark:text-rose-300">
+                          Rejected / Cancelled
+                        </div>
+                        <div className="mt-1 text-2xl font-display font-extrabold text-rose-950 dark:text-white tabular-nums">
+                          {workspace.orders.filter((o: any) => o.status === 'cancelled' || o.status === 'refunded' || o.payment_status === 'failed').length}
+                        </div>
+                        <div className="mt-0.5 text-[11px] font-semibold text-rose-700 dark:text-rose-400">
+                          Rejected or refunded orders →
+                        </div>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setActiveModule('support')}
+                        className="text-left p-3.5 rounded-2xl border border-indigo-200 bg-indigo-50/70 hover:bg-indigo-100/70 transition dark:border-indigo-900/50 dark:bg-indigo-950/30"
+                      >
+                        <div className="text-[10px] font-extrabold uppercase tracking-wider text-indigo-800 dark:text-indigo-300">
+                          Customer Messages
+                        </div>
+                        <div className="mt-1 text-2xl font-display font-extrabold text-indigo-950 dark:text-white tabular-nums">
+                          {supportThreads.length}
+                        </div>
+                        <div className="mt-0.5 text-[11px] font-semibold text-indigo-700 dark:text-indigo-400">
+                          Open support inbox →
+                        </div>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setActiveModule('commerce')}
+                        className="text-left p-3.5 rounded-2xl border border-violet-200 bg-violet-50/70 hover:bg-violet-100/70 transition dark:border-violet-900/50 dark:bg-violet-950/30"
+                      >
+                        <div className="text-[10px] font-extrabold uppercase tracking-wider text-violet-800 dark:text-violet-300">
+                          Categories & Products
+                        </div>
+                        <div className="mt-1 text-2xl font-display font-extrabold text-violet-950 dark:text-white tabular-nums">
+                          {workspace.products.length}
+                        </div>
+                        <div className="mt-0.5 text-[11px] font-semibold text-violet-700 dark:text-violet-400">
+                          Edit products & categories →
+                        </div>
+                      </button>
+                    </div>
+                  </section>
+                )}
+
+                {/* 2. Selected Business 3D KPI Cards */}
+                <div className="space-y-3">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <div className="flex items-center gap-2.5">
+                      <span
+                        className="w-3.5 h-3.5 rounded-full shadow-sm"
+                        style={{ backgroundColor: activeBusiness.primary_color || '#4f46e5' }}
+                      />
+                      <h2 className="text-xl font-display font-extrabold text-slate-950 dark:text-white">
+                        {activeBusiness.name} — Live Performance Metrics
+                      </h2>
+                      <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-indigo-50 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300">
+                        v{activeBusiness.mini_app_version}
+                      </span>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setActiveModule('commerce')}
+                        className="btn-3d-white px-3.5 py-2 rounded-xl text-xs font-bold"
+                      >
+                        Manage Categories & Products
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setActiveModule('builder')}
+                        className="btn-3d-dark px-4 py-2 rounded-xl text-xs font-bold text-white"
+                      >
+                        Customize Mini App
+                      </button>
+                    </div>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={handleExportCsvReport}
-                      className="px-3.5 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-medium hover:bg-slate-50 flex items-center gap-1.5"
-                    >
-                      <Download className="w-3.5 h-3.5" />
-                      {t.exportReport}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setActiveModule('builder')}
-                      className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2.5 text-xs font-semibold text-white shadow-sm transition hover:bg-indigo-500"
-                    >
-                      Customize Mini App
-                    </button>
+
+                  <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3.5">
+                    <div className="card-3d p-4 bg-white dark:bg-slate-900 rounded-2xl">
+                      <div className="text-[11px] font-bold uppercase tracking-wider text-indigo-600 dark:text-indigo-400">{t.totalRevenue}</div>
+                      <div className="mt-1.5 text-xl font-display font-extrabold text-slate-950 dark:text-white tabular-nums">
+                        {Number(analyticsData.overview.totalRevenue).toLocaleString()} ETB
+                      </div>
+                      <div className="text-[11px] font-medium text-slate-500 mt-1 tabular-nums">
+                        30d: {Number(analyticsData.overview.monthlyRevenue).toLocaleString()} ETB
+                      </div>
+                    </div>
+
+                    <div className="card-3d p-4 bg-white dark:bg-slate-900 rounded-2xl">
+                      <div className="text-[11px] font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400">{t.todayRevenue}</div>
+                      <div className="mt-1.5 text-xl font-display font-extrabold text-slate-950 dark:text-white tabular-nums">
+                        {Number(analyticsData.overview.todayRevenue).toLocaleString()} ETB
+                      </div>
+                      <div className="text-[11px] font-medium text-slate-500 mt-1 tabular-nums">
+                        7d: {Number(analyticsData.overview.weeklyRevenue).toLocaleString()} ETB
+                      </div>
+                    </div>
+
+                    <div className="card-3d p-4 bg-white dark:bg-slate-900 rounded-2xl">
+                      <div className="text-[11px] font-bold uppercase tracking-wider text-amber-600 dark:text-amber-400">{t.totalOrders}</div>
+                      <div className="mt-1.5 text-xl font-display font-extrabold text-slate-950 dark:text-white tabular-nums">
+                        {analyticsData.overview.totalOrders}
+                      </div>
+                      <div className="text-[11px] font-medium text-slate-500 mt-1 tabular-nums">
+                        {analyticsData.overview.confirmedOrders} verified · {analyticsData.overview.pendingOrders} pending
+                      </div>
+                    </div>
+
+                    <div className="card-3d p-4 bg-white dark:bg-slate-900 rounded-2xl">
+                      <div className="text-[11px] font-bold uppercase tracking-wider text-violet-600 dark:text-violet-400">{t.totalCustomers}</div>
+                      <div className="mt-1.5 text-xl font-display font-extrabold text-slate-950 dark:text-white tabular-nums">
+                        {analyticsData.overview.totalCustomers}
+                      </div>
+                      <div className="text-[11px] font-medium text-slate-500 mt-1 tabular-nums">
+                        {analyticsData.overview.newCustomers} new · {analyticsData.overview.returningCustomers} returning
+                      </div>
+                    </div>
+
+                    <div className="card-3d p-4 bg-white dark:bg-slate-900 rounded-2xl">
+                      <div className="text-[11px] font-bold uppercase tracking-wider text-sky-600 dark:text-sky-400">Total Visitors</div>
+                      <div className="mt-1.5 text-xl font-display font-extrabold text-slate-950 dark:text-white tabular-nums">
+                        {analyticsData.overview.totalVisitors}
+                      </div>
+                      <div className="text-[11px] font-medium text-slate-500 mt-1">Telegram + Web sessions</div>
+                    </div>
+
+                    <div className="card-3d p-4 bg-white dark:bg-slate-900 rounded-2xl">
+                      <div className="text-[11px] font-bold uppercase tracking-wider text-rose-600 dark:text-rose-400">{t.activeBookings}</div>
+                      <div className="mt-1.5 text-xl font-display font-extrabold text-slate-950 dark:text-white tabular-nums">
+                        {analyticsData.overview.activeBookings}
+                      </div>
+                      <div className="text-[11px] font-medium text-slate-500 mt-1">Scheduled reservations</div>
+                    </div>
                   </div>
                 </div>
 
-                {/* 6 Primary KPI Cards (All from real recorded SQL queries) */}
-                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3.5">
-                  <div className="p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl">
-                    <div className="text-xs text-slate-500">{t.totalRevenue}</div>
-                    <div className="mt-1 text-lg font-display font-bold text-slate-900 dark:text-white tabular-nums">
-                      {Number(analyticsData.overview.totalRevenue).toLocaleString()} ETB
+                {/* 2.5. 24/7 Customer Identification Algorithm & High-Scale SQLite/Media Engine */}
+                <section className="card-3d rounded-2xl bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white p-5 space-y-4">
+                  <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+                    <div className="space-y-1">
+                      <div className="inline-flex items-center gap-2 text-[10px] font-extrabold uppercase tracking-[0.18em] text-emerald-400">
+                        <Fingerprint className="w-3.5 h-3.5" />
+                        24/7 Automatic Customer Identification & SQLite Million-Scale Engine
+                      </div>
+                      <h3 className="text-base font-display font-extrabold text-white">
+                        Store Owner Unique ID: <span className="font-mono text-amber-300">{activeBusiness.owner_uid || currentUser?.owner_uid || 'OWN-ASSIGNED'}</span>
+                      </h3>
+                      <p className="text-xs text-slate-300 max-w-3xl leading-relaxed">
+                        Customers visit and buy from <strong>{activeBusiness.name}</strong> without needing to create an account. Our 24/7 attribution algorithm automatically assigns each visitor a permanent <span className="font-mono text-emerald-300">CUS-247-...</span> fingerprint ID and links their cart, wishlist, and orders directly to your Store Owner ID (<span className="font-mono text-amber-300">{activeBusiness.owner_uid || currentUser?.owner_uid}</span>).
+                      </p>
                     </div>
-                    <div className="text-[11px] text-slate-500 mt-1 tabular-nums">
-                      30d: {Number(analyticsData.overview.monthlyRevenue).toLocaleString()} ETB
-                    </div>
-                  </div>
-
-                  <div className="p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl">
-                    <div className="text-xs text-slate-500">{t.todayRevenue}</div>
-                    <div className="mt-1 text-lg font-display font-bold text-slate-900 dark:text-white tabular-nums">
-                      {Number(analyticsData.overview.todayRevenue).toLocaleString()} ETB
-                    </div>
-                    <div className="text-[11px] text-slate-500 mt-1 tabular-nums">
-                      7d: {Number(analyticsData.overview.weeklyRevenue).toLocaleString()} ETB
-                    </div>
-                  </div>
-
-                  <div className="p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl">
-                    <div className="text-xs text-slate-500">{t.totalOrders}</div>
-                    <div className="mt-1 text-lg font-display font-bold text-slate-900 dark:text-white tabular-nums">
-                      {analyticsData.overview.totalOrders}
-                    </div>
-                    <div className="text-[11px] text-slate-500 mt-1 tabular-nums">
-                      {analyticsData.overview.confirmedOrders} verified · {analyticsData.overview.pendingOrders} pending
-                    </div>
-                  </div>
-
-                  <div className="p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl">
-                    <div className="text-xs text-slate-500">{t.totalCustomers}</div>
-                    <div className="mt-1 text-lg font-display font-bold text-slate-900 dark:text-white tabular-nums">
-                      {analyticsData.overview.totalCustomers}
-                    </div>
-                    <div className="text-[11px] text-slate-500 mt-1 tabular-nums">
-                      {analyticsData.overview.newCustomers} new · {analyticsData.overview.returningCustomers} returning
+                    <div className="flex flex-wrap items-center gap-2 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setAuthMode('telegram');
+                          setAuthModalOpen(true);
+                        }}
+                        className="btn-3d-emerald px-3.5 py-2 rounded-xl text-xs font-extrabold text-white inline-flex items-center gap-1.5"
+                      >
+                        <Send className="w-3.5 h-3.5" />
+                        Telegram Owner Login
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setActiveModule('commerce')}
+                        className="btn-3d-white px-3.5 py-2 rounded-xl text-xs font-bold text-slate-900 inline-flex items-center gap-1.5"
+                      >
+                        <ImagePlus className="w-3.5 h-3.5 text-indigo-600" />
+                        Upload Product Photos
+                      </button>
                     </div>
                   </div>
 
-                  <div className="p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl">
-                    <div className="text-xs text-slate-500">Total Visitors</div>
-                    <div className="mt-1 text-lg font-display font-bold text-slate-900 dark:text-white tabular-nums">
-                      {analyticsData.overview.totalVisitors}
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
+                    <div className="rounded-xl bg-white/10 border border-white/15 p-3.5 space-y-1">
+                      <div className="text-[10px] font-bold uppercase tracking-wider text-emerald-300 flex items-center gap-1.5">
+                        <Fingerprint className="w-3.5 h-3.5" />
+                        Zero-Account Customer Attribution
+                      </div>
+                      <div className="text-xs font-bold text-white">
+                        {(workspace.customers || []).length} Identified Customers Linked 24/7
+                      </div>
+                      <div className="text-[11px] font-mono text-slate-300 truncate">
+                        Latest IDs: {(workspace.customers || []).slice(0, 2).map((c: any) => c.customer_uid || 'CUS-247').join(' · ')}
+                      </div>
                     </div>
-                    <div className="text-[11px] text-slate-500 mt-1">Telegram + Web sessions</div>
-                  </div>
 
-                  <div className="p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl">
-                    <div className="text-xs text-slate-500">{t.activeBookings}</div>
-                    <div className="mt-1 text-lg font-display font-bold text-slate-900 dark:text-white tabular-nums">
-                      {analyticsData.overview.activeBookings}
+                    <div className="rounded-xl bg-white/10 border border-white/15 p-3.5 space-y-1">
+                      <div className="text-[10px] font-bold uppercase tracking-wider text-sky-300 flex items-center gap-1.5">
+                        <HardDrive className="w-3.5 h-3.5" />
+                        Million-Photo Deduplication Engine
+                      </div>
+                      <div className="text-xs font-bold text-white">
+                        Client WebP Compression + SHA-256 Disk Addressing
+                      </div>
+                      <div className="text-[11px] text-slate-300">
+                        Zero base64 SQLite bloat · Immutable 365-day CDN headers
+                      </div>
                     </div>
-                    <div className="text-[11px] text-slate-500 mt-1">Scheduled reservations</div>
-                  </div>
-                </div>
 
-                {/* Split Row: Recent Orders & Live Mini App Storefront Simulator */}
+                    <div className="rounded-xl bg-white/10 border border-white/15 p-3.5 space-y-1">
+                      <div className="text-[10px] font-bold uppercase tracking-wider text-amber-300 flex items-center gap-1.5">
+                        <KeyRound className="w-3.5 h-3.5" />
+                        Dual-Passcode Owner Recovery
+                      </div>
+                      <div className="text-xs font-bold text-white">
+                        Email + Telegram Login + Secondary Recovery PIN
+                      </div>
+                      <div className="text-[11px] text-slate-300">
+                        Instant account recovery if email or password is forgotten
+                      </div>
+                    </div>
+                  </div>
+                </section>
+
+
+
+                {/* 4. Recent Orders & Conversion Funnel (Full-Width Clean 2-Column Layout without Cramped Inline Storefront) */}
                 <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-                  <div className="lg:col-span-7 space-y-6">
-                    {/* Recent Orders Table with Payment Verification Distinction */}
-                    <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 space-y-4">
+                  <div className="lg:col-span-7 card-3d bg-white dark:bg-slate-900 rounded-2xl p-5 space-y-4">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <h2 className="text-sm font-display font-extrabold text-slate-900 dark:text-white">
+                          Recent Orders & Payment Verification ({activeBusiness.name})
+                        </h2>
+                        <p className="text-xs text-slate-500">
+                          Orders are only marked Paid after real payment reference verification.
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setActiveModule('orders')}
+                        className="btn-3d-white px-3 py-1.5 rounded-xl text-xs font-bold text-indigo-600"
+                      >
+                        Manage all ({workspace.orders.length})
+                      </button>
+                    </div>
+
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left border-collapse text-xs">
+                        <thead>
+                          <tr className="border-b border-slate-200 dark:border-slate-800 text-slate-500">
+                            <th className="py-2 pr-3 font-bold">Order</th>
+                            <th className="py-2 px-3 font-bold">Customer</th>
+                            <th className="py-2 px-3 font-bold">Channel</th>
+                            <th className="py-2 px-3 font-bold">Payment State</th>
+                            <th className="py-2 pl-3 font-bold text-right">Total</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                          {workspace.orders.slice(0, 7).map((ord: any) => (
+                            <tr key={ord.id}>
+                              <td className="py-2.5 pr-3 font-mono font-bold text-slate-900 dark:text-white">
+                                {ord.order_number}
+                              </td>
+                              <td className="py-2.5 px-3 font-medium">{ord.customer_name}</td>
+                              <td className="py-2.5 px-3 uppercase font-mono text-[11px] text-slate-500">
+                                {ord.source} · {ord.payment_method}
+                              </td>
+                              <td className="py-2.5 px-3">
+                                <span
+                                  className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold uppercase ${
+                                    ord.payment_status === 'paid'
+                                      ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300'
+                                      : ord.payment_status === 'pending_verification'
+                                      ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300'
+                                      : 'bg-rose-100 text-rose-700'
+                                  }`}
+                                >
+                                  {ord.payment_status.replace(/_/g, ' ')}
+                                </span>
+                              </td>
+                              <td className="py-2.5 pl-3 text-right font-mono font-bold tabular-nums">
+                                {Number(ord.total).toLocaleString()} {ord.currency}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+
+                  {/* Right Column: Top Selling Items & Conversion Funnel */}
+                  <div className="lg:col-span-5 space-y-6">
+                    <div className="card-3d bg-white dark:bg-slate-900 rounded-2xl p-5 space-y-3">
                       <div className="flex items-center justify-between">
                         <div>
-                          <h2 className="text-sm font-display font-semibold text-slate-900 dark:text-white">
-                            Recent Orders & Payment Verification Status
+                          <h2 className="text-sm font-display font-extrabold text-slate-900 dark:text-white flex items-center gap-1.5">
+                            <TrendingUp className="w-4 h-4 text-emerald-600" />
+                            What {activeBusiness.name} Is Selling Best
                           </h2>
-                          <p className="text-xs text-slate-500">
-                            Orders are never marked Paid until transaction verification succeeds.
-                          </p>
+                          <p className="text-xs text-slate-500">Top products ranked by purchases and customer interest</p>
                         </div>
                         <button
                           type="button"
-                          onClick={() => setActiveModule('orders')}
-                          className="text-xs font-medium text-sky-600 hover:underline"
+                          onClick={() => setActiveModule('commerce')}
+                          className="text-xs font-bold text-indigo-600 hover:underline"
                         >
-                          Manage all ({workspace.orders.length})
+                          Edit Catalog
                         </button>
                       </div>
-
-                      <div className="overflow-x-auto">
-                        <table className="w-full text-left border-collapse text-xs">
-                          <thead>
-                            <tr className="border-b border-slate-200 dark:border-slate-800 text-slate-500">
-                              <th className="py-2 pr-3 font-medium">Order</th>
-                              <th className="py-2 px-3 font-medium">Customer</th>
-                              <th className="py-2 px-3 font-medium">Channel</th>
-                              <th className="py-2 px-3 font-medium">Payment State</th>
-                              <th className="py-2 pl-3 font-medium text-right">Total</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                            {workspace.orders.slice(0, 6).map((ord: any) => (
-                              <tr key={ord.id}>
-                                <td className="py-2.5 pr-3 font-mono font-semibold text-slate-900 dark:text-white">
-                                  {ord.order_number}
-                                </td>
-                                <td className="py-2.5 px-3">{ord.customer_name}</td>
-                                <td className="py-2.5 px-3 uppercase font-mono text-[11px] text-slate-500">
-                                  {ord.source} · {ord.payment_method}
-                                </td>
-                                <td className="py-2.5 px-3">
-                                  <span
-                                    className={`font-semibold uppercase ${
-                                      ord.payment_status === 'paid'
-                                        ? 'text-emerald-700 dark:text-emerald-400'
-                                        : ord.payment_status === 'pending_verification'
-                                        ? 'text-amber-700 dark:text-amber-400'
-                                        : 'text-rose-600'
-                                    }`}
-                                  >
-                                    {ord.payment_status.replace(/_/g, ' ')}
-                                  </span>
-                                </td>
-                                <td className="py-2.5 pl-3 text-right font-mono font-semibold tabular-nums">
-                                  {Number(ord.total).toLocaleString()} {ord.currency}
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
+                      <div className="space-y-2">
+                        {(analyticsData.topProducts || []).slice(0, 4).map((prod: any, i: number) => (
+                          <div
+                            key={prod.id}
+                            className="flex items-center justify-between rounded-xl border border-slate-200/80 dark:border-slate-800 px-3.5 py-2.5 text-xs"
+                          >
+                            <div className="min-w-0">
+                              <div className="font-bold text-slate-900 dark:text-white truncate">
+                                #{i + 1} · {prod.name}
+                              </div>
+                              <div className="text-[11px] text-slate-500">
+                                {prod.category_name} · {prod.views_count} views · {prod.likes_count} likes
+                              </div>
+                            </div>
+                            <div className="text-right shrink-0 ml-3">
+                              <div className="font-mono font-extrabold text-emerald-700 dark:text-emerald-400">
+                                {prod.purchases_count} sold
+                              </div>
+                              <div className="text-[11px] text-slate-500 tabular-nums">
+                                {Number(prod.price).toLocaleString()} ETB
+                              </div>
+                            </div>
+                          </div>
+                        ))}
                       </div>
                     </div>
 
-                    {/* 10-Stage Conversion Funnel Summary */}
-                    <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 space-y-4">
+                    <div className="card-3d bg-white dark:bg-slate-900 rounded-2xl p-5 space-y-4">
                       <div className="flex items-center justify-between">
-                        <h2 className="text-sm font-display font-semibold text-slate-900 dark:text-white">
+                        <h2 className="text-sm font-display font-extrabold text-slate-900 dark:text-white">
                           {t.salesFunnel}
                         </h2>
                         <button
                           type="button"
                           onClick={() => setActiveModule('analytics')}
-                          className="text-xs font-medium text-sky-600 hover:underline"
+                          className="text-xs font-bold text-indigo-600 hover:underline"
                         >
                           Full Analytics
                         </button>
                       </div>
                       <div className="space-y-2">
-                        {analyticsData.funnelStages.map((st: any) => {
+                        {analyticsData.funnelStages.slice(0, 6).map((st: any) => {
                           const maxCount = Math.max(1, analyticsData.funnelStages[0]?.count || 1);
                           const pct = Math.min(100, Math.round((st.count / maxCount) * 100));
                           return (
                             <div key={st.key} className="space-y-1 text-xs">
                               <div className="flex items-center justify-between">
-                                <span className="text-slate-700 dark:text-slate-300">
+                                <span className="font-medium text-slate-700 dark:text-slate-300">
                                   {st.step}. {st.label}
                                 </span>
-                                <span className="font-mono font-semibold tabular-nums">
+                                <span className="font-mono font-bold tabular-nums">
                                   {st.count} ({pct}%)
                                 </span>
                               </div>
                               <div className="w-full h-2 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
                                 <div
-                                  className="h-full bg-sky-600 rounded-full"
+                                  className="h-full bg-gradient-to-r from-indigo-600 to-sky-500 rounded-full"
                                   style={{ width: `${pct}%` }}
                                 />
                               </div>
@@ -1259,32 +2226,23 @@ export default function App() {
                       </div>
                     </div>
                   </div>
-
-                  {/* Right Column: Live Interactive Customer Mini App (5 cols) */}
-                  <div className="lg:col-span-5 space-y-2">
-                    <div className="flex items-center justify-between text-xs text-slate-500 px-1">
-                      <span className="font-semibold text-slate-700 dark:text-slate-300">
-                        Interactive Customer Mini App & Web Storefront
-                      </span>
-                      <span>Place real test orders & bookings below</span>
-                    </div>
-                    <MiniAppStorefront
-                      slug={activeBusiness.slug}
-                      mode="embedded_preview"
-                      onOrderCreated={() => loadTenantWorkspace(selectedBusinessId)}
-                    />
-                  </div>
                 </div>
               </div>
             )}
 
-            {/* MODULE 2: MINI APP BUILDER STUDIO (3 CREATION METHODS) */}
+            {/* MODULE 2: MINI APP BUILDER STUDIO (3 CREATION METHODS + MULTI-STORE COVER CARDS) */}
             {activeModule === 'builder' && workspace && (
               <BuilderStudio
                 business={workspace.business}
+                businesses={businesses}
+                onSelectBusiness={(id) => setSelectedBusinessId(id)}
+                onOpenFullPreview={() => setFullStorefrontOpen(true)}
                 versions={workspace.versions}
                 authToken={authToken}
-                onRefresh={() => loadTenantWorkspace(selectedBusinessId)}
+                onRefresh={() => {
+                  loadTenantWorkspace(selectedBusinessId);
+                  loadAccountAndBusinesses();
+                }}
               />
             )}
 
@@ -1314,29 +2272,143 @@ export default function App() {
                 )}
 
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-                  <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-                    <div className="flex items-center justify-between text-xs text-slate-500"><span>Catalog items</span><Package className="h-4 w-4" /></div>
-                    <div className="mt-2 text-2xl font-semibold tabular-nums text-slate-950 dark:text-white">{commerceProducts.length}</div>
-                    <p className="mt-1 text-[11px] text-slate-500">Products currently recorded</p>
+                  <div className="card-3d rounded-2xl bg-white p-4 dark:bg-slate-900">
+                    <div className="flex items-center justify-between text-xs font-bold text-slate-500"><span>Catalog items</span><Package className="h-4 w-4 text-indigo-600" /></div>
+                    <div className="mt-2 text-2xl font-display font-extrabold tabular-nums text-slate-950 dark:text-white">{commerceProducts.length}</div>
+                    <p className="mt-1 text-[11px] text-slate-500">Products across {storeCategories.length} categories</p>
                   </div>
-                  <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-                    <div className="flex items-center justify-between text-xs text-slate-500"><span>Low stock</span><Boxes className="h-4 w-4" /></div>
-                    <div className="mt-2 text-2xl font-semibold tabular-nums text-slate-950 dark:text-white">{lowStockCount}</div>
+                  <div className="card-3d rounded-2xl bg-white p-4 dark:bg-slate-900">
+                    <div className="flex items-center justify-between text-xs font-bold text-slate-500"><span>Low stock</span><Boxes className="h-4 w-4 text-amber-600" /></div>
+                    <div className="mt-2 text-2xl font-display font-extrabold tabular-nums text-slate-950 dark:text-white">{lowStockCount}</div>
                     <p className="mt-1 text-[11px] text-slate-500">Between 1 and 5 units</p>
                   </div>
-                  <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-                    <div className="flex items-center justify-between text-xs text-slate-500"><span>Out of stock</span><AlertCircle className="h-4 w-4" /></div>
-                    <div className="mt-2 text-2xl font-semibold tabular-nums text-slate-950 dark:text-white">{outOfStockCount}</div>
+                  <div className="card-3d rounded-2xl bg-white p-4 dark:bg-slate-900">
+                    <div className="flex items-center justify-between text-xs font-bold text-slate-500"><span>Out of stock</span><AlertCircle className="h-4 w-4 text-rose-600" /></div>
+                    <div className="mt-2 text-2xl font-display font-extrabold tabular-nums text-slate-950 dark:text-white">{outOfStockCount}</div>
                     <p className="mt-1 text-[11px] text-slate-500">Products with zero units recorded</p>
                   </div>
                 </div>
 
+                {/* Store Digital Menu Categories Manager */}
+                <section className="card-3d rounded-2xl bg-white p-4 sm:p-5 dark:bg-slate-900 space-y-4">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div>
+                      <div className="inline-flex items-center gap-1.5 text-[10px] font-extrabold uppercase tracking-[0.18em] text-indigo-600 dark:text-indigo-400">
+                        <Tag className="w-3.5 h-3.5" />
+                        Digital Menu & Storefront Categories
+                      </div>
+                      <h3 className="mt-0.5 text-base font-display font-extrabold text-slate-950 dark:text-white">
+                        Create, Rename & Organize Product Categories
+                      </h3>
+                      <p className="text-xs text-slate-500">
+                        Add custom categories (e.g. "Breakfast", "Hot Drinks", "VIP Packages", "New Arrivals") and assign any product under any category.
+                      </p>
+                    </div>
+                    <form onSubmit={handleAddCategory} className="flex items-center gap-2">
+                      <input
+                        type="text"
+                        value={newCategoryInput}
+                        onChange={(e) => setNewCategoryInput(e.target.value)}
+                        placeholder="New category name..."
+                        className="rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 px-3 py-2 text-xs font-semibold outline-none focus:border-indigo-500"
+                      />
+                      <button
+                        type="submit"
+                        disabled={categorySaving}
+                        className="btn-3d-primary px-3.5 py-2 rounded-xl text-xs font-bold text-white inline-flex items-center gap-1.5 shrink-0"
+                      >
+                        <FolderPlus className="w-3.5 h-3.5" />
+                        Add Category
+                      </button>
+                    </form>
+                  </div>
+
+                  {renamingCategory && (
+                    <form onSubmit={handleRenameCategory} className="flex flex-wrap items-center gap-2 p-3 rounded-xl bg-indigo-50/80 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-800 text-xs">
+                      <span className="font-bold text-indigo-950 dark:text-indigo-200">
+                        Rename "{renamingCategory.oldName}" to:
+                      </span>
+                      <input
+                        type="text"
+                        required
+                        value={renamingCategory.newName}
+                        onChange={(e) => setRenamingCategory({ ...renamingCategory, newName: e.target.value })}
+                        className="rounded-lg border border-indigo-300 bg-white dark:bg-slate-900 px-3 py-1.5 text-xs font-semibold"
+                      />
+                      <button type="submit" className="btn-3d-primary px-3 py-1.5 rounded-lg text-white font-bold">
+                        Save Name
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setRenamingCategory(null)}
+                        className="btn-3d-white px-3 py-1.5 rounded-lg font-bold"
+                      >
+                        Cancel
+                      </button>
+                    </form>
+                  )}
+
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setSelectedCategoryFilter('all')}
+                      className={
+                        selectedCategoryFilter === 'all'
+                          ? 'btn-3d-dark px-3.5 py-1.5 rounded-xl text-xs font-bold text-white'
+                          : 'btn-3d-white px-3.5 py-1.5 rounded-xl text-xs font-semibold'
+                      }
+                    >
+                      All Categories ({commerceProducts.length})
+                    </button>
+                    {storeCategories.map((cat) => {
+                      const count = commerceProducts.filter((p: any) => p.category_name === cat).length;
+                      const isActive = selectedCategoryFilter === cat;
+                      return (
+                        <div
+                          key={cat}
+                          className={`inline-flex items-center gap-1 rounded-xl border px-2.5 py-1 text-xs font-semibold transition ${
+                            isActive
+                              ? 'border-indigo-600 bg-indigo-600 text-white shadow-sm'
+                              : 'border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/70 text-slate-800 dark:text-slate-200'
+                          }`}
+                        >
+                          <button
+                            type="button"
+                            onClick={() => setSelectedCategoryFilter(cat)}
+                            className="px-1 font-bold"
+                          >
+                            {cat} <span className="opacity-75">({count})</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setRenamingCategory({ oldName: cat, newName: cat })}
+                            title={`Rename ${cat}`}
+                            className="p-1 rounded hover:bg-black/10"
+                          >
+                            <Pencil className="w-3 h-3" />
+                          </button>
+                          {storeCategories.length > 1 && (
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteCategory(cat)}
+                              title={`Delete ${cat}`}
+                              className="p-1 rounded hover:bg-rose-500/20 text-rose-500"
+                            >
+                              <X className="w-3 h-3" />
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </section>
+
                 <div className="grid grid-cols-1 gap-5 xl:grid-cols-12">
                   <section className="space-y-4 xl:col-span-7">
-                    <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900 sm:p-5">
+                    <div className="card-3d rounded-2xl bg-white p-4 dark:bg-slate-900 sm:p-5">
                       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                         <div>
-                          <h3 className="text-sm font-semibold text-slate-950 dark:text-white">Product inventory</h3>
+                          <h3 className="text-sm font-bold text-slate-950 dark:text-white">Product inventory</h3>
                           <p className="mt-1 text-xs text-slate-500">{visibleCommerceProducts.length} of {commerceProducts.length} products shown</p>
                         </div>
                         <div className="relative w-full sm:max-w-xs">
@@ -1365,8 +2437,8 @@ export default function App() {
                             onClick={() => setProductStockFilter(filter.id as 'all' | 'low' | 'out' | 'hidden')}
                             aria-pressed={productStockFilter === filter.id}
                             className={productStockFilter === filter.id
-                              ? 'rounded-full bg-slate-950 px-3 py-1.5 text-[11px] font-semibold text-white dark:bg-white dark:text-slate-950'
-                              : 'rounded-full border border-slate-200 px-3 py-1.5 text-[11px] font-medium text-slate-600 transition hover:border-slate-400 dark:border-slate-700 dark:text-slate-300'}
+                              ? 'btn-3d-dark rounded-full px-3 py-1.5 text-[11px] font-bold text-white'
+                              : 'btn-3d-white rounded-full px-3 py-1.5 text-[11px] font-semibold text-slate-700'}
                           >
                             {filter.label} <span className="ml-1 opacity-65">{filter.count}</span>
                           </button>
@@ -1381,7 +2453,7 @@ export default function App() {
                               {commerceProducts.length === 0 ? 'Your catalog is ready for its first product' : 'No products match these filters'}
                             </p>
                             <p className="mt-1 text-xs text-slate-500">
-                              {commerceProducts.length === 0 ? 'Add a product to begin building your catalog.' : 'Try another search or choose a different inventory filter.'}
+                              {commerceProducts.length === 0 ? 'Add a product to begin building your catalog.' : 'Try another search or choose a different category filter.'}
                             </p>
                           </div>
                         ) : visibleCommerceProducts.map((product: any) => {
@@ -1393,41 +2465,100 @@ export default function App() {
                             : stock <= 5
                             ? 'bg-amber-50 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300'
                             : 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300';
+                          const discountPct = Number(product.discount_percent || 0) || (
+                            product.compare_at_price && Number(product.compare_at_price) > Number(product.price)
+                              ? Math.round(((Number(product.compare_at_price) - Number(product.price)) / Number(product.compare_at_price)) * 100)
+                              : 0
+                          );
                           return (
-                            <article key={product.id} className="rounded-xl border border-slate-200 p-4 transition hover:border-slate-300 dark:border-slate-800 dark:hover:border-slate-700">
+                            <article key={product.id} className="rounded-xl border border-slate-200 p-4 transition hover:border-indigo-300 shadow-xs dark:border-slate-800 dark:hover:border-slate-700">
                               <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                                <div className="min-w-0 flex-1">
-                                  <div className="flex flex-wrap items-center gap-2">
-                                    <h4 className="truncate text-sm font-semibold text-slate-950 dark:text-white">{product.name}</h4>
-                                    {Boolean(Number(product.featured)) && <span className="rounded-full bg-indigo-50 px-2 py-0.5 text-[10px] font-medium text-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-300">Featured</span>}
-                                  </div>
-                                  <p className="mt-1 text-xs text-slate-500">{product.category_name || 'Uncategorized'} · <span className="font-mono">{product.sku || 'SKU not assigned'}</span></p>
-                                  <div className="mt-3 flex flex-wrap items-center gap-2">
-                                    <span className={"rounded-full px-2.5 py-1 text-[10px] font-semibold " + stockClass}>{stockLabel}</span>
-                                    {hidden && <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[10px] font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300">Hidden from storefront</span>}
+                                <div className="flex items-start gap-3.5 min-w-0 flex-1">
+                                  {product.image_url ? (
+                                    <img
+                                      src={product.image_url}
+                                      alt={product.name}
+                                      loading="lazy"
+                                      decoding="async"
+                                      className="h-16 w-16 rounded-xl object-cover border border-slate-200 dark:border-slate-700 shrink-0 bg-slate-100"
+                                    />
+                                  ) : (
+                                    <div className="h-16 w-16 rounded-xl border border-dashed border-slate-300 dark:border-slate-700 flex items-center justify-center text-slate-400 shrink-0 bg-slate-50 dark:bg-slate-950">
+                                      <ImagePlus className="h-5 w-5" />
+                                    </div>
+                                  )}
+                                  <div className="min-w-0 flex-1">
+                                    <div className="flex flex-wrap items-center gap-2">
+                                      <h4 className="truncate text-sm font-bold text-slate-950 dark:text-white">{product.name}</h4>
+                                      <span className="rounded-full bg-indigo-50 px-2.5 py-0.5 text-[10px] font-bold text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300">
+                                        {product.category_name || 'Uncategorized'}
+                                      </span>
+                                      {discountPct > 0 && (
+                                        <span className="rounded-full bg-emerald-900 px-2 py-0.5 text-[10px] font-extrabold text-white">
+                                          {discountPct}% OFF
+                                        </span>
+                                      )}
+                                      {Boolean(Number(product.featured)) && <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-800">Featured</span>}
+                                    </div>
+                                    <p className="mt-1 text-xs text-slate-500">
+                                      SKU: <span className="font-mono">{product.sku || 'Assigned'}</span>
+                                      {product.description ? ` · ${product.description}` : ''}
+                                    </p>
+                                    <div className="mt-3 flex flex-wrap items-center gap-2">
+                                      <span className={"rounded-full px-2.5 py-1 text-[10px] font-bold " + stockClass}>{stockLabel}</span>
+                                      {hidden && <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[10px] font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300">Hidden from storefront</span>}
+                                    </div>
                                   </div>
                                 </div>
                                 <div className="flex items-center justify-between gap-4 sm:flex-col sm:items-end">
                                   <div className="text-left sm:text-right">
-                                    <div className="text-base font-semibold tabular-nums text-slate-950 dark:text-white">{Number(product.price || 0).toLocaleString()} {product.currency || 'ETB'}</div>
+                                    <div className="text-base font-display font-extrabold tabular-nums text-slate-950 dark:text-white">
+                                      {Number(product.price || 0).toLocaleString()} {product.currency || 'ETB'}
+                                    </div>
+                                    {product.compare_at_price && Number(product.compare_at_price) > Number(product.price) && (
+                                      <div className="text-[11px] text-slate-400 line-through tabular-nums">
+                                        {Number(product.compare_at_price).toLocaleString()} {product.currency || 'ETB'}
+                                      </div>
+                                    )}
                                     <div className="mt-1 text-xs text-slate-500">{stock.toLocaleString()} units recorded</div>
                                   </div>
                                   <button
                                     type="button"
                                     onClick={() => {
                                       setCommerceError('');
+                                      let parsedVars = '';
+                                      let parsedGallery: string[] = [];
+                                      try {
+                                        const arr = JSON.parse(product.variations_json || '[]');
+                                        parsedVars = Array.isArray(arr) ? arr.join(', ') : '';
+                                      } catch {
+                                        parsedVars = '';
+                                      }
+                                      try {
+                                        const g = JSON.parse(product.gallery_json || '[]');
+                                        parsedGallery = Array.isArray(g) ? g : [];
+                                      } catch {
+                                        parsedGallery = [];
+                                      }
                                       setEditingProduct({
                                         id: product.id,
                                         name: product.name || '',
+                                        category_name: product.category_name || storeCategories[0] || 'Signature Offerings',
+                                        description: product.description || '',
+                                        variations: parsedVars,
                                         price: String(product.price ?? ''),
+                                        compare_at_price: product.compare_at_price ? String(product.compare_at_price) : '',
+                                        discount_percent: product.discount_percent ? String(product.discount_percent) : '',
                                         stock: String(product.stock ?? 0),
+                                        image_url: product.image_url || '',
+                                        gallery: parsedGallery,
                                         available: Boolean(Number(product.available)),
                                         featured: Boolean(Number(product.featured)),
                                       });
                                     }}
-                                    className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-2 text-[11px] font-semibold text-slate-700 transition hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+                                    className="btn-3d-white inline-flex items-center gap-1.5 rounded-xl px-3 py-2 text-[11px] font-bold"
                                   >
-                                    <Pencil className="h-3.5 w-3.5" /> Edit
+                                    <Pencil className="h-3.5 w-3.5 text-indigo-600" /> Edit Photo / Price / Category
                                   </button>
                                 </div>
                               </div>
@@ -1442,10 +2573,10 @@ export default function App() {
                       </div>
                     </div>
 
-                    <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900 sm:p-5">
+                    <div className="card-3d rounded-2xl bg-white p-4 dark:bg-slate-900 sm:p-5">
                       <div className="flex items-center justify-between gap-3">
                         <div>
-                          <h3 className="text-sm font-semibold text-slate-950 dark:text-white">Bookable services</h3>
+                          <h3 className="text-sm font-bold text-slate-950 dark:text-white">Bookable services</h3>
                           <p className="mt-1 text-xs text-slate-500">{commerceServices.length} services configured</p>
                         </div>
                         <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[10px] font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300">Appointments & reservations</span>
@@ -1470,89 +2601,308 @@ export default function App() {
                           </div>
                         ))}
                       </div>
-                      <p className="mt-3 text-[10px] leading-5 text-slate-400">Service editing is not yet supported by the current backend. This screen can create and display service listings.</p>
                     </div>
                   </section>
 
                   <section className="space-y-4 xl:col-span-5">
                     {editingProduct && (
-                      <form onSubmit={handleUpdateProduct} className="space-y-4 rounded-2xl border border-slate-300 bg-slate-50 p-4 shadow-sm dark:border-slate-700 dark:bg-slate-900 sm:p-5">
+                      <form onSubmit={handleUpdateProduct} className="card-3d space-y-4 rounded-2xl border-2 border-indigo-500 bg-indigo-50/40 p-4 dark:bg-slate-900 sm:p-5">
                         <div className="flex items-start justify-between gap-3">
                           <div>
-                            <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400">Edit catalog item</div>
-                            <h3 className="mt-1 text-sm font-semibold text-slate-950 dark:text-white">{editingProduct.name}</h3>
+                            <div className="text-[10px] font-extrabold uppercase tracking-[0.18em] text-indigo-600">Edit catalog item, photos & discount</div>
+                            <h3 className="mt-1 text-sm font-extrabold text-slate-950 dark:text-white">{editingProduct.name}</h3>
                           </div>
                           <button type="button" onClick={() => setEditingProduct(null)} aria-label="Close product editor" className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-200 dark:hover:bg-slate-800"><X className="h-4 w-4" /></button>
                         </div>
+
+                        {/* Device Photo Upload & Gallery in Edit Form */}
+                        <div className="rounded-2xl border border-indigo-200 dark:border-indigo-900/60 bg-white dark:bg-slate-950 p-3.5 space-y-3">
+                          <div className="flex items-center justify-between">
+                            <label className="text-xs font-extrabold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+                              <ImagePlus className="w-4 h-4 text-indigo-600" />
+                              Product Photos (Upload from Device)
+                            </label>
+                            <span className="text-[10px] font-mono text-emerald-700 dark:text-emerald-400 font-bold">
+                              Auto WebP + SHA-256 Deduplicated
+                            </span>
+                          </div>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <label className="btn-3d-white px-3 py-2 rounded-xl text-xs font-bold cursor-pointer inline-flex items-center gap-1.5 text-indigo-700">
+                              <Upload className="w-3.5 h-3.5" />
+                              <span>{photoUploading ? 'Optimizing & Uploading...' : 'Upload Photo(s) from Device'}</span>
+                              <input
+                                type="file"
+                                accept="image/*"
+                                multiple
+                                className="hidden"
+                                onChange={(e) => compressAndUploadDevicePhotos(e.target.files, 'edit')}
+                              />
+                            </label>
+                            {editingProduct.image_url && (
+                              <button
+                                type="button"
+                                onClick={() => setEditingProduct({ ...editingProduct, image_url: '', gallery: [] })}
+                                className="text-[11px] text-rose-600 font-bold hover:underline"
+                              >
+                                Clear Photos
+                              </button>
+                            )}
+                          </div>
+                          {(editingProduct.image_url || (editingProduct.gallery && editingProduct.gallery.length > 0)) && (
+                            <div className="flex items-center gap-2 overflow-x-auto pt-1">
+                              {(editingProduct.gallery?.length ? editingProduct.gallery : [editingProduct.image_url]).map((url: string, idx: number) => (
+                                <div key={idx} className="relative group shrink-0">
+                                  <img
+                                    src={url}
+                                    alt={`Preview ${idx + 1}`}
+                                    className={`h-14 w-14 rounded-xl object-cover border-2 ${editingProduct.image_url === url ? 'border-indigo-600' : 'border-slate-200'}`}
+                                    onClick={() => setEditingProduct({ ...editingProduct, image_url: url })}
+                                  />
+                                  {idx === 0 && (
+                                    <span className="absolute bottom-0.5 left-0.5 right-0.5 bg-black/70 text-white text-[8px] font-bold text-center rounded">
+                                      Cover
+                                    </span>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+
                         <div>
-                          <label className="mb-1 block text-xs font-medium text-slate-700 dark:text-slate-300">Product name</label>
+                          <label className="mb-1 block text-xs font-bold text-slate-700 dark:text-slate-300">Product name</label>
                           <input required value={editingProduct.name} onChange={(e) => setEditingProduct({ ...editingProduct, name: e.target.value })} className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-xs dark:border-slate-700 dark:bg-slate-950" />
+                        </div>
+                        <div>
+                          <label className="mb-1 block text-xs font-bold text-slate-700 dark:text-slate-300">Assign / Move to Category</label>
+                          <select
+                            value={storeCategories.includes(editingProduct.category_name) ? editingProduct.category_name : '__custom__'}
+                            onChange={(e) => {
+                              if (e.target.value !== '__custom__') {
+                                setEditingProduct({ ...editingProduct, category_name: e.target.value });
+                              }
+                            }}
+                            className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-xs font-semibold dark:border-slate-700 dark:bg-slate-950 mb-2"
+                          >
+                            {storeCategories.map((c) => (
+                              <option key={c} value={c}>{c}</option>
+                            ))}
+                            <option value="__custom__">+ Type a custom category below</option>
+                          </select>
+                          <input
+                            required
+                            value={editingProduct.category_name}
+                            onChange={(e) => setEditingProduct({ ...editingProduct, category_name: e.target.value })}
+                            placeholder="Category name"
+                            className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs dark:border-slate-700 dark:bg-slate-950"
+                          />
                         </div>
                         <div className="grid grid-cols-2 gap-3">
                           <div>
-                            <label className="mb-1 block text-xs font-medium text-slate-700 dark:text-slate-300">Price (ETB)</label>
+                            <label className="mb-1 block text-xs font-bold text-slate-700 dark:text-slate-300">Selling Price (ETB)</label>
                             <input required type="number" min="0" step="0.01" value={editingProduct.price} onChange={(e) => setEditingProduct({ ...editingProduct, price: e.target.value })} className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-xs dark:border-slate-700 dark:bg-slate-950" />
                           </div>
                           <div>
-                            <label className="mb-1 block text-xs font-medium text-slate-700 dark:text-slate-300">Stock units</label>
+                            <label className="mb-1 block text-xs font-bold text-slate-700 dark:text-slate-300">Stock units</label>
                             <input required type="number" min="0" step="1" value={editingProduct.stock} onChange={(e) => setEditingProduct({ ...editingProduct, stock: e.target.value })} className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-xs dark:border-slate-700 dark:bg-slate-950" />
                           </div>
                         </div>
+                        <div className="grid grid-cols-2 gap-3">
+                          <div>
+                            <label className="mb-1 block text-xs font-bold text-emerald-700 dark:text-emerald-400">Discount (% OFF)</label>
+                            <input
+                              type="number"
+                              min="0"
+                              max="95"
+                              value={editingProduct.discount_percent || ''}
+                              onChange={(e) => setEditingProduct({ ...editingProduct, discount_percent: e.target.value })}
+                              placeholder="e.g. 25"
+                              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs dark:border-slate-700 dark:bg-slate-950"
+                            />
+                          </div>
+                          <div>
+                            <label className="mb-1 block text-xs font-bold text-slate-700 dark:text-slate-300">Original Price (Optional)</label>
+                            <input
+                              type="number"
+                              min="0"
+                              step="0.01"
+                              value={editingProduct.compare_at_price || ''}
+                              onChange={(e) => setEditingProduct({ ...editingProduct, compare_at_price: e.target.value })}
+                              placeholder="Auto-calculated if blank"
+                              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs dark:border-slate-700 dark:bg-slate-950"
+                            />
+                          </div>
+                        </div>
+                        <div>
+                          <label className="mb-1 block text-xs font-bold text-slate-700 dark:text-slate-300">Options / Variations (comma-separated)</label>
+                          <input value={editingProduct.variations || ''} onChange={(e) => setEditingProduct({ ...editingProduct, variations: e.target.value })} placeholder="S, M, L, XL, XXL · White, Black, Beige" className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs dark:border-slate-700 dark:bg-slate-950" />
+                        </div>
+                        <div>
+                          <label className="mb-1 block text-xs font-bold text-slate-700 dark:text-slate-300">Description</label>
+                          <textarea rows={2} value={editingProduct.description || ''} onChange={(e) => setEditingProduct({ ...editingProduct, description: e.target.value })} className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs dark:border-slate-700 dark:bg-slate-950" />
+                        </div>
                         <label className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white p-3 text-xs dark:border-slate-700 dark:bg-slate-950">
                           <span><strong className="block font-semibold text-slate-800 dark:text-slate-200">Available on storefront</strong><span className="text-[10px] text-slate-500">Customers can see and order this product</span></span>
-                          <input type="checkbox" checked={Boolean(editingProduct.available)} onChange={(e) => setEditingProduct({ ...editingProduct, available: e.target.checked })} className="h-4 w-4 accent-slate-900" />
+                          <input type="checkbox" checked={Boolean(editingProduct.available)} onChange={(e) => setEditingProduct({ ...editingProduct, available: e.target.checked })} className="h-4 w-4 accent-indigo-600" />
                         </label>
                         <label className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white p-3 text-xs dark:border-slate-700 dark:bg-slate-950">
                           <span><strong className="block font-semibold text-slate-800 dark:text-slate-200">Feature this product</strong><span className="text-[10px] text-slate-500">Highlight it in the catalog</span></span>
-                          <input type="checkbox" checked={Boolean(editingProduct.featured)} onChange={(e) => setEditingProduct({ ...editingProduct, featured: e.target.checked })} className="h-4 w-4 accent-slate-900" />
+                          <input type="checkbox" checked={Boolean(editingProduct.featured)} onChange={(e) => setEditingProduct({ ...editingProduct, featured: e.target.checked })} className="h-4 w-4 accent-indigo-600" />
                         </label>
-                        <button type="submit" disabled={productSaving} className="w-full rounded-xl bg-slate-950 px-4 py-2.5 text-xs font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-white dark:text-slate-950">
-                          {productSaving ? 'Saving changes...' : 'Save product changes'}
+                        <button type="submit" disabled={productSaving} className="btn-3d-primary w-full rounded-xl px-4 py-2.5 text-xs font-bold text-white disabled:opacity-50">
+                          {productSaving ? 'Saving changes...' : 'Save Product, Photos & Discount'}
                         </button>
                       </form>
                     )}
 
-                    <form onSubmit={handleCreateProduct} className="space-y-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900 sm:p-5">
+                    <form onSubmit={handleCreateProduct} className="card-3d space-y-3.5 rounded-2xl bg-white p-4 dark:bg-slate-900 sm:p-5">
                       <div>
-                        <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400">New catalog item</div>
-                        <h3 className="mt-1 text-sm font-semibold text-slate-950 dark:text-white">Add a product</h3>
-                        <p className="mt-1 text-xs leading-5 text-slate-500">Set the price and starting stock. The system assigns the product SKU.</p>
+                        <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-indigo-600">New catalog item + Device Photo Upload</div>
+                        <h3 className="mt-1 text-sm font-bold text-slate-950 dark:text-white">Add a Product with Photos, Price, Discount & Description</h3>
+                        <p className="mt-1 text-xs leading-5 text-slate-500">
+                          Upload photos directly from your phone or computer. Photos are automatically compressed to WebP and deduplicated on disk so your store scales to millions of images.
+                        </p>
+                      </div>
+
+                      {/* Device Photo Upload Box */}
+                      <div className="rounded-2xl border-2 border-dashed border-indigo-200 dark:border-indigo-900/60 bg-indigo-50/40 dark:bg-slate-950 p-3.5 space-y-2.5">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-extrabold text-slate-900 dark:text-white flex items-center gap-1.5">
+                            <ImagePlus className="w-4 h-4 text-indigo-600" />
+                            1. Upload Product Photo(s) from Device
+                          </span>
+                          <span className="text-[10px] font-mono font-bold text-emerald-700 dark:text-emerald-400">
+                            Up to 4 Gallery Photos
+                          </span>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <label className="btn-3d-primary px-3.5 py-2 rounded-xl text-xs font-bold text-white cursor-pointer inline-flex items-center gap-1.5">
+                            <Upload className="w-3.5 h-3.5" />
+                            <span>{photoUploading ? 'Optimizing & Uploading...' : 'Choose Photo(s) from Device'}</span>
+                            <input
+                              type="file"
+                              accept="image/*"
+                              multiple
+                              className="hidden"
+                              onChange={(e) => compressAndUploadDevicePhotos(e.target.files, 'new')}
+                            />
+                          </label>
+                          {prodImageUrl && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setProdImageUrl('');
+                                setProdGallery([]);
+                              }}
+                              className="text-xs font-bold text-rose-600 hover:underline"
+                            >
+                              Remove
+                            </button>
+                          )}
+                        </div>
+                        {lastUploadStats && (
+                          <div className="text-[10px] font-mono text-emerald-800 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/40 px-2.5 py-1 rounded-lg">
+                            ✓ WebP Optimized ({Math.round(lastUploadStats.byteSize / 1024)} KB · Saved {lastUploadStats.savedPercent}% · SHA-256 #{lastUploadStats.sha256.slice(0, 8)})
+                          </div>
+                        )}
+                        {prodGallery.length > 0 && (
+                          <div className="flex items-center gap-2 pt-1 overflow-x-auto">
+                            {prodGallery.map((url, idx) => (
+                              <button
+                                key={idx}
+                                type="button"
+                                onClick={() => setProdImageUrl(url)}
+                                className={`relative rounded-xl overflow-hidden border-2 shrink-0 ${
+                                  prodImageUrl === url ? 'border-indigo-600 ring-2 ring-indigo-500/30' : 'border-slate-200'
+                                }`}
+                              >
+                                <img src={url} alt={`Uploaded ${idx + 1}`} className="h-14 w-14 object-cover" />
+                                {prodImageUrl === url && (
+                                  <span className="absolute bottom-0 inset-x-0 bg-indigo-600 text-white text-[8px] font-bold text-center">
+                                    Main
+                                  </span>
+                                )}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+
+                      <div>
+                        <label className="mb-1 block text-xs font-bold text-slate-700 dark:text-slate-300">Product name</label>
+                        <input required value={prodName} onChange={(e) => setProdName(e.target.value)} placeholder="e.g. Royal Embroidered Bisht or Signature Blend" className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-xs dark:border-slate-700 dark:bg-slate-950" />
                       </div>
                       <div>
-                        <label className="mb-1 block text-xs font-medium text-slate-700 dark:text-slate-300">Product name</label>
-                        <input required value={prodName} onChange={(e) => setProdName(e.target.value)} placeholder="e.g. Signature coffee blend" className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-xs dark:border-slate-700 dark:bg-slate-950" />
-                      </div>
-                      <div>
-                        <label className="mb-1 block text-xs font-medium text-slate-700 dark:text-slate-300">Category</label>
-                        <input required value={prodCat} onChange={(e) => setProdCat(e.target.value)} className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-xs dark:border-slate-700 dark:bg-slate-950" />
+                        <label className="mb-1 block text-xs font-bold text-slate-700 dark:text-slate-300">Category</label>
+                        <select
+                          value={storeCategories.includes(prodCat) ? prodCat : '__custom__'}
+                          onChange={(e) => {
+                            if (e.target.value !== '__custom__') setProdCat(e.target.value);
+                          }}
+                          className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold dark:border-slate-700 dark:bg-slate-950 mb-2"
+                        >
+                          {storeCategories.map((c) => (
+                            <option key={c} value={c}>{c}</option>
+                          ))}
+                          <option value="__custom__">+ Type a new category below</option>
+                        </select>
+                        <input required value={prodCat} onChange={(e) => setProdCat(e.target.value)} placeholder="Or type category name..." className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs dark:border-slate-700 dark:bg-slate-950" />
                       </div>
                       <div className="grid grid-cols-2 gap-3">
                         <div>
-                          <label className="mb-1 block text-xs font-medium text-slate-700 dark:text-slate-300">Price (ETB)</label>
-                          <input required type="number" min="0" step="0.01" value={prodPrice} onChange={(e) => setProdPrice(e.target.value)} className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-xs dark:border-slate-700 dark:bg-slate-950" />
+                          <label className="mb-1 block text-xs font-bold text-slate-700 dark:text-slate-300">Selling Price (ETB)</label>
+                          <input required type="number" min="0" step="0.01" value={prodPrice} onChange={(e) => setProdPrice(e.target.value)} placeholder="e.g. 129.99" className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-xs dark:border-slate-700 dark:bg-slate-950" />
                         </div>
                         <div>
-                          <label className="mb-1 block text-xs font-medium text-slate-700 dark:text-slate-300">Starting stock</label>
-                          <input required type="number" min="0" step="1" value={prodStock} onChange={(e) => setProdStock(e.target.value)} className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-xs dark:border-slate-700 dark:bg-slate-950" />
+                          <label className="mb-1 block text-xs font-bold text-slate-700 dark:text-slate-300">Starting stock</label>
+                          <input required type="number" min="0" step="1" value={prodStock} onChange={(e) => setProdStock(e.target.value)} placeholder="e.g. 25" className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-xs dark:border-slate-700 dark:bg-slate-950" />
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className="mb-1 block text-xs font-bold text-emerald-700 dark:text-emerald-400 flex items-center gap-1">
+                            <Percent className="w-3 h-3" /> Discount (% OFF)
+                          </label>
+                          <input
+                            type="number"
+                            min="0"
+                            max="95"
+                            value={prodDiscountPct}
+                            onChange={(e) => setProdDiscountPct(e.target.value)}
+                            placeholder="e.g. 25 for 25% OFF"
+                            className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs dark:border-slate-700 dark:bg-slate-950"
+                          />
+                        </div>
+                        <div>
+                          <label className="mb-1 block text-xs font-bold text-slate-700 dark:text-slate-300">Compare-at Price (Optional)</label>
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            value={prodComparePrice}
+                            onChange={(e) => setProdComparePrice(e.target.value)}
+                            placeholder="Auto-calculated if % set"
+                            className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs dark:border-slate-700 dark:bg-slate-950"
+                          />
                         </div>
                       </div>
                       <div>
-                        <label className="mb-1 block text-xs font-medium text-slate-700 dark:text-slate-300">Variations</label>
-                        <input value={prodVariations} onChange={(e) => setProdVariations(e.target.value)} placeholder="Small, Medium, Large" className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-xs dark:border-slate-700 dark:bg-slate-950" />
+                        <label className="mb-1 block text-xs font-bold text-slate-700 dark:text-slate-300">Sizes, Colors & Variations (comma-separated)</label>
+                        <input value={prodVariations} onChange={(e) => setProdVariations(e.target.value)} placeholder="S, M, L, XL, XXL · White, Black, Beige" className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-xs dark:border-slate-700 dark:bg-slate-950" />
                       </div>
                       <div>
-                        <label className="mb-1 block text-xs font-medium text-slate-700 dark:text-slate-300">Description (optional)</label>
-                        <textarea rows={2} value={prodDesc} onChange={(e) => setProdDesc(e.target.value)} className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-xs dark:border-slate-700 dark:bg-slate-950" />
+                        <label className="mb-1 block text-xs font-bold text-slate-700 dark:text-slate-300">Description</label>
+                        <textarea rows={2} value={prodDesc} onChange={(e) => setProdDesc(e.target.value)} placeholder="Describe fabric, quality, fit, delivery details..." className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-xs dark:border-slate-700 dark:bg-slate-950" />
                       </div>
-                      <button type="submit" disabled={productSaving} className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-slate-950 px-4 py-2.5 text-xs font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-white dark:text-slate-950">
-                        <Plus className="h-4 w-4" /> {productSaving ? 'Creating product...' : 'Add product'}
+                      <button type="submit" disabled={productSaving || photoUploading} className="btn-3d-primary inline-flex w-full items-center justify-center gap-2 rounded-xl px-4 py-3 text-xs font-bold text-white disabled:opacity-50">
+                        <Plus className="h-4 w-4" /> {productSaving ? 'Creating product...' : 'Add Product with Photos & Discount'}
                       </button>
                     </form>
 
-                    <form onSubmit={handleCreateService} className="space-y-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900 sm:p-5">
+                    <form onSubmit={handleCreateService} className="card-3d space-y-3 rounded-2xl bg-white p-4 dark:bg-slate-900 sm:p-5">
                       <div>
-                        <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400">Appointments & reservations</div>
-                        <h3 className="mt-1 text-sm font-semibold text-slate-950 dark:text-white">Add a bookable service</h3>
+                        <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-400">Appointments & reservations</div>
+                        <h3 className="mt-1 text-sm font-bold text-slate-950 dark:text-white">Add a bookable service</h3>
                         <p className="mt-1 text-xs leading-5 text-slate-500">Create the service customers can request through your storefront.</p>
                       </div>
                       <div>
@@ -1573,7 +2923,7 @@ export default function App() {
                         <label className="mb-1 block text-xs font-medium text-slate-700 dark:text-slate-300">Description (optional)</label>
                         <textarea rows={2} value={srvDesc} onChange={(e) => setSrvDesc(e.target.value)} className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-xs dark:border-slate-700 dark:bg-slate-950" />
                       </div>
-                      <button type="submit" disabled={serviceSaving} className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-slate-950 px-4 py-2.5 text-xs font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-white dark:text-slate-950">
+                      <button type="submit" disabled={serviceSaving} className="btn-3d-dark inline-flex w-full items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-xs font-bold text-white disabled:opacity-50">
                         <Plus className="h-4 w-4" /> {serviceSaving ? 'Creating service...' : 'Add service'}
                       </button>
                     </form>
@@ -1585,10 +2935,11 @@ export default function App() {
             {/* MODULE 4: ORDERS, BOOKINGS & PAYMENT METHODS */}
             {activeModule === 'orders' && workspace && (
               <div className="space-y-6">
+
                 <section className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
                   <div>
                     <div className="text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-400">Order operations</div>
-                    <h2 className="mt-1 text-2xl font-display font-semibold tracking-tight text-slate-950 dark:text-white">Orders & payments</h2>
+                    <h2 className="mt-1 text-2xl font-display font-semibold tracking-tight text-slate-950 dark:text-white">Orders & payments — {workspace.business?.name}</h2>
                     <p className="mt-1 max-w-2xl text-sm leading-6 text-slate-500 dark:text-slate-400">
                       Track orders, confirm received payments, and manage the account details customers use at checkout.
                     </p>
@@ -1607,22 +2958,70 @@ export default function App() {
                   </div>
                 )}
 
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-                  <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-                    <div className="text-xs text-slate-500">Total orders</div>
-                    <div className="mt-2 text-2xl font-semibold tabular-nums text-slate-950 dark:text-white">{workspace.orders.length}</div>
-                    <p className="mt-1 text-[11px] text-slate-500">Customer order records</p>
-                  </div>
-                  <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-                    <div className="text-xs text-slate-500">Awaiting payment verification</div>
-                    <div className="mt-2 text-2xl font-semibold tabular-nums text-slate-950 dark:text-white">{workspace.orders.filter((o: any) => o.payment_status === 'pending_verification').length}</div>
-                    <p className="mt-1 text-[11px] text-slate-500">Review incoming transfers</p>
-                  </div>
-                  <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-                    <div className="text-xs text-slate-500">Booking requests</div>
-                    <div className="mt-2 text-2xl font-semibold tabular-nums text-slate-950 dark:text-white">{workspace.bookings.filter((b: any) => b.status === 'requested').length}</div>
-                    <p className="mt-1 text-[11px] text-slate-500">Appointments needing a decision</p>
-                  </div>
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                  <button
+                    type="button"
+                    onClick={() => setOrderStatusFilter('all')}
+                    className={`text-left rounded-2xl border p-4 shadow-sm transition ${
+                      orderStatusFilter === 'all'
+                        ? 'border-indigo-500 bg-indigo-50/70 dark:bg-indigo-950/30 ring-2 ring-indigo-500/20'
+                        : 'border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900'
+                    }`}
+                  >
+                    <div className="text-xs font-bold text-slate-500">All Sales Orders</div>
+                    <div className="mt-2 text-2xl font-extrabold tabular-nums text-slate-950 dark:text-white">
+                      {workspace.orders.length}
+                    </div>
+                    <p className="mt-1 text-[11px] text-slate-500">Click to view all records</p>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setOrderStatusFilter('payment_requests')}
+                    className={`text-left rounded-2xl border p-4 shadow-sm transition ${
+                      orderStatusFilter === 'payment_requests'
+                        ? 'border-amber-500 bg-amber-50/80 dark:bg-amber-950/40 ring-2 ring-amber-500/20'
+                        : 'border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900'
+                    }`}
+                  >
+                    <div className="text-xs font-bold text-amber-700 dark:text-amber-400">Payment Requests</div>
+                    <div className="mt-2 text-2xl font-extrabold tabular-nums text-amber-900 dark:text-white">
+                      {workspace.orders.filter((o: any) => o.payment_status === 'pending_verification').length}
+                    </div>
+                    <p className="mt-1 text-[11px] text-amber-700 dark:text-amber-300">Awaiting transfer verification</p>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setOrderStatusFilter('finished')}
+                    className={`text-left rounded-2xl border p-4 shadow-sm transition ${
+                      orderStatusFilter === 'finished'
+                        ? 'border-emerald-500 bg-emerald-50/80 dark:bg-emerald-950/40 ring-2 ring-emerald-500/20'
+                        : 'border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900'
+                    }`}
+                  >
+                    <div className="text-xs font-bold text-emerald-700 dark:text-emerald-400">Finished Orders</div>
+                    <div className="mt-2 text-2xl font-extrabold tabular-nums text-emerald-900 dark:text-white">
+                      {workspace.orders.filter((o: any) => o.status === 'completed').length}
+                    </div>
+                    <p className="mt-1 text-[11px] text-emerald-700 dark:text-emerald-300">Completed & delivered</p>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setOrderStatusFilter('rejected')}
+                    className={`text-left rounded-2xl border p-4 shadow-sm transition ${
+                      orderStatusFilter === 'rejected'
+                        ? 'border-rose-500 bg-rose-50/80 dark:bg-rose-950/40 ring-2 ring-rose-500/20'
+                        : 'border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900'
+                    }`}
+                  >
+                    <div className="text-xs font-bold text-rose-700 dark:text-rose-400">Rejected / Cancelled</div>
+                    <div className="mt-2 text-2xl font-extrabold tabular-nums text-rose-900 dark:text-white">
+                      {workspace.orders.filter((o: any) => o.status === 'cancelled' || o.status === 'refunded' || o.payment_status === 'failed').length}
+                    </div>
+                    <p className="mt-1 text-[11px] text-rose-700 dark:text-rose-300">Rejected or refunded orders</p>
+                  </button>
                 </div>
 
                 {/* Multiple owner-managed checkout payment methods */}
@@ -1714,26 +3113,55 @@ export default function App() {
                 <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900 sm:p-5">
                   <div className="mb-4 flex flex-wrap items-end justify-between gap-2">
                     <div>
-                      <h3 className="text-sm font-semibold text-slate-950 dark:text-white">Customer orders</h3>
-                      <p className="mt-1 text-xs text-slate-500">Update order progress and delivery status for each request.</p>
+                      <h3 className="text-sm font-semibold text-slate-950 dark:text-white">
+                        Customer orders ({orderStatusFilter === 'all' ? 'All' : orderStatusFilter === 'payment_requests' ? 'Payment Requests' : orderStatusFilter === 'finished' ? 'Finished' : 'Rejected / Cancelled'})
+                      </h3>
+                      <p className="mt-1 text-xs text-slate-500">Update order progress, verify payment requests, or mark finished/rejected.</p>
                     </div>
-                    <span className="text-[11px] tabular-nums text-slate-400">{workspace.orders.length} records</span>
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      {(['all', 'payment_requests', 'finished', 'rejected'] as const).map((flt) => (
+                        <button
+                          key={flt}
+                          type="button"
+                          onClick={() => setOrderStatusFilter(flt)}
+                          className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition ${
+                            orderStatusFilter === flt
+                              ? 'bg-slate-950 text-white dark:bg-indigo-600'
+                              : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300'
+                          }`}
+                        >
+                          {flt === 'all' ? 'All' : flt === 'payment_requests' ? 'Payment Requests' : flt === 'finished' ? 'Finished' : 'Rejected'}
+                        </button>
+                      ))}
+                    </div>
                   </div>
                   <div className="space-y-3">
-                    {workspace.orders.length === 0 ? (
+                    {workspace.orders.filter((ord: any) => {
+                      if (orderStatusFilter === 'payment_requests') return ord.payment_status === 'pending_verification';
+                      if (orderStatusFilter === 'finished') return ord.status === 'completed';
+                      if (orderStatusFilter === 'rejected') return ord.status === 'cancelled' || ord.status === 'refunded' || ord.payment_status === 'failed';
+                      return true;
+                    }).length === 0 ? (
                       <div className="rounded-xl border border-dashed border-slate-300 px-4 py-9 text-center dark:border-slate-700">
                         <Package className="mx-auto h-6 w-6 text-slate-400" />
-                        <p className="mt-2 text-sm font-medium text-slate-800 dark:text-slate-200">No orders yet</p>
-                        <p className="mt-1 text-xs text-slate-500">New customer orders will appear here.</p>
+                        <p className="mt-2 text-sm font-medium text-slate-800 dark:text-slate-200">No matching orders in this filter</p>
+                        <p className="mt-1 text-xs text-slate-500">Switch filter above to view all customer orders.</p>
                       </div>
-                    ) : workspace.orders.map((ord: any) => (
+                    ) : workspace.orders
+                        .filter((ord: any) => {
+                          if (orderStatusFilter === 'payment_requests') return ord.payment_status === 'pending_verification';
+                          if (orderStatusFilter === 'finished') return ord.status === 'completed';
+                          if (orderStatusFilter === 'rejected') return ord.status === 'cancelled' || ord.status === 'refunded' || ord.payment_status === 'failed';
+                          return true;
+                        })
+                        .map((ord: any) => (
                       <article key={ord.id} className="rounded-xl border border-slate-200 p-4 dark:border-slate-800">
                         <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                           <div className="min-w-0 flex-1">
                             <div className="flex flex-wrap items-center gap-2">
                               <span className="font-mono text-sm font-semibold text-slate-950 dark:text-white">{ord.order_number}</span>
                               <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-600 dark:bg-slate-800 dark:text-slate-300">{String(ord.status).replace(/_/g, ' ')}</span>
-                              <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${ord.payment_status === 'paid' ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300' : ord.payment_status === 'pending_verification' ? 'bg-amber-50 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300' : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300'}`}>
+                              <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${ord.payment_status === 'paid' ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300' : ord.payment_status === 'pending_verification' ? 'bg-amber-50 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300' : ord.payment_status === 'failed' ? 'bg-rose-50 text-rose-700 dark:bg-rose-950/40 dark:text-rose-300' : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300'}`}>
                                 {String(ord.payment_status).replace(/_/g, ' ')}
                               </span>
                             </div>
@@ -1748,8 +3176,8 @@ export default function App() {
                               <option value="confirmed">Confirmed</option>
                               <option value="preparing">Preparing</option>
                               <option value="out_for_delivery">Out for delivery</option>
-                              <option value="completed">Completed</option>
-                              <option value="cancelled">Cancelled</option>
+                              <option value="completed">Completed (Finished)</option>
+                              <option value="cancelled">Cancelled (Rejected)</option>
                               <option value="refunded">Refunded</option>
                             </select>
                             <select value={ord.delivery_status} onChange={(e) => handleUpdateOrderStatus(ord.id, ord.status, e.target.value)} aria-label={'Delivery status for ' + ord.order_number} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs dark:border-slate-700 dark:bg-slate-950 sm:w-auto">
@@ -1769,8 +3197,8 @@ export default function App() {
                   {/* Business payments */}
                   <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900 sm:p-5">
                     <div>
-                      <h3 className="text-sm font-semibold text-slate-950 dark:text-white">Payment verification</h3>
-                      <p className="mt-1 text-xs leading-5 text-slate-500">Check your bank or mobile-money account first. Enter its real transaction reference before confirming receipt.</p>
+                      <h3 className="text-sm font-semibold text-slate-950 dark:text-white">Payment request data & verification</h3>
+                      <p className="mt-1 text-xs leading-5 text-slate-500">Check your bank or mobile-money account first. Enter its real transaction reference to verify receipt, or reject invalid payment requests.</p>
                     </div>
                     <div className="mt-3 space-y-3">
                       {workspace.payments.filter((p: any) => p.scope === 'business').length === 0 ? (
@@ -1793,6 +3221,11 @@ export default function App() {
                               {pay.status !== 'verified' && (
                                 <button type="button" disabled={verificationSaving} onClick={() => { setVerificationPaymentId(verificationPaymentId === pay.id ? '' : pay.id); setVerificationReference(''); setOrderManagementError(''); }} className="rounded-lg bg-slate-950 px-3 py-2 text-[11px] font-semibold text-white transition hover:bg-slate-800 disabled:opacity-50 dark:bg-white dark:text-slate-950">
                                   Verify receipt
+                                </button>
+                              )}
+                              {pay.status === 'pending' && (
+                                <button type="button" disabled={verificationSaving} onClick={() => handleVerifyPayment(pay.id, 'fail')} className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-[11px] font-semibold text-rose-700 hover:bg-rose-100 disabled:opacity-50 dark:border-rose-900/50 dark:bg-rose-950/30 dark:text-rose-300">
+                                  Reject request
                                 </button>
                               )}
                               {pay.status === 'verified' && (
@@ -2691,131 +4124,704 @@ export default function App() {
                   loadAccountAndBusinesses();
                   loadTenantWorkspace(selectedBusinessId);
                 }}
+                onPreviewBusiness={(bizId) => {
+                  setSelectedBusinessId(bizId);
+                  setStorefrontCustomerOnly(false);
+                  setFullStorefrontOpen(true);
+                }}
+                onEditBusinessCatalog={(bizId) => {
+                  setSelectedBusinessId(bizId);
+                  setActiveModule('commerce');
+                }}
+                onOpenCreateBusiness={() => setNewBizModalOpen(true)}
               />
+            )}
+
+            {/* MODULE 12: MORE HUB — MOVED ACTION BUTTONS + MY BUSINESS LIST + WORKSPACE TOOLS */}
+            {activeModule === 'more' && (
+              <div className="space-y-6">
+                {/* 1. Moved Storefront & Platform Controls (The 4 Requested Buttons) */}
+                <section className="card-3d rounded-2xl bg-white dark:bg-slate-900 p-5 space-y-4">
+                  <div>
+                    <div className="text-[10px] font-extrabold uppercase tracking-[0.18em] text-indigo-600 dark:text-indigo-400">
+                      Quick Store & Platform Actions
+                    </div>
+                    <h2 className="mt-0.5 text-base font-display font-extrabold text-slate-950 dark:text-white">
+                      Store Creation, Entry Preview, Telegram Guide & Language
+                    </h2>
+                    <p className="text-xs text-slate-500">
+                      Moved here from the storefront and header so your storefront preview and workspace remain clean and uncluttered.
+                    </p>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
+                    {/* Button 1: New Business App */}
+                    <button
+                      type="button"
+                      onClick={() => setNewBizModalOpen(true)}
+                      className="btn-3d-primary rounded-2xl p-4 text-left text-white flex flex-col justify-between gap-3"
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="w-9 h-9 rounded-xl bg-white/20 flex items-center justify-center">
+                          <Plus className="w-5 h-5 text-white" />
+                        </span>
+                        <span className="text-[10px] font-extrabold uppercase tracking-wider px-2 py-0.5 rounded-full bg-white/20">
+                          Create
+                        </span>
+                      </div>
+                      <div>
+                        <div className="font-display font-extrabold text-sm">New Business App</div>
+                        <div className="text-[11px] text-indigo-100 mt-0.5">
+                          Launch a new Telegram & Web store
+                        </div>
+                      </div>
+                    </button>
+
+                    {/* Button 2: Open Store for Entry Preview */}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setStorefrontCustomerOnly(false);
+                        setFullStorefrontOpen(true);
+                      }}
+                      className="btn-3d-emerald rounded-2xl p-4 text-left text-white flex flex-col justify-between gap-3"
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="w-9 h-9 rounded-xl bg-white/20 flex items-center justify-center">
+                          <Eye className="w-5 h-5 text-white" />
+                        </span>
+                        <span className="text-[10px] font-extrabold uppercase tracking-wider px-2 py-0.5 rounded-full bg-white/20">
+                          Live View
+                        </span>
+                      </div>
+                      <div>
+                        <div className="font-display font-extrabold text-sm">Open Store for Entry Preview</div>
+                        <div className="text-[11px] text-emerald-100 mt-0.5 truncate">
+                          Preview {activeBusiness?.name || 'current store'}
+                        </div>
+                      </div>
+                    </button>
+
+                    {/* Button 3: How Store and Telegram Works */}
+                    <button
+                      type="button"
+                      onClick={() => setLaunchGuideOpen(true)}
+                      className="btn-3d-white rounded-2xl p-4 text-left flex flex-col justify-between gap-3 border-emerald-200"
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="w-9 h-9 rounded-xl bg-emerald-50 text-emerald-700 flex items-center justify-center">
+                          <Send className="w-4 h-4" />
+                        </span>
+                        <span className="text-[10px] font-extrabold uppercase tracking-wider px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">
+                          Guide
+                        </span>
+                      </div>
+                      <div>
+                        <div className="font-display font-extrabold text-sm text-slate-950 dark:text-white">
+                          How Store & Telegram Works
+                        </div>
+                        <div className="text-[11px] text-slate-500 mt-0.5">
+                          Step-by-step Telegram & channel setup
+                        </div>
+                      </div>
+                    </button>
+
+                    {/* Button 4: English / Language Button */}
+                    <div className="card-3d rounded-2xl p-4 bg-slate-50/80 dark:bg-slate-950/60 flex flex-col justify-between gap-3">
+                      <div className="flex items-center justify-between">
+                        <span className="w-9 h-9 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center">
+                          <Globe className="w-4 h-4" />
+                        </span>
+                        <span className="text-[10px] font-extrabold uppercase tracking-wider px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-800">
+                          {LANGUAGE_LABELS[lang]}
+                        </span>
+                      </div>
+                      <div>
+                        <div className="font-display font-extrabold text-sm text-slate-950 dark:text-white mb-2">
+                          Language ({LANGUAGE_LABELS[lang]})
+                        </div>
+                        <div className="flex flex-wrap gap-1.5">
+                          {(['en', 'am', 'om'] as LanguageCode[]).map((code) => (
+                            <button
+                              key={code}
+                              type="button"
+                              onClick={() => setLang(code)}
+                              className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition ${
+                                lang === code
+                                  ? 'bg-indigo-600 text-white shadow-xs'
+                                  : 'bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300'
+                              }`}
+                            >
+                              {LANGUAGE_LABELS[code]}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </section>
+
+                {/* 2. MY BUSINESS LIST ('Business' Section — Role-Aware: Admin sees all by Category + What They Sell; Store Owner sees ONLY their own store) */}
+                <section className="card-3d rounded-2xl bg-white dark:bg-slate-900 p-5 space-y-4">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 dark:border-slate-800 pb-4">
+                    <div>
+                      <div className="inline-flex items-center gap-1.5 text-[10px] font-extrabold uppercase tracking-[0.18em] text-indigo-600 dark:text-indigo-400">
+                        <Building2 className="w-3.5 h-3.5" />
+                        {currentUser?.platform_role === 'super_admin'
+                          ? 'Platform Admin · Complete Business Directory by Category'
+                          : 'Store Owner · My Isolated Business List'}
+                      </div>
+                      <h2 className="mt-0.5 text-lg font-display font-extrabold text-slate-950 dark:text-white">
+                        {currentUser?.platform_role === 'super_admin'
+                          ? `All Platform Businesses (${businesses.length} Stores)`
+                          : `My Store (${businesses.length} Owned Store)`}
+                      </h2>
+                      <p className="text-xs text-slate-500">
+                        {currentUser?.platform_role === 'super_admin'
+                          ? 'Filter businesses by category, click any store to preview its live page, inspect what they are selling, block/pause, delete, or add a new business.'
+                          : 'Strict Role Isolation: As a Store Owner, you only see and manage the store(s) owned by your account. Other businesses on the platform are hidden.'}
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2 shrink-0 self-start sm:self-auto">
+                      {currentUser?.platform_role === 'super_admin' && (
+                        <button
+                          type="button"
+                          onClick={() => setActiveModule('superadmin')}
+                          className="btn-3d-white px-3.5 py-2.5 rounded-xl text-xs font-bold text-indigo-700 inline-flex items-center gap-1.5"
+                        >
+                          <ShieldAlert className="w-4 h-4" />
+                          Manage Owners & Customers
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => setNewBizModalOpen(true)}
+                        className="btn-3d-primary px-4 py-2.5 rounded-xl text-xs font-bold text-white inline-flex items-center gap-2"
+                      >
+                        <Plus className="w-4 h-4" />
+                        Create New Store
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Category Filter Pills (shown when Admin views all businesses across categories) */}
+                  {currentUser?.platform_role === 'super_admin' && (
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      {[
+                        { id: 'all', label: `All Categories (${businesses.length})` },
+                        { id: 'retail', label: 'Retail & Boutique' },
+                        { id: 'coffee_shop', label: 'Coffee & Roastery' },
+                        { id: 'hotel', label: 'Hotel & Hospitality' },
+                        { id: 'salon', label: 'Salon & Wellness' },
+                        { id: 'restaurant', label: 'Restaurant & Dining' },
+                        { id: 'real_estate', label: 'Real Estate' },
+                      ].map((cat) => {
+                        const count = cat.id === 'all' ? businesses.length : businesses.filter((b: any) => b.category === cat.id).length;
+                        if (cat.id !== 'all' && count === 0) return null;
+                        return (
+                          <button
+                            key={cat.id}
+                            type="button"
+                            onClick={() => setAdminCategoryFilter(cat.id)}
+                            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition ${
+                              adminCategoryFilter === cat.id
+                                ? 'bg-indigo-600 text-white shadow-xs'
+                                : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200'
+                            }`}
+                          >
+                            {cat.label} {cat.id !== 'all' ? `(${count})` : ''}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  <div className="divide-y divide-slate-100 dark:divide-slate-800 border border-slate-200/90 dark:border-slate-800 rounded-2xl bg-slate-50/40 dark:bg-slate-950/30">
+                    {businesses
+                      .filter((b: any) => currentUser?.platform_role !== 'super_admin' || adminCategoryFilter === 'all' || b.category === adminCategoryFilter)
+                      .map((biz: any) => {
+                        const isSelected = biz.id === selectedBusinessId;
+                        const isPaused = biz.status === 'paused' || biz.status === 'suspended';
+                        const isCatalogExpanded = expandedCatalogBizId === biz.id;
+                        const catalogProducts = Array.isArray(biz.catalogProducts) ? biz.catalogProducts : [];
+                        const catalogServices = Array.isArray(biz.catalogServices) ? biz.catalogServices : [];
+                        return (
+                          <div
+                            key={biz.id}
+                            className={`px-4 py-4 transition space-y-3 ${
+                              isSelected
+                                ? 'bg-indigo-50/60 dark:bg-indigo-950/30'
+                                : 'hover:bg-white dark:hover:bg-slate-900/90'
+                            }`}
+                          >
+                            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+                              <div className="flex items-center gap-3.5 min-w-0">
+                                <span
+                                  className="w-11 h-11 rounded-2xl flex items-center justify-center text-white font-display font-extrabold text-sm shadow-sm shrink-0"
+                                  style={{ backgroundColor: biz.primary_color || '#4f46e5' }}
+                                >
+                                  {String(biz.name || 'B').slice(0, 2).toUpperCase()}
+                                </span>
+                                <div className="min-w-0">
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setSelectedBusinessId(biz.id);
+                                        setStatusBanner(`Switched active business to "${biz.name}".`);
+                                      }}
+                                      className="font-display font-extrabold text-sm text-slate-950 dark:text-white hover:text-indigo-600 transition text-left"
+                                    >
+                                      {biz.name}
+                                    </button>
+                                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase bg-slate-200/80 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
+                                      {String(biz.category || 'retail').replace(/_/g, ' ')}
+                                    </span>
+                                    {isSelected && (
+                                      <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold uppercase bg-indigo-600 text-white">
+                                        Active Store
+                                      </span>
+                                    )}
+                                    <span
+                                      className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${
+                                        isPaused
+                                          ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300'
+                                          : 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300'
+                                      }`}
+                                    >
+                                      {biz.status || 'active'}
+                                    </span>
+                                  </div>
+                                  <div className="text-xs text-slate-500 flex flex-wrap items-center gap-x-3 gap-y-0.5 mt-1">
+                                    {biz.owner_name && (
+                                      <>
+                                        <span>Owner: <strong className="text-slate-700 dark:text-slate-300">{biz.owner_name}</strong> ({biz.owner_uid})</span>
+                                        <span>·</span>
+                                      </>
+                                    )}
+                                    <span className="font-semibold text-slate-700 dark:text-slate-300 tabular-nums">
+                                      {Number(biz.verifiedRevenue || 0).toLocaleString()} ETB sales
+                                    </span>
+                                    <span>·</span>
+                                    <span className="text-emerald-700 dark:text-emerald-400 font-semibold">{biz.finishedOrdersCount ?? biz.paidOrdersCount ?? 0} finished</span>
+                                    <span>·</span>
+                                    <span className="text-amber-700 dark:text-amber-400 font-semibold">{biz.pendingPaymentRequestsCount ?? biz.pendingOrdersCount ?? 0} pay requests</span>
+                                    <span>·</span>
+                                    <span className="text-rose-600 dark:text-rose-400 font-semibold">{biz.rejectedOrdersCount ?? 0} rejected</span>
+                                  </div>
+                                </div>
+                              </div>
+
+                              <div className="flex flex-wrap items-center gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => setExpandedCatalogBizId(isCatalogExpanded ? null : biz.id)}
+                                  className="btn-3d-white px-3 py-1.5 rounded-xl text-xs font-bold inline-flex items-center gap-1.5 text-indigo-700"
+                                >
+                                  <ShoppingBag className="w-3.5 h-3.5" />
+                                  {isCatalogExpanded ? 'Hide What They Sell' : `What They Sell (${catalogProducts.length + catalogServices.length})`}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setSelectedBusinessId(biz.id);
+                                    setStorefrontCustomerOnly(false);
+                                    setFullStorefrontOpen(true);
+                                  }}
+                                  className="btn-3d-emerald px-3 py-1.5 rounded-xl text-xs font-bold inline-flex items-center gap-1.5 text-white"
+                                >
+                                  <Eye className="w-3.5 h-3.5" />
+                                  Preview Page
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setSelectedBusinessId(biz.id);
+                                    setActiveModule('builder');
+                                  }}
+                                  className="btn-3d-white px-3 py-1.5 rounded-xl text-xs font-bold inline-flex items-center gap-1.5 text-indigo-700"
+                                >
+                                  <Layers className="w-3.5 h-3.5" />
+                                  Edit Builder
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setSelectedBusinessId(biz.id);
+                                    setActiveModule('commerce');
+                                  }}
+                                  className="btn-3d-white px-3 py-1.5 rounded-xl text-xs font-bold inline-flex items-center gap-1.5"
+                                >
+                                  <Package className="w-3.5 h-3.5 text-violet-600" />
+                                  Products
+                                </button>
+                                {isPaused ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleBrandQuickAction(biz.id, 'resume')}
+                                    className="btn-3d-white px-3 py-1.5 rounded-xl text-xs font-bold inline-flex items-center gap-1.5 text-emerald-700"
+                                  >
+                                    <PlayCircle className="w-3.5 h-3.5" />
+                                    Unblock / Resume
+                                  </button>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleBrandQuickAction(biz.id, 'pause')}
+                                    className="btn-3d-white px-3 py-1.5 rounded-xl text-xs font-bold inline-flex items-center gap-1.5 text-amber-700"
+                                  >
+                                    <PauseCircle className="w-3.5 h-3.5" />
+                                    Block / Pause
+                                  </button>
+                                )}
+                                {(currentUser?.platform_role === 'super_admin' || businesses.length > 1) && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleBrandQuickAction(biz.id, 'delete')}
+                                    className="btn-3d-white px-3 py-1.5 rounded-xl text-xs font-bold inline-flex items-center gap-1.5 text-rose-600"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                    Delete
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+
+                            {/* Expandable "What They Are Selling" Catalog Drawer */}
+                            {isCatalogExpanded && (
+                              <div className="p-3.5 rounded-2xl bg-white dark:bg-slate-900 border border-indigo-200/80 dark:border-indigo-900/50 space-y-2.5">
+                                <div className="flex items-center justify-between">
+                                  <span className="text-[11px] font-extrabold uppercase tracking-wider text-indigo-600 dark:text-indigo-400">
+                                    What {biz.name} Is Selling ({catalogProducts.length} Products · {catalogServices.length} Services)
+                                  </span>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setSelectedBusinessId(biz.id);
+                                      setStorefrontCustomerOnly(false);
+                                      setFullStorefrontOpen(true);
+                                    }}
+                                    className="text-xs font-bold text-emerald-600 hover:underline"
+                                  >
+                                    Open Full Storefront Preview →
+                                  </button>
+                                </div>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
+                                  {catalogProducts.map((prod: any) => (
+                                    <div key={prod.id} className="flex items-center gap-2.5 p-2 rounded-xl border border-slate-200/80 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-950/50">
+                                      {prod.image_url ? (
+                                        <img src={prod.image_url} alt={prod.name} className="w-10 h-10 rounded-lg object-cover shrink-0 bg-slate-200" />
+                                      ) : (
+                                        <div className="w-10 h-10 rounded-lg bg-indigo-100 text-indigo-700 flex items-center justify-center font-bold text-xs shrink-0">
+                                          {String(prod.name || 'P').slice(0, 1)}
+                                        </div>
+                                      )}
+                                      <div className="min-w-0 flex-1">
+                                        <div className="text-xs font-bold text-slate-900 dark:text-white truncate">{prod.name}</div>
+                                        <div className="text-[10px] text-slate-500 truncate">{prod.category} · Stock: {prod.stock}</div>
+                                      </div>
+                                      <div className="text-right shrink-0">
+                                        <div className="text-xs font-extrabold text-slate-900 dark:text-white tabular-nums">
+                                          {Number(prod.discount_price || prod.price || 0).toLocaleString()} ETB
+                                        </div>
+                                      </div>
+                                    </div>
+                                  ))}
+                                  {catalogServices.map((svc: any) => (
+                                    <div key={svc.id} className="flex items-center justify-between gap-2 p-2 rounded-xl border border-violet-200/70 dark:border-violet-900/40 bg-violet-50/30 dark:bg-violet-950/20">
+                                      <div className="min-w-0">
+                                        <div className="text-xs font-bold text-slate-900 dark:text-white truncate">{svc.name}</div>
+                                        <div className="text-[10px] text-violet-600 dark:text-violet-300">{svc.category} · {svc.duration_minutes} mins</div>
+                                      </div>
+                                      <div className="text-xs font-extrabold text-slate-900 dark:text-white tabular-nums shrink-0">
+                                        {Number(svc.price || 0).toLocaleString()} ETB
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                  </div>
+                </section>
+
+                {/* 3. Additional Workspace Tools & Administration */}
+                <section className="card-3d rounded-2xl bg-white dark:bg-slate-900 p-5 space-y-4">
+                  <div>
+                    <div className="text-[10px] font-extrabold uppercase tracking-[0.18em] text-slate-400">
+                      All Workspace Tools
+                    </div>
+                    <h3 className="mt-0.5 text-sm font-display font-extrabold text-slate-950 dark:text-white">
+                      Jump to Any Business Management Section
+                    </h3>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                    {[
+                      { id: 'commerce', label: t.commerce, desc: 'Add products, device photos & discounts', icon: Package },
+                      { id: 'analytics', label: t.analytics, desc: 'Traffic, funnel & revenue analytics', icon: BarChart3 },
+                      { id: 'team', label: t.teamBranches, desc: 'Employees, roles, branches & expenses', icon: Users },
+                      { id: 'marketing', label: t.marketing, desc: 'Promo codes, loyalty & broadcasts', icon: Megaphone },
+                      { id: 'telegram', label: t.telegramSetup, desc: 'Bot token, channel link & web domain', icon: Send },
+                      { id: 'subscriptions', label: t.subscriptions, desc: 'Plans, billing & marketplace add-ons', icon: CreditCard },
+                      ...(currentUser?.platform_role === 'super_admin'
+                        ? [{ id: 'superadmin', label: t.superAdmin, desc: 'Platform-wide super administration', icon: ShieldAlert }]
+                        : []),
+                    ].map((tool) => {
+                      const Icon = tool.icon;
+                      return (
+                        <button
+                          key={tool.id}
+                          type="button"
+                          onClick={() => setActiveModule(tool.id as ActiveModule)}
+                          className="card-3d rounded-2xl p-4 text-left bg-slate-50/70 dark:bg-slate-950/50 hover:bg-white transition flex items-start gap-3"
+                        >
+                          <span className="w-9 h-9 rounded-xl bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 flex items-center justify-center shrink-0">
+                            <Icon className="w-4 h-4" />
+                          </span>
+                          <div className="min-w-0">
+                            <div className="font-display font-extrabold text-xs text-slate-950 dark:text-white">
+                              {tool.label}
+                            </div>
+                            <div className="text-[11px] text-slate-500 mt-0.5">
+                              {tool.desc}
+                            </div>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </section>
+              </div>
             )}
           </main>
         </div>
       )}
 
       {!fullStorefrontOpen && (
-        <>
-          {mobileMoreOpen && (
-            <div className="telebiz-mobile-more fixed inset-x-3 bottom-[82px] z-50 rounded-2xl border border-slate-200 bg-white p-2 shadow-2xl shadow-slate-950/15 dark:border-slate-700 dark:bg-slate-900 lg:hidden">
-              <p className="px-3 py-2 text-[10px] font-bold uppercase tracking-[0.16em] text-slate-400">More workspace tools</p>
-              {[
-                { id: 'commerce', label: t.commerce, icon: Package },
-                { id: 'analytics', label: t.analytics, icon: BarChart3 },
-                { id: 'team', label: t.teamBranches, icon: Users },
-                { id: 'marketing', label: t.marketing, icon: Megaphone },
-                { id: 'telegram', label: t.telegramSetup, icon: Send },
-                { id: 'subscriptions', label: t.subscriptions, icon: CreditCard },
-                ...(currentUser?.platform_role === 'super_admin' ? [{ id: 'superadmin', label: t.superAdmin, icon: ShieldAlert }] : []),
-              ].map((item) => {
-                const Icon = item.icon;
-                return (
-                  <button
-                    key={item.id}
-                    type="button"
-                    onClick={() => { setActiveModule(item.id as ActiveModule); setMobileMoreOpen(false); }}
-                    className="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-xs font-semibold text-slate-700 transition hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-800"
-                  >
-                    <Icon className="h-4 w-4 text-indigo-500" />
-                    {item.label}
-                  </button>
-                );
-              })}
-            </div>
-          )}
-          <nav className="telebiz-mobile-nav fixed inset-x-0 bottom-0 z-40 grid grid-cols-5 gap-1 border-t border-slate-200 bg-white/95 px-2 pt-2 shadow-[0_-8px_30px_rgba(15,23,42,0.08)] backdrop-blur-xl dark:border-slate-800 dark:bg-slate-950/95 lg:hidden" aria-label="Business navigation">
-            {[
-              { id: 'overview', label: 'Home', icon: LayoutDashboard },
-              { id: 'builder', label: 'Builder', icon: Layers },
-              { id: 'orders', label: 'Orders', icon: ShoppingCart },
-              { id: 'support', label: 'Support', icon: MessageSquare },
-              { id: 'more', label: 'More', icon: MoreHorizontal },
-            ].map((item) => {
-              const Icon = item.icon;
-              const active = item.id === 'more' ? mobileMoreOpen : activeModule === item.id;
-              return (
-                <button
-                  key={item.id}
-                  type="button"
-                  onClick={() => item.id === 'more'
-                    ? setMobileMoreOpen((open) => !open)
-                    : (setActiveModule(item.id as ActiveModule), setMobileMoreOpen(false))}
-                  aria-current={item.id !== 'more' && active ? 'page' : undefined}
-                  aria-expanded={item.id === 'more' ? mobileMoreOpen : undefined}
-                  className={'flex min-w-0 flex-col items-center justify-center gap-1 rounded-xl px-1 py-2 text-[10px] font-semibold transition ' + (
-                    active ? 'bg-indigo-50 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300' : 'text-slate-500 hover:bg-slate-50 dark:text-slate-400 dark:hover:bg-slate-900'
-                  )}
-                >
-                  <Icon className="h-5 w-5" />
-                  <span>{item.label}</span>
-                </button>
-              );
-            })}
-          </nav>
-        </>
+        <nav className="telebiz-mobile-nav fixed inset-x-0 bottom-0 z-40 grid grid-cols-5 gap-1 border-t border-slate-200 bg-white/95 px-2 pt-2 shadow-[0_-8px_30px_rgba(15,23,42,0.08)] backdrop-blur-xl dark:border-slate-800 dark:bg-slate-950/95 lg:hidden" aria-label="Business navigation">
+          {[
+            { id: 'overview', label: 'Home', icon: LayoutDashboard },
+            { id: 'builder', label: 'Builder', icon: Layers },
+            { id: 'orders', label: 'Orders', icon: ShoppingCart },
+            { id: 'support', label: 'Support', icon: MessageSquare },
+            { id: 'more', label: 'More', icon: MoreHorizontal },
+          ].map((item) => {
+            const Icon = item.icon;
+            const active = activeModule === item.id;
+            return (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => {
+                  setActiveModule(item.id as ActiveModule);
+                  setMobileMoreOpen(false);
+                }}
+                aria-current={active ? 'page' : undefined}
+                className={'flex min-w-0 flex-col items-center justify-center gap-1 rounded-xl px-1 py-2 text-[10px] font-semibold transition ' + (
+                  active ? 'bg-indigo-50 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300' : 'text-slate-500 hover:bg-slate-50 dark:text-slate-400 dark:hover:bg-slate-900'
+                )}
+              >
+                <Icon className="h-5 w-5" />
+                <span>{item.label}</span>
+              </button>
+            );
+          })}
+        </nav>
       )}
 
-      {/* MODAL: CREATE NEW BUSINESS MINI APP (3 CREATION METHODS) */}
+      {/* MODAL: CREATE NEW BUSINESS MINI APP (WITH VISUAL TEMPLATES & LIVE PREVIEW) */}
       {newBizModalOpen && (
-        <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl max-w-xl w-full p-6 space-y-4 text-xs">
-            <div className="flex items-center justify-between">
-              <h3 className="text-base font-display font-bold text-slate-900 dark:text-white">
-                Create New Business Mini App & Web Storefront
-              </h3>
-              <button type="button" onClick={() => setNewBizModalOpen(false)} className="text-slate-500">
+        <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
+          <div className="card-3d bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl max-w-3xl w-full p-6 space-y-5 text-xs my-8 max-h-[92vh] overflow-y-auto">
+            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-4">
+              <div>
+                <span className="text-[10px] font-extrabold uppercase tracking-widest text-emerald-700">
+                  Instant Visual Storefront Generator
+                </span>
+                <h3 className="text-lg font-display font-extrabold text-slate-950 dark:text-white mt-0.5">
+                  Create Your Business Storefront & Telegram Mini App
+                </h3>
+                <p className="text-slate-500 mt-0.5">
+                  Pick a visual template below — we automatically build your store with sample categories, products, and checkout so you can preview and edit immediately.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setNewBizModalOpen(false)}
+                className="btn-3d-white px-3.5 py-2 rounded-xl font-bold"
+              >
                 Close
               </button>
             </div>
 
-            <form onSubmit={handleCreateBusiness} className="space-y-3">
+            <form onSubmit={handleCreateBusiness} className="space-y-4">
+              {/* STEP 1: VISUAL STOREFRONT TEMPLATE PICKER */}
               <div>
-                <label className="block font-medium text-slate-700 dark:text-slate-300 mb-1">
-                  Choose Creation Method
+                <label className="block font-extrabold text-slate-900 dark:text-white mb-2">
+                  Step 1 — Choose Your Visual Storefront Template (Auto-Populates Products & Categories)
                 </label>
-                <div className="grid grid-cols-3 gap-2">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                   {[
-                    { id: 'self_service', label: '1. Visual Builder' },
-                    { id: 'ai_builder', label: '2. AI-Powered Builder' },
-                    { id: 'done_for_you', label: '3. Done-For-You Service' },
+                    {
+                      id: 'royal_boutique',
+                      cat: 'retail',
+                      title: 'Al-Saudia Luxury Boutique',
+                      subtitle: 'Thobes, Apparel, Watches & Retail',
+                      primary: '#0F382A',
+                      accent: '#C69C53',
+                      cats: ['Thobes', 'Agal', 'Bishts', 'Jalabiyas', 'Accessories'],
+                      badge: 'Matches Reference Photo',
+                    },
+                    {
+                      id: 'artisanal_coffee',
+                      cat: 'coffee_shop',
+                      title: 'Specialty Coffee & Roastery',
+                      subtitle: 'Roasted Beans, Espresso & Gifts',
+                      primary: '#3C2415',
+                      accent: '#C69C53',
+                      cats: ['Whole Bean', 'Ground', 'Brew Gear', 'Pastry'],
+                      badge: 'Popular Cafe',
+                    },
+                    {
+                      id: 'digital_menu',
+                      cat: 'restaurant',
+                      title: 'Fine Dining & Fast Delivery',
+                      subtitle: 'Platters, Grill, Drinks & Table Booking',
+                      primary: '#7C2D12',
+                      accent: '#D97706',
+                      cats: ['Signature Platters', 'Mains', 'Beverages', 'Desserts'],
+                      badge: 'Food & Menu',
+                    },
+                    {
+                      id: 'luxury_hotel',
+                      cat: 'hotel',
+                      title: 'Hospitality & Resort Suites',
+                      subtitle: 'Room Bookings, Spa & Airport Transfer',
+                      primary: '#1E293B',
+                      accent: '#B45309',
+                      cats: ['Suites', 'Dining', 'Spa Packages', 'VIP Transfers'],
+                      badge: 'Bookings + Store',
+                    },
+                    {
+                      id: 'wellness_salon',
+                      cat: 'salon',
+                      title: 'Beauty, Oud & Wellness Spa',
+                      subtitle: 'Skincare, Fragrances & Appointments',
+                      primary: '#4A1D36',
+                      accent: '#D4AF37',
+                      cats: ['Oud & Perfumes', 'Skincare', 'Hair Care', 'Spa'],
+                      badge: 'Beauty & Appointments',
+                    },
+                  ].map((tpl) => {
+                    const selected = newBizTemplate === tpl.id;
+                    return (
+                      <button
+                        key={tpl.id}
+                        type="button"
+                        onClick={() => {
+                          setNewBizTemplate(tpl.id);
+                          setNewBizCategory(tpl.cat);
+                          if (!newBizName) {
+                            setNewBizName(tpl.title);
+                          }
+                          if (!newBizDesc) {
+                            setNewBizDesc(`${tpl.title} — ${tpl.subtitle}. Crafted for modern lifestyle.`);
+                          }
+                        }}
+                        className={`text-left rounded-2xl p-3.5 border transition flex flex-col justify-between ${
+                          selected
+                            ? 'border-emerald-700 bg-emerald-50/70 dark:bg-emerald-950/40 ring-2 ring-emerald-600/20 shadow-md'
+                            : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:border-slate-300'
+                        }`}
+                      >
+                        <div>
+                          {/* Mini visual header preview inside template card */}
+                          <div
+                            className="rounded-xl p-2.5 mb-2.5 text-white flex items-center justify-between"
+                            style={{ backgroundColor: tpl.primary }}
+                          >
+                            <div>
+                              <span
+                                className="inline-block text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded mb-1"
+                                style={{ backgroundColor: tpl.accent, color: '#1C1917' }}
+                              >
+                                {tpl.badge}
+                              </span>
+                              <div className="font-serif font-bold text-xs truncate">{tpl.title}</div>
+                            </div>
+                            <span className="w-6 h-6 rounded-full bg-white/15 flex items-center justify-center text-[10px]">
+                              🛍️
+                            </span>
+                          </div>
+                          <div className="text-[11px] font-semibold text-slate-600 dark:text-slate-300">
+                            {tpl.subtitle}
+                          </div>
+                        </div>
+                        <div className="mt-2.5 pt-2 border-t border-slate-100 dark:border-slate-800 flex flex-wrap gap-1">
+                          {tpl.cats.slice(0, 3).map((c) => (
+                            <span
+                              key={c}
+                              className="px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-[9px] font-bold text-slate-600 dark:text-slate-300"
+                            >
+                              {c}
+                            </span>
+                          ))}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* STEP 2: CREATION MODE */}
+              <div>
+                <label className="block font-extrabold text-slate-900 dark:text-white mb-1.5">
+                  Step 2 — How Would You Like to Build & Manage?
+                </label>
+                <div className="grid grid-cols-3 gap-2.5">
+                  {[
+                    { id: 'self_service', label: '1. Visual Self-Service Builder', sub: 'Instant template + live edit' },
+                    { id: 'ai_builder', label: '2. AI-Powered Store Builder', sub: 'Describe & auto-customize' },
+                    { id: 'done_for_you', label: '3. Done-For-You Concierge', sub: 'Our team builds it for you' },
                   ].map((m) => (
                     <button
                       key={m.id}
                       type="button"
                       onClick={() => setNewBizMethod(m.id as any)}
-                      className={`p-2.5 rounded-lg border text-center font-semibold ${
+                      className={`p-3 rounded-xl border text-left transition ${
                         newBizMethod === m.id
-                          ? 'border-sky-600 bg-sky-50 dark:bg-sky-950 text-sky-900 dark:text-sky-200'
+                          ? 'border-emerald-700 bg-emerald-50/70 dark:bg-emerald-950/40 text-emerald-950 dark:text-emerald-200 font-bold'
                           : 'border-slate-200 dark:border-slate-800'
                       }`}
                     >
-                      {m.label}
+                      <div className="font-bold">{m.label}</div>
+                      <div className="text-[10px] text-slate-500 mt-0.5">{m.sub}</div>
                     </button>
                   ))}
                 </div>
               </div>
 
+              {/* STEP 3: STORE DETAILS */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className="block font-medium mb-1">Business Name</label>
+                  <label className="block font-bold mb-1">Store / Brand Name</label>
                   <input
                     type="text"
                     value={newBizName}
                     onChange={(e) => setNewBizName(e.target.value)}
-                    placeholder="e.g., Habesha Craft Roasters"
-                    className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800"
+                    placeholder="e.g., Al-Noor Royal Wear"
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 font-semibold"
                     required
                   />
                 </div>
                 <div>
-                  <label className="block font-medium mb-1">Business Category (9 Templates)</label>
+                  <label className="block font-bold mb-1">Business Category</label>
                   <select
                     value={newBizCategory}
                     onChange={(e) => setNewBizCategory(e.target.value)}
-                    className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800"
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 font-semibold"
                   >
                     {BUSINESS_CATEGORIES.map((c) => (
                       <option key={c.id} value={c.id}>
@@ -2827,143 +4833,1049 @@ export default function App() {
               </div>
 
               <div>
-                <label className="block font-medium mb-1">Business Description</label>
+                <label className="block font-bold mb-1">Store Tagline & Description</label>
                 <textarea
                   rows={2}
                   value={newBizDesc}
                   onChange={(e) => setNewBizDesc(e.target.value)}
-                  placeholder="Describe your products, services, and target customers..."
-                  className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800"
+                  placeholder="Timeless elegance — traditional wear, bespoke tailoring, and fast delivery..."
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800"
                   required
                 />
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className="block font-medium mb-1">Contact Phone</label>
+                  <label className="block font-bold mb-1">Store Contact Phone / WhatsApp</label>
                   <input
                     type="text"
                     value={newBizPhone}
                     onChange={(e) => setNewBizPhone(e.target.value)}
-                    className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800"
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800"
                   />
                 </div>
                 <div>
-                  <label className="block font-medium mb-1">Telegram Bot Username (Optional)</label>
+                  <label className="block font-bold mb-1">Telegram Bot Username (Can also link later)</label>
                   <input
                     type="text"
                     value={newBizBot}
                     onChange={(e) => setNewBizBot(e.target.value)}
-                    placeholder="@MyBusinessBot"
-                    className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 font-mono"
+                    placeholder="@MyStoreBot"
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 font-mono"
                   />
                 </div>
               </div>
 
               {newBizMethod === 'done_for_you' && (
                 <div>
-                  <label className="block font-medium mb-1">
-                    Done-For-You Concierge Instructions (For Platform Specialists)
+                  <label className="block font-bold mb-1">
+                    Done-For-You Concierge Instructions (For Our Specialists)
                   </label>
                   <textarea
                     rows={2}
                     value={newBizDfyNotes}
                     onChange={(e) => setNewBizDfyNotes(e.target.value)}
-                    placeholder="Tell our team what templates, catalog items, and Telegram integrations to configure for you..."
-                    className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800"
+                    placeholder="Tell our team what colors, products, and Telegram channel links to set up for you..."
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800"
                   />
                 </div>
               )}
 
-              <div className="flex justify-end gap-2 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setNewBizModalOpen(false)}
-                  className="px-4 py-2 rounded-lg border border-slate-200 dark:border-slate-700"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="px-5 py-2 rounded-lg bg-sky-600 text-white font-semibold"
-                >
-                  Create Business Workspace
-                </button>
+              <div className="flex items-center justify-between pt-3 border-t border-slate-100 dark:border-slate-800">
+                <span className="text-[11px] text-slate-500">
+                  Includes 4 starter products, categories, size/color selectors & 1-step checkout.
+                </span>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setNewBizModalOpen(false)}
+                    className="btn-3d-white px-4 py-2.5 rounded-xl font-bold"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="btn-3d-emerald px-5 py-2.5 rounded-xl text-white font-extrabold"
+                  >
+                    Create Store & Open Visual Preview →
+                  </button>
+                </div>
               </div>
             </form>
           </div>
         </div>
       )}
 
-      {/* MODAL: SIGN IN / REGISTER */}
+      {/* MODAL: COMPLETE WALKTHROUGH — HOW STORE OWNERS SIGN UP, PREVIEW, PUBLISH & LINK TELEGRAM */}
+      {launchGuideOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-950/75 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
+          <div className="card-3d bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl max-w-4xl w-full p-6 space-y-6 text-xs my-8 max-h-[92vh] overflow-y-auto">
+            <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-4">
+              <div>
+                <span className="text-[10px] font-extrabold uppercase tracking-widest text-emerald-700">
+                  End-to-End Platform Playbook
+                </span>
+                <h3 className="text-lg font-display font-extrabold text-slate-950 dark:text-white mt-0.5">
+                  How Store Owners Create, Preview, Publish & Connect to Telegram Channels
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setLaunchGuideOpen(false)}
+                className="btn-3d-white px-3.5 py-2 rounded-xl font-bold"
+              >
+                Close Guide
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="card-3d rounded-2xl p-4 bg-slate-50/80 dark:bg-slate-950/50 space-y-2">
+                <div className="flex items-center gap-2">
+                  <span className="w-7 h-7 rounded-xl bg-emerald-900 text-white font-extrabold flex items-center justify-center">
+                    1
+                  </span>
+                  <h4 className="font-display font-extrabold text-sm text-slate-950 dark:text-white">
+                    Sign Up & Automatic Visual Template
+                  </h4>
+                </div>
+                <p className="text-slate-600 dark:text-slate-300 leading-relaxed">
+                  Store owners register an account (or click <strong>+ Create New Business</strong>) and pick a visual template like <strong>Al-Saudia Luxury Boutique</strong>. The platform automatically generates their storefront with pre-built categories, 4 sample products (with sizes, color swatches, compare-at discounts), a booking service, and opens the <strong>Live Storefront Preview</strong> immediately.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setLaunchGuideOpen(false);
+                    setNewBizModalOpen(true);
+                  }}
+                  className="btn-3d-white px-3 py-1.5 rounded-xl font-bold text-emerald-800 mt-1"
+                >
+                  Try Creating a Store Now →
+                </button>
+              </div>
+
+              <div className="card-3d rounded-2xl p-4 bg-slate-50/80 dark:bg-slate-950/50 space-y-2">
+                <div className="flex items-center gap-2">
+                  <span className="w-7 h-7 rounded-xl bg-emerald-900 text-white font-extrabold flex items-center justify-center">
+                    2
+                  </span>
+                  <h4 className="font-display font-extrabold text-sm text-slate-950 dark:text-white">
+                    Live Preview & Instant Customization
+                  </h4>
+                </div>
+                <p className="text-slate-600 dark:text-slate-300 leading-relaxed">
+                  Inside the Storefront Preview, owners can toggle between <strong>Interactive Storefront</strong> and the <strong>3-Screen Mobile Showcase (Photo View)</strong>. Using the top bar, they can click <strong>Quick Edit Theme & Colors</strong> right on the storefront to change their brand colors, fonts, or banner, or open <strong>Catalog</strong> to upload their own products and prices.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setLaunchGuideOpen(false);
+                    setFullStorefrontOpen(true);
+                  }}
+                  className="btn-3d-emerald px-3 py-1.5 rounded-xl font-bold text-white mt-1"
+                >
+                  Open Live Boutique Storefront →
+                </button>
+              </div>
+
+              <div className="card-3d rounded-2xl p-4 bg-slate-50/80 dark:bg-slate-950/50 space-y-2">
+                <div className="flex items-center gap-2">
+                  <span className="w-7 h-7 rounded-xl bg-emerald-900 text-white font-extrabold flex items-center justify-center">
+                    3
+                  </span>
+                  <h4 className="font-display font-extrabold text-sm text-slate-950 dark:text-white">
+                    Publish & Link to Telegram Bot + Channel
+                  </h4>
+                </div>
+                <p className="text-slate-600 dark:text-slate-300 leading-relaxed">
+                  When ready, the owner clicks <strong>Publish Store</strong> in the Builder, then goes to <strong>Telegram & Web Setup</strong>:
+                </p>
+                <ul className="list-disc pl-4 space-y-1 text-slate-600 dark:text-slate-300">
+                  <li><strong>Telegram Bot Mini App:</strong> Enter their `@BotFather` bot username (e.g. `@AlSaudiaWearBot`) — customers tap the <strong>"Open Store"</strong> Menu Button inside Telegram chat.</li>
+                  <li><strong>Telegram Channel Link:</strong> Enter their public channel (`@AlSaudiaOfficial`). Every product post in the channel gets a direct <strong>"🛍️ Shop in Mini App"</strong> button (`https://t.me/YourBot/app?startapp=store`).</li>
+                  <li><strong>Web Link (No Telegram Needed):</strong> Share `{window.location.origin}/?store={activeBusiness?.slug || 'al-saudia-boutique'}` on Instagram, WhatsApp, or TikTok.</li>
+                </ul>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setLaunchGuideOpen(false);
+                    setFullStorefrontOpen(false);
+                    setActiveModule('telegram');
+                  }}
+                  className="btn-3d-white px-3 py-1.5 rounded-xl font-bold text-indigo-700 mt-1"
+                >
+                  Go to Telegram & Channel Setup →
+                </button>
+              </div>
+
+              <div className="card-3d rounded-2xl p-4 bg-slate-50/80 dark:bg-slate-950/50 space-y-2">
+                <div className="flex items-center gap-2">
+                  <span className="w-7 h-7 rounded-xl bg-emerald-900 text-white font-extrabold flex items-center justify-center">
+                    4
+                  </span>
+                  <h4 className="font-display font-extrabold text-sm text-slate-950 dark:text-white">
+                    How Customers Engage & Buy
+                  </h4>
+                </div>
+                <p className="text-slate-600 dark:text-slate-300 leading-relaxed">
+                  Customers tap the link in the business’s Telegram Channel, Bot, or Web URL:
+                </p>
+                <ul className="list-disc pl-4 space-y-1 text-slate-600 dark:text-slate-300">
+                  <li><strong>Screen 1 (Home):</strong> Browse the hero banner, category visual cards (`Thobes`, `Agal`, `Bishts`, `Jalabiyas`), and Best Sellers.</li>
+                  <li><strong>Screen 2 (Category Grid):</strong> Filter by category pills, save favorites to Wishlist, or tap <strong>Add to Cart</strong>.</li>
+                  <li><strong>Screen 3 (Product Detail):</strong> Inspect the 4-photo vertical gallery, pick their <strong>Size (S–XXL)</strong> and <strong>Color swatch</strong>, and tap <strong>Buy Now</strong>.</li>
+                  <li><strong>Checkout & Tracking:</strong> Apply promo codes (`ROYAL25`), copy the store's payment account with 1 tap, submit their order, and track live delivery or chat with support!</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: STORE OWNER SIGN IN / REGISTER / TELEGRAM LOGIN / PASSCODE RECOVERY */}
       {authModalOpen && (
-        <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl max-w-md w-full p-6 space-y-4 text-xs">
-            <div className="flex items-center justify-between">
-              <h3 className="text-base font-display font-bold text-slate-900 dark:text-white">
-                {authMode === 'login' ? 'Sign In to TeleBiz OS' : 'Create Business Owner Account'}
-              </h3>
-              <button type="button" onClick={() => setAuthModalOpen(false)} className="text-slate-500">
+        <div className="fixed inset-0 z-50 bg-slate-950/75 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
+          <div className="card-3d bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl max-w-lg w-full p-6 space-y-5 text-xs my-8">
+            <div className="flex items-start justify-between gap-3 border-b border-slate-200 dark:border-slate-800 pb-4">
+              <div>
+                <div className="inline-flex items-center gap-1.5 text-[10px] font-extrabold uppercase tracking-widest text-indigo-600 dark:text-indigo-400">
+                  <Fingerprint className="w-3.5 h-3.5" />
+                  Store Owner Identity & Recovery Vault
+                </div>
+                <h3 className="text-lg font-display font-extrabold text-slate-950 dark:text-white mt-0.5">
+                  {authMode === 'login'
+                    ? 'Sign In to Your Store Owner Account'
+                    : authMode === 'register'
+                    ? 'Create Store Owner Account + Recovery Passcode'
+                    : authMode === 'telegram'
+                    ? 'Continue with Telegram (Store Owners)'
+                    : 'Recover Account with Secondary Passcode'}
+                </h3>
+                <p className="text-[11px] text-slate-500 mt-0.5">
+                  Accounts are strictly for Store Owners. Customers shop & checkout without needing an account (tracked 24/7 via Customer UID).
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setAuthModalOpen(false)}
+                className="btn-3d-white px-3 py-1.5 rounded-xl font-bold shrink-0"
+              >
                 Close
               </button>
             </div>
 
+            {/* 4-Mode Switcher */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 bg-slate-100 dark:bg-slate-950 p-1.5 rounded-2xl">
+              {[
+                { id: 'login', label: 'Email Sign In' },
+                { id: 'register', label: 'New Store Owner' },
+                { id: 'telegram', label: 'Telegram Login' },
+                { id: 'recover', label: 'Recover Account' },
+              ].map((tab) => (
+                <button
+                  key={tab.id}
+                  type="button"
+                  onClick={() => {
+                    setAuthMode(tab.id as any);
+                    setAuthError('');
+                    setAuthSuccessMsg('');
+                  }}
+                  className={`py-2 px-2.5 rounded-xl font-bold text-[11px] transition ${
+                    authMode === tab.id
+                      ? 'bg-slate-950 text-white shadow-xs dark:bg-indigo-600'
+                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
+                  }`}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+
             {authError && (
-              <div className="p-3 rounded bg-rose-50 border border-rose-200 text-rose-700">{authError}</div>
+              <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 font-semibold">
+                {authError}
+              </div>
+            )}
+            {authSuccessMsg && (
+              <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 font-semibold">
+                {authSuccessMsg}
+              </div>
             )}
 
-            <form onSubmit={handleAuthSubmit} className="space-y-3">
-              {authMode === 'register' && (
-                <div>
-                  <label className="block font-medium mb-1">Full Name</label>
-                  <input
-                    type="text"
-                    value={authName}
-                    onChange={(e) => setAuthName(e.target.value)}
-                    className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700"
-                    required
-                  />
-                </div>
+            <form onSubmit={handleAuthSubmit} className="space-y-3.5">
+              {authMode === 'login' && (
+                <>
+                  <div>
+                    <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                      Email Address, Store Owner ID (`OWN-...`), or `@telegram`
+                    </label>
+                    <input
+                      type="text"
+                      value={authEmail}
+                      onChange={(e) => setAuthEmail(e.target.value)}
+                      placeholder="hana@tomocacraft.et or OWN-HAN-204881"
+                      className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950"
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">Password</label>
+                    <input
+                      type="password"
+                      value={authPassword}
+                      onChange={(e) => setAuthPassword(e.target.value)}
+                      placeholder="owner123 or admin123"
+                      className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950"
+                      required
+                    />
+                  </div>
+                  <button type="submit" className="btn-3d-primary w-full py-3 rounded-xl text-white font-extrabold">
+                    Sign In to Store Owner Workspace →
+                  </button>
+                </>
               )}
-              <div>
-                <label className="block font-medium mb-1">Email Address</label>
-                <input
-                  type="email"
-                  value={authEmail}
-                  onChange={(e) => setAuthEmail(e.target.value)}
-                  placeholder="hana@tomocacraft.et or admin@telebiz.os"
-                  className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700"
-                  required
-                />
-              </div>
-              <div>
-                <label className="block font-medium mb-1">Password</label>
-                <input
-                  type="password"
-                  value={authPassword}
-                  onChange={(e) => setAuthPassword(e.target.value)}
-                  placeholder="owner123 or admin123"
-                  className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700"
-                  required
-                />
-              </div>
-              <button type="submit" className="w-full py-2.5 rounded-lg bg-sky-600 text-white font-semibold">
-                {authMode === 'login' ? 'Sign In' : 'Register & Continue'}
-              </button>
-            </form>
 
-            <div className="text-center pt-2 border-t border-slate-100 dark:border-slate-800">
+              {authMode === 'register' && (
+                <>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">Store Owner Full Name</label>
+                      <input
+                        type="text"
+                        value={authName}
+                        onChange={(e) => setAuthName(e.target.value)}
+                        placeholder="e.g. Tariq Al-Mansoor"
+                        className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950"
+                        required
+                      />
+                    </div>
+                    <div>
+                      <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">Telegram Handle (Optional)</label>
+                      <input
+                        type="text"
+                        value={authTgUsername}
+                        onChange={(e) => setAuthTgUsername(e.target.value)}
+                        placeholder="@your_telegram"
+                        className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 font-mono"
+                      />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">Email Address</label>
+                      <input
+                        type="email"
+                        value={authEmail}
+                        onChange={(e) => setAuthEmail(e.target.value)}
+                        placeholder="owner@yourbrand.com"
+                        className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950"
+                        required
+                      />
+                    </div>
+                    <div>
+                      <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">Primary Password</label>
+                      <input
+                        type="password"
+                        minLength={6}
+                        value={authPassword}
+                        onChange={(e) => setAuthPassword(e.target.value)}
+                        placeholder="Min 6 characters"
+                        className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950"
+                        required
+                      />
+                    </div>
+                  </div>
+
+                  {/* Mandatory Secondary Recovery Passcode */}
+                  <div className="rounded-2xl border-2 border-indigo-200 dark:border-indigo-900 bg-indigo-50/60 dark:bg-indigo-950/30 p-3.5 space-y-2.5">
+                    <div className="flex items-center justify-between">
+                      <span className="font-extrabold text-indigo-950 dark:text-indigo-200 flex items-center gap-1.5">
+                        <KeyRound className="w-4 h-4 text-indigo-600" />
+                        Mandatory Secondary Recovery Passcode
+                      </span>
+                      <span className="px-2 py-0.5 rounded-full bg-indigo-600 text-white text-[9px] font-extrabold uppercase">
+                        Required for Recovery
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-600 dark:text-slate-300">
+                      Set a second secret Passcode / PIN (4–12 digits or characters). If you ever forget your email or password, you can recover your account immediately with this code.
+                    </p>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                      <div>
+                        <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                          Secondary Recovery Passcode
+                        </label>
+                        <input
+                          type="password"
+                          minLength={4}
+                          value={authRecoveryPasscode}
+                          onChange={(e) => setAuthRecoveryPasscode(e.target.value)}
+                          placeholder="e.g. 2026 or secret-pin"
+                          className="w-full px-3 py-2 rounded-xl border border-indigo-300 bg-white dark:bg-slate-950 font-mono tracking-widest"
+                          required
+                        />
+                      </div>
+                      <div>
+                        <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                          Passcode Memory Hint (Optional)
+                        </label>
+                        <input
+                          type="text"
+                          value={authRecoveryHint}
+                          onChange={(e) => setAuthRecoveryHint(e.target.value)}
+                          placeholder="e.g. Founding year"
+                          className="w-full px-3 py-2 rounded-xl border border-slate-200 bg-white dark:bg-slate-950"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  <button type="submit" className="btn-3d-emerald w-full py-3 rounded-xl text-white font-extrabold">
+                    Create Store Owner Account & Generate Unique ID →
+                  </button>
+                </>
+              )}
+
+              {authMode === 'telegram' && (
+                <>
+                  <div className="rounded-2xl border border-sky-200 dark:border-sky-900 bg-sky-50/70 dark:bg-sky-950/30 p-3.5 space-y-2">
+                    <div className="font-extrabold text-sky-950 dark:text-sky-200 flex items-center gap-1.5">
+                      <Send className="w-4 h-4 text-sky-600" />
+                      1-Click Telegram Store Owner Login & Registration
+                    </div>
+                    <p className="text-[11px] text-slate-600 dark:text-slate-300">
+                      Sign in or open a new store using your Telegram username. You will receive a permanent Store Owner Unique ID (`OWN-...`) that links your Telegram Mini App and customers 24/7.
+                    </p>
+                  </div>
+                  <div>
+                    <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">Your Telegram Username</label>
+                    <input
+                      type="text"
+                      value={authTgUsername}
+                      onChange={(e) => setAuthTgUsername(e.target.value)}
+                      placeholder="@hana_tomoca or @your_telegram_handle"
+                      className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 font-mono"
+                      required
+                    />
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                        Display Name (If New Store Owner)
+                      </label>
+                      <input
+                        type="text"
+                        value={authName}
+                        onChange={(e) => setAuthName(e.target.value)}
+                        placeholder="Your Name or Brand"
+                        className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950"
+                      />
+                    </div>
+                    <div>
+                      <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                        Recovery Passcode (4+ chars)
+                      </label>
+                      <input
+                        type="password"
+                        value={authRecoveryPasscode}
+                        onChange={(e) => setAuthRecoveryPasscode(e.target.value)}
+                        placeholder="e.g. 2026"
+                        className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 font-mono"
+                      />
+                    </div>
+                  </div>
+                  <button type="submit" className="btn-3d-primary w-full py-3 rounded-xl text-white font-extrabold flex items-center justify-center gap-2">
+                    <Send className="w-4 h-4" />
+                    Continue with Telegram →
+                  </button>
+                </>
+              )}
+
+              {authMode === 'recover' && (
+                <>
+                  <div className="rounded-2xl border border-amber-200 dark:border-amber-900 bg-amber-50/70 dark:bg-amber-950/30 p-3.5 space-y-1.5">
+                    <div className="font-extrabold text-amber-950 dark:text-amber-200">
+                      Forgot Your Email or Password? Recover with Your Secondary Passcode
+                    </div>
+                    <p className="text-[11px] text-slate-600 dark:text-slate-300">
+                      Enter your Name, Telegram `@username`, Store Owner ID (`OWN-...`), or Email along with your secondary Recovery Passcode to unlock your account and set a new password.
+                    </p>
+                  </div>
+                  <div>
+                    <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                      Your Name, Telegram `@username`, Store Owner ID (`OWN-...`), or Email
+                    </label>
+                    <input
+                      type="text"
+                      value={authEmail}
+                      onChange={(e) => setAuthEmail(e.target.value)}
+                      placeholder="e.g. Hana Tadesse, @hana_tomoca, or OWN-HAN-204881"
+                      className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950"
+                      required
+                    />
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                        Your Secondary Recovery Passcode
+                      </label>
+                      <input
+                        type="password"
+                        value={authRecoveryPasscode}
+                        onChange={(e) => setAuthRecoveryPasscode(e.target.value)}
+                        placeholder="e.g. 2026"
+                        className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 font-mono"
+                        required
+                      />
+                    </div>
+                    <div>
+                      <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                        Set New Password (Optional)
+                      </label>
+                      <input
+                        type="password"
+                        value={authRecoverNewPassword}
+                        onChange={(e) => setAuthRecoverNewPassword(e.target.value)}
+                        placeholder="New password (min 6 chars)"
+                        className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950"
+                      />
+                    </div>
+                  </div>
+                  <button type="submit" className="btn-3d-dark w-full py-3 rounded-xl text-white font-extrabold">
+                    Verify Recovery Passcode & Restore Account →
+                  </button>
+                </>
+              )}
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ORGANIZED MENU & SETTINGS DRAWER (Language, Workspace Fonts, Admin Profile, Password, Passcode, Co-Admins) */}
+      {menuDrawerOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-xs flex justify-end">
+          <div className="bg-white dark:bg-slate-900 border-l border-slate-200 dark:border-slate-800 w-full max-w-xl h-full overflow-y-auto p-6 space-y-6 text-xs shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-4">
+              <div className="flex items-center gap-2.5">
+                <span className="w-9 h-9 rounded-xl bg-indigo-600 text-white flex items-center justify-center shadow-sm">
+                  <Settings className="w-5 h-5" />
+                </span>
+                <div>
+                  <h3 className="text-base font-display font-extrabold text-slate-950 dark:text-white">
+                    Platform Menu & Account Settings
+                  </h3>
+                  <p className="text-[11px] text-slate-500">
+                    Languages, typography, admin account credentials, passcode lock & co-admins
+                  </p>
+                </div>
+              </div>
               <button
                 type="button"
-                onClick={() => setAuthMode(authMode === 'login' ? 'register' : 'login')}
-                className="text-sky-600 hover:underline font-medium"
+                onClick={() => setMenuDrawerOpen(false)}
+                className="btn-3d-white px-3 py-1.5 rounded-xl font-bold"
               >
-                {authMode === 'login'
-                  ? 'Need a new account? Register here'
-                  : 'Already have an account? Sign in'}
+                Close
+              </button>
+            </div>
+
+            {/* Menu Navigation Tabs */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+              {[
+                { id: 'general', label: 'Language & Fonts', icon: Globe },
+                { id: 'account', label: 'Admin Account', icon: Users },
+                { id: 'security', label: 'Password & PIN', icon: KeyRound },
+                { id: 'admins', label: 'Add Co-Admin', icon: UserPlus },
+              ].map((tab) => {
+                const Icon = tab.icon;
+                const active = menuTab === tab.id;
+                return (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    onClick={() => {
+                      setMenuTab(tab.id as any);
+                      setSettingsError('');
+                      setSettingsMessage('');
+                    }}
+                    className={
+                      active
+                        ? 'btn-3d-primary py-2.5 px-3 rounded-xl font-bold text-white flex items-center justify-center gap-1.5'
+                        : 'btn-3d-white py-2.5 px-3 rounded-xl font-semibold flex items-center justify-center gap-1.5'
+                    }
+                  >
+                    <Icon className="w-3.5 h-3.5" />
+                    <span>{tab.label}</span>
+                  </button>
+                );
+              })}
+            </div>
+
+            {settingsMessage && (
+              <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 font-semibold flex items-center justify-between">
+                <span>{settingsMessage}</span>
+                <button type="button" onClick={() => setSettingsMessage('')} className="underline">Dismiss</button>
+              </div>
+            )}
+            {settingsError && (
+              <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 font-semibold flex items-center justify-between">
+                <span>{settingsError}</span>
+                <button type="button" onClick={() => setSettingsError('')} className="underline">Dismiss</button>
+              </div>
+            )}
+
+            {/* TAB 1: LANGUAGE, WORKSPACE FONTS & ROLE SWITCHER */}
+            {menuTab === 'general' && (
+              <div className="space-y-5">
+                <div className="card-3d rounded-2xl p-4 bg-slate-50/70 dark:bg-slate-950/50 space-y-3">
+                  <div className="font-display font-extrabold text-sm text-slate-950 dark:text-white">
+                    Platform Language (ቋንቋ / Afaan)
+                  </div>
+                  <p className="text-slate-500">
+                    Choose your preferred operating language across menus and dashboards.
+                  </p>
+                  <div className="grid grid-cols-3 gap-2.5">
+                    {(['en', 'am', 'om'] as LanguageCode[]).map((code) => (
+                      <button
+                        key={code}
+                        type="button"
+                        onClick={() => handleLanguageChange(code)}
+                        className={
+                          lang === code
+                            ? 'btn-3d-primary py-3 px-3 rounded-xl font-bold text-white text-center'
+                            : 'btn-3d-white py-3 px-3 rounded-xl font-bold text-center'
+                        }
+                      >
+                        {LANGUAGE_LABELS[code]}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="card-3d rounded-2xl p-4 bg-slate-50/70 dark:bg-slate-950/50 space-y-3">
+                  <div className="font-display font-extrabold text-sm text-slate-950 dark:text-white flex items-center gap-1.5">
+                    <Sparkles className="w-4 h-4 text-indigo-600" />
+                    Workspace Typography & Font Style
+                  </div>
+                  <p className="text-slate-500">
+                    Customize the font style of your entire operating dashboard. (You can also set individual store fonts in the Builder.)
+                  </p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                    {[
+                      { id: 'jakarta', name: 'Plus Jakarta Sans', desc: 'Modern Geometric Tech' },
+                      { id: 'outfit', name: 'Outfit Display', desc: 'Bold Rounded Contemporary' },
+                      { id: 'playfair', name: 'Playfair Display', desc: 'Luxury Editorial Serif' },
+                      { id: 'fraunces', name: 'Fraunces Soft Serif', desc: 'Artisanal Hospitality' },
+                      { id: 'space', name: 'Space Grotesk', desc: 'Crisp Technical Studio' },
+                    ].map((f) => (
+                      <button
+                        key={f.id}
+                        type="button"
+                        onClick={() => setWorkspaceFont(f.id as any)}
+                        className={`text-left p-3 rounded-xl border transition ${
+                          workspaceFont === f.id
+                            ? 'border-indigo-600 bg-indigo-50/80 dark:bg-indigo-950/50 font-bold ring-2 ring-indigo-500/20'
+                            : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900'
+                        }`}
+                      >
+                        <div className="text-sm font-bold text-slate-950 dark:text-white">{f.name}</div>
+                        <div className="text-[11px] text-slate-500">{f.desc}</div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {availableAccounts.length > 0 && (
+                  <div className="card-3d rounded-2xl p-4 bg-slate-50/70 dark:bg-slate-950/50 space-y-3">
+                    <div className="font-display font-extrabold text-sm text-slate-950 dark:text-white">
+                      Quick Account / Role Switcher
+                    </div>
+                    <p className="text-slate-500">
+                      Switch between Super Admin and Business Owner accounts or sign in with another account.
+                    </p>
+                    <div className="space-y-2">
+                      {availableAccounts.map((acc: any) => (
+                        <button
+                          key={acc.id}
+                          type="button"
+                          onClick={() => handleSwitchDemoAccount(acc.id)}
+                          className={`w-full p-3 rounded-xl border text-left flex items-center justify-between ${
+                            currentUser?.id === acc.id
+                              ? 'border-indigo-600 bg-indigo-50/80 dark:bg-indigo-950/50 font-bold'
+                              : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:border-indigo-300'
+                          }`}
+                        >
+                          <div>
+                            <div className="font-bold text-slate-950 dark:text-white">{acc.name}</div>
+                            <div className="text-[11px] text-slate-500">{acc.email}</div>
+                          </div>
+                          <span className="px-2.5 py-1 rounded-full bg-indigo-100 text-indigo-800 text-[10px] font-extrabold uppercase">
+                            {acc.platform_role}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setMenuDrawerOpen(false);
+                        setAuthModalOpen(true);
+                      }}
+                      className="btn-3d-white w-full py-2.5 rounded-xl font-bold text-center"
+                    >
+                      Sign In / Register Another Account
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* TAB 2: ADMIN / OWNER PROFILE */}
+            {menuTab === 'account' && (
+              <form onSubmit={handleSaveProfile} className="card-3d rounded-2xl p-5 bg-slate-50/70 dark:bg-slate-950/50 space-y-4">
+                <div>
+                  <h4 className="text-sm font-display font-extrabold text-slate-950 dark:text-white">
+                    Change Admin / Owner Name & Account Details
+                  </h4>
+                  <p className="text-slate-500 mt-0.5">
+                    Update your display name, login email address, and Telegram handle.
+                  </p>
+                </div>
+                <div>
+                  <label className="block font-bold mb-1">Admin / Owner Full Name</label>
+                  <input
+                    type="text"
+                    required
+                    value={profileNameInput}
+                    onChange={(e) => setProfileNameInput(e.target.value)}
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900"
+                  />
+                </div>
+                <div>
+                  <label className="block font-bold mb-1">Account Email Address</label>
+                  <input
+                    type="email"
+                    required
+                    value={profileEmailInput}
+                    onChange={(e) => setProfileEmailInput(e.target.value)}
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900"
+                  />
+                </div>
+                <div>
+                  <label className="block font-bold mb-1">Telegram Username</label>
+                  <input
+                    type="text"
+                    value={profileTgInput}
+                    onChange={(e) => setProfileTgInput(e.target.value)}
+                    placeholder="@username"
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 font-mono"
+                  />
+                </div>
+                <button type="submit" className="btn-3d-primary w-full py-2.5 rounded-xl font-bold text-white">
+                  Save Admin Profile Changes
+                </button>
+              </form>
+            )}
+
+            {/* TAB 3: PASSWORD & PASSCODE LOCK */}
+            {menuTab === 'security' && (
+              <div className="space-y-5">
+                <form onSubmit={handleChangePassword} className="card-3d rounded-2xl p-5 bg-slate-50/70 dark:bg-slate-950/50 space-y-3">
+                  <div>
+                    <h4 className="text-sm font-display font-extrabold text-slate-950 dark:text-white">
+                      Change Account Password
+                    </h4>
+                    <p className="text-slate-500">Update your login password at any time.</p>
+                  </div>
+                  <div>
+                    <label className="block font-bold mb-1">Current Password (optional in demo)</label>
+                    <input
+                      type="password"
+                      value={currentPasswordInput}
+                      onChange={(e) => setCurrentPasswordInput(e.target.value)}
+                      placeholder="Current password"
+                      className="w-full px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900"
+                    />
+                  </div>
+                  <div>
+                    <label className="block font-bold mb-1">New Password (minimum 6 characters)</label>
+                    <input
+                      type="password"
+                      required
+                      minLength={6}
+                      value={newPasswordInput}
+                      onChange={(e) => setNewPasswordInput(e.target.value)}
+                      placeholder="Enter new password"
+                      className="w-full px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900"
+                    />
+                  </div>
+                  <button type="submit" className="btn-3d-dark w-full py-2.5 rounded-xl font-bold text-white">
+                    Update Password
+                  </button>
+                </form>
+
+                <div className="card-3d rounded-2xl p-5 bg-slate-50/70 dark:bg-slate-950/50 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h4 className="text-sm font-display font-extrabold text-slate-950 dark:text-white">
+                        Security Passcode / Quick PIN Lock
+                      </h4>
+                      <p className="text-slate-500">
+                        Set a 4 to 6 digit passcode to lock your admin screen when stepping away.
+                      </p>
+                    </div>
+                    <span
+                      className={`px-2.5 py-1 rounded-full text-[10px] font-extrabold uppercase ${
+                        currentUser?.has_passcode
+                          ? 'bg-emerald-100 text-emerald-800'
+                          : 'bg-slate-200 text-slate-700'
+                      }`}
+                    >
+                      {currentUser?.has_passcode ? 'PIN Active' : 'No PIN Set'}
+                    </span>
+                  </div>
+                  <div>
+                    <label className="block font-bold mb-1">4–6 Digit Security Passcode</label>
+                    <input
+                      type="password"
+                      maxLength={6}
+                      value={passcodeInput}
+                      onChange={(e) => setPasscodeInput(e.target.value.replace(/\D/g, ''))}
+                      placeholder="e.g. 2026"
+                      className="w-full px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 font-mono tracking-widest text-sm"
+                    />
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => handleSavePasscode('set')}
+                      className="btn-3d-primary flex-1 py-2.5 rounded-xl font-bold text-white"
+                    >
+                      {currentUser?.has_passcode ? 'Update Passcode' : 'Enable Passcode Lock'}
+                    </button>
+                    {currentUser?.has_passcode && (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setMenuDrawerOpen(false);
+                            setIsPasscodeLocked(true);
+                          }}
+                          className="btn-3d-white px-4 py-2.5 rounded-xl font-bold text-amber-700"
+                        >
+                          Lock Screen Now
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleSavePasscode('clear')}
+                          className="btn-3d-white px-4 py-2.5 rounded-xl font-bold text-rose-600"
+                        >
+                          Remove PIN
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* TAB 4: ADD PLATFORM CO-ADMINS */}
+            {menuTab === 'admins' && (
+              <div className="space-y-5">
+                <form onSubmit={handleAddCoAdmin} className="card-3d rounded-2xl p-5 bg-slate-50/70 dark:bg-slate-950/50 space-y-3">
+                  <div>
+                    <h4 className="text-sm font-display font-extrabold text-slate-950 dark:text-white">
+                      Add New Admin to Control Platform
+                    </h4>
+                    <p className="text-slate-500">
+                      Create an additional administrator account with full platform & store management access.
+                    </p>
+                  </div>
+                  <div>
+                    <label className="block font-bold mb-1">Admin Full Name</label>
+                    <input
+                      type="text"
+                      required
+                      value={coAdminName}
+                      onChange={(e) => setCoAdminName(e.target.value)}
+                      placeholder="e.g. Dawit Bekele"
+                      className="w-full px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900"
+                    />
+                  </div>
+                  <div>
+                    <label className="block font-bold mb-1">Admin Email</label>
+                    <input
+                      type="email"
+                      required
+                      value={coAdminEmail}
+                      onChange={(e) => setCoAdminEmail(e.target.value)}
+                      placeholder="dawit@telebiz.os"
+                      className="w-full px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900"
+                    />
+                  </div>
+                  <div>
+                    <label className="block font-bold mb-1">Initial Password</label>
+                    <input
+                      type="password"
+                      required
+                      minLength={6}
+                      value={coAdminPassword}
+                      onChange={(e) => setCoAdminPassword(e.target.value)}
+                      placeholder="Minimum 6 characters"
+                      className="w-full px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900"
+                    />
+                  </div>
+                  <button type="submit" className="btn-3d-primary w-full py-2.5 rounded-xl font-bold text-white">
+                    Create Platform Administrator
+                  </button>
+                </form>
+
+                <div className="card-3d rounded-2xl p-5 bg-slate-50/70 dark:bg-slate-950/50 space-y-3">
+                  <div className="font-display font-extrabold text-sm text-slate-950 dark:text-white">
+                    Active Platform Administrators ({coAdminsList.length})
+                  </div>
+                  <div className="space-y-2">
+                    {coAdminsList.map((adm: any) => (
+                      <div
+                        key={adm.id}
+                        className="flex items-center justify-between p-3 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900"
+                      >
+                        <div>
+                          <div className="font-bold text-slate-950 dark:text-white">{adm.name}</div>
+                          <div className="text-[11px] text-slate-500">{adm.email}</div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => handleSwitchDemoAccount(adm.id)}
+                          className="btn-3d-white px-3 py-1.5 rounded-lg text-[11px] font-bold"
+                        >
+                          Switch to Admin
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* 3-ROLE RECOGNITION & ISOLATION ALGORITHM EXPLANATION MODAL */}
+      {roleGuideModalOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
+          <div className="card-3d bg-white dark:bg-slate-900 rounded-3xl max-w-3xl w-full p-6 space-y-5 border border-slate-200 dark:border-slate-800 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-start justify-between gap-4 border-b border-slate-100 dark:border-slate-800 pb-4">
+              <div>
+                <div className="inline-flex items-center gap-1.5 text-[10px] font-extrabold uppercase tracking-[0.18em] text-indigo-600 dark:text-indigo-400">
+                  <ShieldAlert className="w-3.5 h-3.5" />
+                  3-Tier Role-Based Access Control (RBAC) & Tenant Isolation
+                </div>
+                <h3 className="mt-1 text-lg font-display font-extrabold text-slate-950 dark:text-white">
+                  How the Algorithm Recognizes & Separates Admin, Store Owners & Customers
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setRoleGuideModalOpen(false)}
+                className="p-2 rounded-xl border border-slate-200 dark:border-slate-800 text-slate-500 hover:bg-slate-100"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
+              <div className="p-4 rounded-2xl border border-indigo-200 bg-indigo-50/50 dark:border-indigo-900/50 dark:bg-indigo-950/30 space-y-2">
+                <div className="px-2.5 py-1 rounded-lg bg-indigo-600 text-white font-extrabold text-[10px] uppercase w-fit">
+                  1. Platform Admin (Owner)
+                </div>
+                <div className="font-bold text-slate-900 dark:text-white">
+                  Database Role: <code className="text-indigo-600">platform_role = &apos;super_admin&apos;</code>
+                </div>
+                <ul className="space-y-1.5 text-slate-600 dark:text-slate-300 list-disc pl-4">
+                  <li>Unrestricted SQL query across all tenants (<code className="font-mono">SELECT * FROM businesses</code>).</li>
+                  <li>Filters business lists by <strong>Category</strong> (Retail, Coffee, Hotel, Salon, Restaurant, Real Estate).</li>
+                  <li>Clicks any business to preview its storefront page and inspect <strong>what they are selling</strong>.</li>
+                  <li>Can <strong>Block/Suspend</strong>, <strong>Add</strong>, or <strong>Delete</strong> any business, Store Owner, or Customer.</li>
+                </ul>
+              </div>
+
+              <div className="p-4 rounded-2xl border border-emerald-200 bg-emerald-50/50 dark:border-emerald-900/50 dark:bg-emerald-950/30 space-y-2">
+                <div className="px-2.5 py-1 rounded-lg bg-emerald-600 text-white font-extrabold text-[10px] uppercase w-fit">
+                  2. Store Owners
+                </div>
+                <div className="font-bold text-slate-900 dark:text-white">
+                  Database Role: <code className="text-emerald-600">platform_role = &apos;user&apos;</code> + <code className="text-emerald-600">OWN-...</code> ID
+                </div>
+                <ul className="space-y-1.5 text-slate-600 dark:text-slate-300 list-disc pl-4">
+                  <li>Every backend query enforces <code className="font-mono">WHERE b.owner_id = req.user.id</code> via <code className="font-mono">verifyTenantAccess</code>.</li>
+                  <li>Sees <strong>ONLY their own store(s)</strong> — never other businesses on the platform.</li>
+                  <li>Sees their sales report, <strong>Payment Request data</strong>, <strong>Finished orders</strong>, <strong>Rejected orders</strong>, Customer Messages, Categories, and Store Builder.</li>
+                </ul>
+              </div>
+
+              <div className="p-4 rounded-2xl border border-amber-200 bg-amber-50/50 dark:border-amber-900/50 dark:bg-amber-950/30 space-y-2">
+                <div className="px-2.5 py-1 rounded-lg bg-amber-600 text-white font-extrabold text-[10px] uppercase w-fit">
+                  3. Store Customers
+                </div>
+                <div className="font-bold text-slate-900 dark:text-white">
+                  Public Mini App Scope + <code className="text-amber-600">CUS-247-...</code> ID
+                </div>
+                <ul className="space-y-1.5 text-slate-600 dark:text-slate-300 list-disc pl-4">
+                  <li>Accesses only public storefront routes (<code className="font-mono">/api/storefront/:slug</code>) scoped to a single store&apos;s <code className="font-mono">business_id</code>.</li>
+                  <li>Identified 24/7 by automatic <code className="font-mono">CUS-247-...</code> token without needing a password.</li>
+                  <li>Can browse products, add to cart, submit payment transfer references, and message store support — zero access to owner or admin tools.</li>
+                </ul>
+              </div>
+            </div>
+
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={() => setRoleGuideModalOpen(false)}
+                className="btn-3d-primary px-5 py-2.5 rounded-xl text-xs font-bold text-white"
+              >
+                Got It
               </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* SECURITY PASSCODE LOCK SCREEN OVERLAY */}
+      {isPasscodeLocked && (
+        <div className="fixed inset-0 z-50 bg-slate-950/95 backdrop-blur-md flex items-center justify-center p-4">
+          <form
+            onSubmit={handleUnlockPasscode}
+            className="card-3d bg-white dark:bg-slate-900 rounded-3xl max-w-sm w-full p-6 space-y-4 text-center"
+          >
+            <div className="w-12 h-12 rounded-2xl bg-indigo-600 text-white flex items-center justify-center mx-auto shadow-md">
+              <Lock className="w-6 h-6" />
+            </div>
+            <div>
+              <h3 className="text-lg font-display font-extrabold text-slate-950 dark:text-white">
+                Workspace Locked
+              </h3>
+              <p className="text-xs text-slate-500 mt-1">
+                Enter your 4–6 digit security passcode for {currentUser?.name} to unlock.
+              </p>
+            </div>
+            {unlockError && (
+              <div className="p-2.5 rounded-xl bg-rose-50 text-rose-700 text-xs font-bold">
+                {unlockError}
+              </div>
+            )}
+            <input
+              type="password"
+              maxLength={6}
+              required
+              value={unlockPinInput}
+              onChange={(e) => setUnlockPinInput(e.target.value.replace(/\D/g, ''))}
+              placeholder="••••"
+              className="w-full text-center tracking-[0.5em] font-mono text-xl py-3 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+            />
+            <button type="submit" className="btn-3d-primary w-full py-3 rounded-xl font-bold text-white text-xs">
+              Unlock TeleBiz OS
+            </button>
+          </form>
         </div>
       )}
     </div>

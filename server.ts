@@ -2,15 +2,37 @@ import express, { Request, Response, NextFunction } from 'express';
 import { createServer as createViteServer } from 'vite';
 import dotenv from 'dotenv';
 import crypto from 'crypto';
+import fs from 'fs';
 import path from 'path';
 import { GoogleGenAI, Type } from '@google/genai';
-import { db, initDatabase, hashPassword } from './src/db/database.ts';
+import {
+  db,
+  initDatabase,
+  hashPassword,
+  ensureDefaultBusinessPaymentMethods,
+  generateOwnerUid,
+  generateCustomerUid,
+} from './src/db/database.ts';
 
 dotenv.config();
 initDatabase();
 
+const uploadsDir = path.resolve(process.cwd(), 'uploads', 'media');
+if (!fs.existsSync(uploadsDir)) {
+  fs.mkdirSync(uploadsDir, { recursive: true });
+}
+
 const app = express();
-app.use(express.json({ limit: '5mb' }));
+app.use(express.json({ limit: '18mb' }));
+
+// Serve deduplicated & compressed product images with 1-year immutable cache headers
+app.use(
+  '/uploads/media',
+  express.static(uploadsDir, {
+    maxAge: '365d',
+    immutable: true,
+  })
+);
 
 // Initialize server-side Gemini client per skill guidelines
 function getGenAIClient() {
@@ -95,13 +117,13 @@ function authMiddleware(req: Request, _res: Response, next: NextFunction) {
   if (authHeader && authHeader.startsWith('Bearer ')) {
     const token = authHeader.slice(7);
     const session = db.prepare(`
-      SELECT s.token, u.id, u.email, u.name, u.platform_role, u.preferred_language
+      SELECT s.token, u.id, u.email, u.name, u.platform_role, u.preferred_language, u.account_status
       FROM sessions s
       JOIN users u ON u.id = s.user_id
       WHERE s.token = ? AND s.revoked = 0
-    `).get(token) as (AuthUser & { token: string }) | undefined;
+    `).get(token) as (AuthUser & { token: string; account_status?: string }) | undefined;
 
-    if (session) {
+    if (session && session.account_status !== 'blocked') {
       req.user = {
         id: session.id,
         email: session.email,
@@ -114,8 +136,8 @@ function authMiddleware(req: Request, _res: Response, next: NextFunction) {
     }
   }
 
-  // Fallback to default business owner if no token header provided so initial load works seamlessly
-  const defaultUser = db.prepare('SELECT id, email, name, platform_role, preferred_language FROM users WHERE id = ?').get('usr_owner_1') as AuthUser | undefined;
+  // Fallback to Platform Super Admin if no token header is provided so the Admin can immediately inspect all categories & businesses
+  const defaultUser = db.prepare('SELECT id, email, name, platform_role, preferred_language FROM users WHERE id = ?').get('usr_superadmin') as AuthUser | undefined;
   if (defaultUser) {
     req.user = defaultUser;
   }
@@ -124,16 +146,18 @@ function authMiddleware(req: Request, _res: Response, next: NextFunction) {
 
 app.use('/api', authMiddleware);
 
-// Tenant Isolation Check Helper
+// Tenant Isolation Check Helper (Enforces strict separation between Admin, Store Owners, and Employees)
 function verifyTenantAccess(user: AuthUser | undefined, businessId: string, requiredPermission?: string): { allowed: boolean; business?: any; role?: string; error?: string } {
   if (!user) return { allowed: false, error: 'Authentication required' };
   const business = db.prepare('SELECT * FROM businesses WHERE id = ?').get(businessId) as any;
   if (!business) return { allowed: false, error: 'Business not found' };
 
+  // Role 1: Platform Admin can access & inspect any business across the platform
   if (user.platform_role === 'super_admin') {
     return { allowed: true, business, role: 'super_admin' };
   }
 
+  // Role 2: Store Owner can strictly access ONLY businesses where owner_id matches their user.id
   if (business.owner_id === user.id) {
     return { allowed: true, business, role: 'owner' };
   }
@@ -146,7 +170,7 @@ function verifyTenantAccess(user: AuthUser | undefined, businessId: string, requ
   ) as any;
 
   if (!emp) {
-    return { allowed: false, error: 'Cross-tenant access denied: You do not belong to this business.' };
+    return { allowed: false, error: 'Cross-tenant access denied: Store owners can only view and manage their own stores.' };
   }
 
   if (requiredPermission) {
@@ -169,7 +193,9 @@ app.get('/api/auth/me', (req: Request, res: Response) => {
     return;
   }
 
-  // Fetch businesses accessible to this user
+  // Strict Role-Based Business Query:
+  // - Platform Admin ('super_admin') sees all businesses across all categories.
+  // - Store Owner ('user') strictly sees ONLY businesses where b.owner_id = req.user.id (or active employee).
   let businesses: any[] = [];
   if (req.user.platform_role === 'super_admin') {
     businesses = db.prepare('SELECT * FROM businesses ORDER BY created_at DESC').all();
@@ -182,26 +208,111 @@ app.get('/api/auth/me', (req: Request, res: Response) => {
     `).all(req.user.id, req.user.email);
   }
 
-  const allDemoAccounts = db.prepare('SELECT id, email, name, platform_role, preferred_language FROM users').all();
+  // Enrich each business with owner identity, product catalog preview, and order status counts (Finished, Rejected, Payment Requests)
+  const enrichedBusinesses = businesses.map((b) => {
+    const ownerInfo = db.prepare('SELECT id, name, email, owner_uid, telegram_username, account_status FROM users WHERE id = ?').get(b.owner_id) as any;
+    const orders = db.prepare('SELECT status, total, payment_status, created_at FROM orders WHERE business_id = ?').all(b.id) as any[];
+    const paidOrders = orders.filter((o) => o.payment_status === 'paid');
+    const verifiedRevenue = paidOrders.reduce((sum, o) => sum + Number(o.total || 0), 0);
+    const todayRevenue = paidOrders
+      .filter((o) => String(o.created_at || '').startsWith('2026-11-01'))
+      .reduce((sum, o) => sum + Number(o.total || 0), 0);
+    const pendingOrdersCount = orders.filter((o) => o.payment_status === 'pending_verification' || o.payment_status === 'unpaid').length;
+    const pendingPaymentRequestsCount = orders.filter((o) => o.payment_status === 'pending_verification').length;
+    const finishedOrdersCount = orders.filter((o) => o.status === 'completed').length;
+    const rejectedOrdersCount = orders.filter(
+      (o) => o.status === 'cancelled' || o.status === 'refunded' || o.status === 'rejected' || o.payment_status === 'failed'
+    ).length;
+
+    const catalogProducts = db.prepare(
+      'SELECT id, name, category_name, price, compare_at_price, discount_percent, currency, stock, available, image_type, image_url FROM products WHERE business_id = ? ORDER BY created_at DESC'
+    ).all(b.id) as any[];
+    const catalogServices = db.prepare(
+      'SELECT id, name, duration_mins, price, currency, available FROM services_listings WHERE business_id = ? ORDER BY created_at DESC'
+    ).all(b.id) as any[];
+    const customersCount = (db.prepare('SELECT COUNT(*) as cnt FROM customers WHERE business_id = ?').get(b.id) as { cnt: number }).cnt;
+    const visitorsCount = (db.prepare("SELECT COUNT(*) as cnt FROM analytics_events WHERE business_id = ? AND event_type = 'app_visit'").get(b.id) as { cnt: number }).cnt;
+
+    return {
+      ...b,
+      owner_name: ownerInfo?.name || 'Store Owner',
+      owner_email: ownerInfo?.email || '',
+      owner_uid: ownerInfo?.owner_uid || b.owner_uid || 'OWN-ID',
+      owner_status: ownerInfo?.account_status || 'active',
+      verifiedRevenue,
+      todayRevenue,
+      totalOrders: orders.length,
+      paidOrdersCount: paidOrders.length,
+      pendingOrdersCount,
+      pendingPaymentRequestsCount,
+      finishedOrdersCount,
+      rejectedOrdersCount,
+      productsCount: catalogProducts.length,
+      servicesCount: catalogServices.length,
+      catalogProducts,
+      catalogServices,
+      customersCount,
+      visitorsCount,
+    };
+  });
+
+  const userFull = db.prepare('SELECT passcode, owner_uid, recovery_passcode_hash, recovery_hint, auth_provider, telegram_username, telegram_id, account_status FROM users WHERE id = ?').get(req.user.id) as any;
+  const allDemoAccounts = db.prepare(`
+    SELECT u.id, u.email, u.name, u.platform_role, u.preferred_language, u.owner_uid, u.telegram_username, u.account_status,
+      (SELECT GROUP_CONCAT(b.name, ', ') FROM businesses b WHERE b.owner_id = u.id) as owned_store_names
+    FROM users u
+    ORDER BY CASE WHEN u.platform_role = 'super_admin' THEN 0 ELSE 1 END, u.created_at ASC
+  `).all();
+
+  const mediaStats = db.prepare(`
+    SELECT COUNT(*) as totalAssets, COALESCE(SUM(byte_size), 0) as storedBytes, COALESCE(SUM(original_size), 0) as originalBytes
+    FROM media_assets
+  `).get() as any;
 
   res.json({
-    user: req.user,
-    businesses,
+    user: {
+      ...req.user,
+      owner_uid: userFull?.owner_uid || generateOwnerUid(req.user.name),
+      telegram_username: userFull?.telegram_username || '',
+      telegram_id: userFull?.telegram_id || '',
+      auth_provider: userFull?.auth_provider || 'email',
+      account_status: userFull?.account_status || 'active',
+      has_passcode: Boolean(userFull?.passcode),
+      has_recovery_passcode: Boolean(userFull?.recovery_passcode_hash),
+      recovery_hint: userFull?.recovery_hint || '',
+    },
+    businesses: enrichedBusinesses,
     availableAccounts: allDemoAccounts,
+    engineMetrics: {
+      sqliteMode: 'B-Tree Indexed + 256MB MMAP + 64MB Page Cache',
+      mediaAssetsCount: Number(mediaStats?.totalAssets || 0),
+      storedBytes: Number(mediaStats?.storedBytes || 0),
+      originalBytes: Number(mediaStats?.originalBytes || 0),
+    },
   });
 });
 
 app.post('/api/auth/login', (req: Request, res: Response) => {
   const { email, password } = req.body;
   if (!email || !password) {
-    res.status(400).json({ error: 'Email and password are required' });
+    res.status(400).json({ error: 'Email (or Store Owner ID) and password are required' });
     return;
   }
 
-  const user = db.prepare('SELECT * FROM users WHERE LOWER(email) = LOWER(?)').get(email) as any;
+  const cleanInput = String(email).trim();
+  const user = db.prepare(
+    'SELECT * FROM users WHERE LOWER(email) = LOWER(?) OR UPPER(owner_uid) = UPPER(?) OR LOWER(telegram_username) = LOWER(?)'
+  ).get(cleanInput, cleanInput, cleanInput.startsWith('@') ? cleanInput : `@${cleanInput}`) as any;
+
   if (!user || user.password_hash !== hashPassword(password)) {
-    res.status(401).json({ error: 'Invalid email or password' });
+    res.status(401).json({ error: 'Invalid credentials. If you forgot your email or password, use the Recovery Passcode tab.' });
     return;
+  }
+
+  if (!user.owner_uid) {
+    const newUid = generateOwnerUid(user.name);
+    db.prepare('UPDATE users SET owner_uid = ? WHERE id = ?').run(newUid, user.id);
+    user.owner_uid = newUid;
   }
 
   const token = 'sess_' + crypto.randomBytes(16).toString('hex');
@@ -216,6 +327,8 @@ app.post('/api/auth/login', (req: Request, res: Response) => {
       id: user.id,
       email: user.email,
       name: user.name,
+      owner_uid: user.owner_uid,
+      telegram_username: user.telegram_username || '',
       platform_role: user.platform_role,
       preferred_language: user.preferred_language,
     },
@@ -223,24 +336,48 @@ app.post('/api/auth/login', (req: Request, res: Response) => {
 });
 
 app.post('/api/auth/register', (req: Request, res: Response) => {
-  const { name, email, password, language } = req.body;
+  const { name, email, password, recovery_passcode, recovery_hint, telegram_username, language } = req.body;
   if (!name || !email || !password) {
     res.status(400).json({ error: 'Name, email, and password are required' });
     return;
   }
+  if (!recovery_passcode || String(recovery_passcode).trim().length < 4) {
+    res.status(400).json({
+      error: 'Please set a 4+ character/digit Recovery Passcode so you can always recover your account if you forget your email or password.',
+    });
+    return;
+  }
 
-  const existing = db.prepare('SELECT id FROM users WHERE LOWER(email) = LOWER(?)').get(email);
+  const existing = db.prepare('SELECT id FROM users WHERE LOWER(email) = LOWER(?)').get(String(email).trim());
   if (existing) {
     res.status(409).json({ error: 'An account with this email already exists' });
     return;
   }
 
   const userId = 'usr_' + crypto.randomBytes(5).toString('hex');
+  const ownerUid = generateOwnerUid(name);
   const now = new Date().toISOString();
+  const cleanTg = telegram_username
+    ? (String(telegram_username).trim().startsWith('@') ? String(telegram_username).trim() : `@${String(telegram_username).trim()}`)
+    : '';
+
   db.prepare(`
-    INSERT INTO users (id, email, name, password_hash, platform_role, preferred_language, created_at)
-    VALUES (?, ?, ?, ?, 'user', ?, ?)
-  `).run(userId, email, name, hashPassword(password), language || 'en', now);
+    INSERT INTO users (
+      id, email, name, password_hash, platform_role, telegram_username,
+      preferred_language, owner_uid, recovery_passcode_hash, recovery_hint, auth_provider, created_at
+    ) VALUES (?, ?, ?, ?, 'user', ?, ?, ?, ?, ?, 'email', ?)
+  `).run(
+    userId,
+    String(email).trim(),
+    String(name).trim(),
+    hashPassword(password),
+    cleanTg,
+    language || 'en',
+    ownerUid,
+    hashPassword(String(recovery_passcode).trim()),
+    String(recovery_hint || 'Store Owner Recovery Passcode').trim(),
+    now
+  );
 
   const token = 'sess_' + crypto.randomBytes(16).toString('hex');
   db.prepare(`
@@ -250,7 +387,161 @@ app.post('/api/auth/register', (req: Request, res: Response) => {
 
   res.json({
     token,
-    user: { id: userId, email, name, platform_role: 'user', preferred_language: language || 'en' },
+    user: {
+      id: userId,
+      email: String(email).trim(),
+      name: String(name).trim(),
+      owner_uid: ownerUid,
+      telegram_username: cleanTg,
+      platform_role: 'user',
+      preferred_language: language || 'en',
+    },
+  });
+});
+
+// Store Owner Sign-In / Sign-Up with Telegram Account
+app.post('/api/auth/telegram', (req: Request, res: Response) => {
+  const { telegram_username, telegram_id, name, recovery_passcode, language } = req.body;
+  const rawHandle = String(telegram_username || '').trim().replace(/^@+/, '');
+  if (!rawHandle) {
+    res.status(400).json({ error: 'Please enter your Telegram @username to continue with Telegram.' });
+    return;
+  }
+
+  const normalizedHandle = `@${rawHandle}`;
+  const now = new Date().toISOString();
+
+  // Check if Store Owner with this Telegram handle or ID already exists
+  let user = db.prepare(
+    'SELECT * FROM users WHERE LOWER(telegram_username) = LOWER(?) OR (telegram_id IS NOT NULL AND telegram_id != "" AND telegram_id = ?)'
+  ).get(normalizedHandle, String(telegram_id || '')) as any;
+
+  if (!user) {
+    // Creating a new Store Owner account via Telegram
+    if (!recovery_passcode || String(recovery_passcode).trim().length < 4) {
+      res.status(400).json({
+        error: 'First-time Telegram Store Owner registration: please set a 4+ digit/character Recovery Passcode below.',
+        requiresRegistrationDetails: true,
+      });
+      return;
+    }
+
+    const userId = 'usr_tg_' + crypto.randomBytes(4).toString('hex');
+    const displayName = String(name || rawHandle).trim();
+    const ownerUid = generateOwnerUid(displayName);
+    const syntheticEmail = `${rawHandle.toLowerCase()}@telegram.telebiz.os`;
+    const tgId = String(telegram_id || crypto.randomInt(100000000, 999999999));
+
+    db.prepare(`
+      INSERT INTO users (
+        id, email, name, password_hash, platform_role, telegram_id, telegram_username,
+        preferred_language, owner_uid, recovery_passcode_hash, recovery_hint, auth_provider, created_at
+      ) VALUES (?, ?, ?, ?, 'user', ?, ?, ?, ?, ?, 'Telegram Account Recovery Passcode', 'telegram', ?)
+    `).run(
+      userId,
+      syntheticEmail,
+      displayName,
+      hashPassword(String(recovery_passcode).trim()),
+      tgId,
+      normalizedHandle,
+      language || 'en',
+      ownerUid,
+      hashPassword(String(recovery_passcode).trim()),
+      now
+    );
+
+    user = db.prepare('SELECT * FROM users WHERE id = ?').get(userId);
+  } else if (!user.owner_uid) {
+    const newUid = generateOwnerUid(user.name);
+    db.prepare('UPDATE users SET owner_uid = ? WHERE id = ?').run(newUid, user.id);
+    user.owner_uid = newUid;
+  }
+
+  const token = 'sess_' + crypto.randomBytes(16).toString('hex');
+  db.prepare(`
+    INSERT INTO sessions (token, user_id, expires_at, ip_address, user_agent, revoked, created_at)
+    VALUES (?, ?, ?, ?, ?, 0, ?)
+  `).run(token, user.id, new Date(Date.now() + 7 * 86400000).toISOString(), req.ip || '', req.headers['user-agent'] || '', now);
+
+  res.json({
+    token,
+    user: {
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      owner_uid: user.owner_uid,
+      telegram_username: user.telegram_username,
+      platform_role: user.platform_role,
+      preferred_language: user.preferred_language,
+    },
+  });
+});
+
+// Recover Forgotten Email or Password using Secondary Recovery Passcode
+app.post('/api/auth/recover', (req: Request, res: Response) => {
+  const { identifier, recovery_passcode, new_password } = req.body;
+  if (!identifier || !recovery_passcode) {
+    res.status(400).json({
+      error: 'Please enter your Email, Store Owner ID (OWN-...), Telegram @username, or Full Name along with your Recovery Passcode.',
+    });
+    return;
+  }
+
+  const cleanId = String(identifier).trim();
+  const handleCandidate = cleanId.startsWith('@') ? cleanId : `@${cleanId}`;
+  const user = db.prepare(`
+    SELECT * FROM users
+    WHERE LOWER(email) = LOWER(?)
+       OR UPPER(owner_uid) = UPPER(?)
+       OR LOWER(telegram_username) = LOWER(?)
+       OR LOWER(name) = LOWER(?)
+  `).get(cleanId, cleanId, handleCandidate, cleanId) as any;
+
+  if (!user) {
+    res.status(404).json({
+      error: 'No Store Owner account matched that Email, Owner ID, Telegram username, or Name.',
+    });
+    return;
+  }
+
+  const enteredHash = hashPassword(String(recovery_passcode).trim());
+  const matchesRecovery = user.recovery_passcode_hash && user.recovery_passcode_hash === enteredHash;
+  const matchesPin = user.passcode && String(user.passcode).trim() === String(recovery_passcode).trim();
+
+  if (!matchesRecovery && !matchesPin) {
+    res.status(401).json({
+      error: 'Invalid Recovery Passcode for this account. (Tip: Demo accounts use recovery passcode 2026)',
+    });
+    return;
+  }
+
+  if (new_password && String(new_password).trim().length >= 4) {
+    db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(
+      hashPassword(String(new_password).trim()),
+      user.id
+    );
+  }
+
+  const now = new Date().toISOString();
+  const token = 'sess_' + crypto.randomBytes(16).toString('hex');
+  db.prepare(`
+    INSERT INTO sessions (token, user_id, expires_at, ip_address, user_agent, revoked, created_at)
+    VALUES (?, ?, ?, ?, ?, 0, ?)
+  `).run(token, user.id, new Date(Date.now() + 7 * 86400000).toISOString(), req.ip || '', req.headers['user-agent'] || '', now);
+
+  res.json({
+    token,
+    recoveredEmail: user.email,
+    ownerUid: user.owner_uid,
+    user: {
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      owner_uid: user.owner_uid,
+      telegram_username: user.telegram_username || '',
+      platform_role: user.platform_role,
+      preferred_language: user.preferred_language,
+    },
   });
 });
 
@@ -280,6 +571,157 @@ app.patch('/api/auth/language', (req: Request, res: Response) => {
   res.json({ preferred_language: language });
 });
 
+// Update current user/admin profile (name, email, telegram_username)
+app.patch('/api/auth/profile', (req: Request, res: Response) => {
+  if (!req.user) {
+    res.status(401).json({ error: 'Authentication required' });
+    return;
+  }
+  const { name, email, telegram_username } = req.body;
+  if (!name || !String(name).trim()) {
+    res.status(400).json({ error: 'Name cannot be empty.' });
+    return;
+  }
+  const cleanEmail = email ? String(email).trim() : req.user.email;
+  const existing = db.prepare('SELECT id FROM users WHERE LOWER(email) = LOWER(?) AND id != ?').get(cleanEmail, req.user.id);
+  if (existing) {
+    res.status(409).json({ error: 'Another account already uses this email.' });
+    return;
+  }
+
+  db.prepare('UPDATE users SET name = ?, email = ?, telegram_username = ? WHERE id = ?').run(
+    String(name).trim(),
+    cleanEmail,
+    telegram_username !== undefined ? String(telegram_username).trim() : '',
+    req.user.id
+  );
+
+  const updated = db.prepare('SELECT id, email, name, platform_role, preferred_language, telegram_username, passcode FROM users WHERE id = ?').get(req.user.id) as any;
+  res.json({
+    user: {
+      id: updated.id,
+      email: updated.email,
+      name: updated.name,
+      platform_role: updated.platform_role,
+      preferred_language: updated.preferred_language,
+      telegram_username: updated.telegram_username || '',
+      has_passcode: Boolean(updated.passcode),
+    },
+  });
+});
+
+// Update current user/admin password
+app.post('/api/auth/password', (req: Request, res: Response) => {
+  if (!req.user) {
+    res.status(401).json({ error: 'Authentication required' });
+    return;
+  }
+  const { newPassword } = req.body;
+  if (!newPassword || String(newPassword).length < 4) {
+    res.status(400).json({ error: 'New password must be at least 4 characters.' });
+    return;
+  }
+  db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(hashPassword(String(newPassword)), req.user.id);
+  recordAuditLog({
+    actorUserId: req.user.id,
+    actorName: req.user.name,
+    actorRole: req.user.platform_role,
+    action: 'UPDATE_ACCOUNT_PASSWORD',
+    targetType: 'user',
+    targetId: req.user.id,
+    reason: 'User updated account password in Settings',
+  });
+  res.json({ success: true });
+});
+
+// Set, verify, or clear security passcode lock
+app.post('/api/auth/passcode', (req: Request, res: Response) => {
+  if (!req.user) {
+    res.status(401).json({ error: 'Authentication required' });
+    return;
+  }
+  const { action, passcode } = req.body;
+  const userRow = db.prepare('SELECT passcode FROM users WHERE id = ?').get(req.user.id) as any;
+
+  if (action === 'verify') {
+    if (!userRow?.passcode || userRow.passcode === String(passcode || '').trim()) {
+      res.json({ verified: true });
+    } else {
+      res.status(401).json({ error: 'Incorrect passcode. Please try again.' });
+    }
+    return;
+  }
+
+  if (action === 'clear') {
+    db.prepare("UPDATE users SET passcode = '' WHERE id = ?").run(req.user.id);
+    res.json({ success: true, has_passcode: false });
+    return;
+  }
+
+  const cleanPin = String(passcode || '').trim();
+  if (!/^\d{4,6}$/.test(cleanPin)) {
+    res.status(400).json({ error: 'Passcode must be a 4 to 6 digit number.' });
+    return;
+  }
+  db.prepare('UPDATE users SET passcode = ? WHERE id = ?').run(cleanPin, req.user.id);
+  res.json({ success: true, has_passcode: true });
+});
+
+// List & add Platform Co-Admins (Super Admin management)
+app.get('/api/superadmin/admins', (req: Request, res: Response) => {
+  if (!req.user) {
+    res.status(401).json({ error: 'Authentication required' });
+    return;
+  }
+  const admins = db.prepare("SELECT id, email, name, platform_role, telegram_username, created_at FROM users WHERE platform_role = 'super_admin' ORDER BY created_at ASC").all();
+  res.json(admins);
+});
+
+app.post('/api/superadmin/admins', (req: Request, res: Response) => {
+  if (!req.user || req.user.platform_role !== 'super_admin') {
+    res.status(403).json({ error: 'Only Platform Super Admins can add new platform administrators.' });
+    return;
+  }
+  const { name, email, password, telegram_username } = req.body;
+  if (!name || !email || !password) {
+    res.status(400).json({ error: 'Admin name, email, and password are required.' });
+    return;
+  }
+  const existing = db.prepare('SELECT id FROM users WHERE LOWER(email) = LOWER(?)').get(String(email).trim()) as any;
+  const now = new Date().toISOString();
+  if (existing) {
+    db.prepare("UPDATE users SET platform_role = 'super_admin', name = ?, password_hash = ? WHERE id = ?").run(
+      String(name).trim(),
+      hashPassword(String(password)),
+      existing.id
+    );
+  } else {
+    db.prepare(`
+      INSERT INTO users (id, email, name, password_hash, platform_role, telegram_username, preferred_language, created_at)
+      VALUES (?, ?, ?, ?, 'super_admin', ?, 'en', ?)
+    `).run(
+      'usr_adm_' + crypto.randomBytes(4).toString('hex'),
+      String(email).trim(),
+      String(name).trim(),
+      hashPassword(String(password)),
+      String(telegram_username || '').trim(),
+      now
+    );
+  }
+  recordAuditLog({
+    actorUserId: req.user.id,
+    actorName: req.user.name,
+    actorRole: 'super_admin',
+    action: 'ADD_PLATFORM_ADMIN',
+    targetType: 'user',
+    targetId: String(email).trim(),
+    newValue: `${name} (${email}) promoted/added as super_admin`,
+    reason: 'Added via Admin Settings Menu',
+  });
+  const admins = db.prepare("SELECT id, email, name, platform_role, telegram_username, created_at FROM users WHERE platform_role = 'super_admin' ORDER BY created_at ASC").all();
+  res.status(201).json(admins);
+});
+
 // ============================================================================
 // 2. BUSINESS CREATION (DONE-FOR-YOU, SELF-SERVICE, AI BUILDER) & CONFIG
 // ============================================================================
@@ -294,12 +736,14 @@ app.post('/api/businesses', (req: Request, res: Response) => {
     name,
     category,
     creation_method,
+    template_id,
     description,
     contact_phone,
     contact_email,
     address,
     primary_color,
     accent_color,
+    font_family,
     dfy_notes,
     telegram_bot_username,
   } = req.body;
@@ -317,16 +761,121 @@ app.post('/api/businesses', (req: Request, res: Response) => {
   const published = creation_method === 'done_for_you' ? 0 : 1;
   const initials = name.split(' ').map((w: string) => w[0]).join('').slice(0, 2).toUpperCase() || 'TB';
 
+  // Determine template defaults based on template_id or category
+  const templatePresets: Record<string, {
+    primary: string;
+    accent: string;
+    font: string;
+    categories: string[];
+    heroTitle: string;
+    heroSub: string;
+    products: Array<{ cat: string; name: string; desc: string; price: number; compare: number; vars: string[]; img: string }>;
+    service: { name: string; desc: string; mins: number; price: number };
+  }> = {
+    royal_boutique: {
+      primary: '#0F382A',
+      accent: '#C69C6D',
+      font: 'Playfair Display',
+      categories: ['Thobes', 'Agal', 'Bishts', 'Jalabiyas', 'Accessories'],
+      heroTitle: `Timeless Elegance by ${name}`,
+      heroSub: description || 'Traditional wear & luxury apparel crafted for modern lifestyle.',
+      products: [
+        { cat: 'Thobes', name: 'Classic Tailored Thobe', desc: 'Premium long-staple cotton with structured collar.', price: 4850, compare: 6450, vars: ['S', 'M', 'L', 'XL', 'XXL'], img: 'thobe_white' },
+        { cat: 'Thobes', name: 'Embroidered Royal Thobe', desc: 'Obsidian luxury weave with artisanal gold-thread embroidery.', price: 6950, compare: 8900, vars: ['S', 'M', 'L', 'XL', 'XXL'], img: 'thobe_black' },
+        { cat: 'Bishts', name: 'Ceremonial Gold-Trimmed Bisht', desc: 'Hand-finished formal cloak with golden zari border.', price: 14500, compare: 18000, vars: ['M', 'L', 'XL'], img: 'bisht_gold' },
+        { cat: 'Accessories', name: 'Royal Oud & Cufflink Set', desc: 'Presentation gift box with aged Oud and brushed cufflinks.', price: 5900, compare: 7500, vars: ['Gold Edition', 'Silver Edition'], img: 'accessories_gold' },
+      ],
+      service: { name: 'Private Bespoke Measurement & Fitting', desc: '1-on-1 tailoring session at our showroom.', mins: 45, price: 1200 },
+    },
+    artisanal_coffee: {
+      primary: '#1E1B18',
+      accent: '#B45309',
+      font: 'Fraunces',
+      categories: ['Single-Origin Beans', 'Brewing Hardware', 'Cold Brew & RTD', 'Gift Boxes'],
+      heroTitle: `Fresh Peak-Harvest Roasts by ${name}`,
+      heroSub: description || 'Specialty coffee beans & brewing gear delivered via Telegram & Web.',
+      products: [
+        { cat: 'Single-Origin Beans', name: 'Yirgacheffe Grade 1 Micro-Lot (500g)', desc: 'Jasmine aromatics, bergamot, and sweet peach finish.', price: 980, compare: 1150, vars: ['Whole Bean', 'Espresso Grind', 'Filter Grind'], img: 'coffee' },
+        { cat: 'Single-Origin Beans', name: 'Guji Anaerobic Natural (500g)', desc: 'Wild strawberry, dark cacao, and syrupy body.', price: 1250, compare: 1450, vars: ['Whole Bean', 'V60 Grind'], img: 'coffee' },
+        { cat: 'Brewing Hardware', name: 'Artisan Ceramic Pour-Over Kit', desc: 'Thermal retention dripper, server, and 100 filters.', price: 3450, compare: 3900, vars: ['Obsidian Matte', 'Warm Sand'], img: 'ceramic' },
+        { cat: 'Cold Brew & RTD', name: 'Nitro Cold Brew 6-Pack', desc: 'Velvety nitrogen-infused cold brew cans.', price: 1100, compare: 1350, vars: ['Original Black', 'Cardamom'], img: 'coldbrew' },
+      ],
+      service: { name: 'Private Roastery Cupping & Tasting', desc: 'Guided sensory tasting of 5 seasonal lots.', mins: 60, price: 850 },
+    },
+    digital_menu: {
+      primary: '#7C2D12',
+      accent: '#EA580C',
+      font: 'Outfit',
+      categories: ['Signature Dishes', 'Wood-Fired Specials', 'Artisan Drinks', 'Desserts'],
+      heroTitle: `Order Fresh from ${name}`,
+      heroSub: description || 'Hot kitchen-to-door delivery and instant table reservations.',
+      products: [
+        { cat: 'Signature Dishes', name: 'Chef Royal Mixed Platter (For 2)', desc: 'Chargrilled prime cuts, saffron rice, and house flatbread.', price: 1850, compare: 2200, vars: ['Mild Spice', 'Medium', 'Chef Spicy'], img: 'coffee' },
+        { cat: 'Wood-Fired Specials', name: 'Truffle & Burrata Artisan Flatbread', desc: '24-hour fermented sourdough baked in our stone oven.', price: 950, compare: 1150, vars: ['Regular 12"', 'Family 16"'], img: 'ceramic' },
+        { cat: 'Artisan Drinks', name: 'Spiced Hibiscus & Mint Cooler', desc: 'House-brewed botanical refresher with fresh lime.', price: 320, compare: 400, vars: ['Chilled', 'No Ice'], img: 'coldbrew' },
+        { cat: 'Desserts', name: 'Pistachio Baklava Cheesecake', desc: 'Layered crispy phyllo, roasted pistachios, and honey glaze.', price: 580, compare: 700, vars: ['Single Slice', 'Share Box'], img: 'leather' },
+      ],
+      service: { name: 'VIP Chef Table Reservation', desc: 'Priority courtyard or private dining room table.', mins: 90, price: 500 },
+    },
+    luxury_hotel: {
+      primary: '#0F172A',
+      accent: '#0D9488',
+      font: 'Playfair Display',
+      categories: ['Suites & Rooms', 'Dining & Brunch', 'Spa & Wellness', 'Airport Transfers'],
+      heroTitle: `Welcome to ${name}`,
+      heroSub: description || 'Boutique suites, fine dining & private wellness experiences.',
+      products: [
+        { cat: 'Dining & Brunch', name: 'Sunday Champagne & Jazz Brunch (For 2)', desc: 'All-inclusive culinary buffet and heated infinity pool pass.', price: 4200, compare: 4900, vars: ['Courtyard Table', 'Poolside Cabana'], img: 'hotel' },
+        { cat: 'Spa & Wellness', name: 'Full-Day Thermal Spa & Massage Pass', desc: '60-minute aromatherapy massage, sauna, and herbal lounge.', price: 3600, compare: 4200, vars: ['Single Guest', 'Couples Suite'], img: 'salon' },
+        { cat: 'Suites & Rooms', name: 'Romantic Weekend Suite Package', desc: 'Panoramic executive suite with late checkout and breakfast.', price: 12500, compare: 15000, vars: ['King View', 'Terrace Suite'], img: 'hotel' },
+        { cat: 'Airport Transfers', name: 'Chauffeured Executive SUV Pickup', desc: 'Private VIP terminal meet-and-greet transfer.', price: 2400, compare: 2900, vars: ['One-Way', 'Round-Trip'], img: 'leather' },
+      ],
+      service: { name: 'Executive Suite & Event Viewing', desc: 'Private tour and reservation consultation.', mins: 45, price: 0 },
+    },
+    wellness_salon: {
+      primary: '#3B0764',
+      accent: '#E11D48',
+      font: 'Playfair Display',
+      categories: ['Botanical Hair Care', 'Skincare & Facials', 'Hammam & Body', 'Take-Home Kits'],
+      heroTitle: `Radiant Self-Care at ${name}`,
+      heroSub: description || 'Holistic beauty treatments and organic botanical care.',
+      products: [
+        { cat: 'Take-Home Kits', name: 'Moroccan Argan & Rosehip Repair Serum', desc: 'Cold-pressed organic elixir for luminous skin and hair.', price: 1850, compare: 2300, vars: ['50ml Dropper', '100ml Salon Size'], img: 'salon' },
+        { cat: 'Botanical Hair Care', name: 'Keratin Silk & Botanical Mask Kit', desc: 'Sulfate-free restorative shampoo and deep conditioning mask.', price: 2950, compare: 3500, vars: ['Hydrating', 'Color Protect'], img: 'salon' },
+        { cat: 'Skincare & Facials', name: 'Vitamin C Brightening Ritual Set', desc: 'Clinical-grade cleanser, toner, and brightening serum.', price: 3400, compare: 4100, vars: ['Normal Skin', 'Sensitive Skin'], img: 'ceramic' },
+        { cat: 'Hammam & Body', name: 'Eucalyptus Black Soap & Kessa Glove', desc: 'Authentic exfoliating hammam ritual kit.', price: 1450, compare: 1800, vars: ['Eucalyptus', 'Orange Blossom'], img: 'leather' },
+      ],
+      service: { name: 'Signature 75-Min Botanical Facial & Massage', desc: 'Customized holistic skin and scalp rejuvenation.', mins: 75, price: 2800 },
+    },
+  };
+
+  const chosenPresetKey =
+    template_id && templatePresets[template_id]
+      ? template_id
+      : category === 'restaurant'
+      ? 'digital_menu'
+      : category === 'hotel'
+      ? 'luxury_hotel'
+      : category === 'salon'
+      ? 'wellness_salon'
+      : 'royal_boutique';
+  const preset = templatePresets[chosenPresetKey];
+
+  const finalPrimary = primary_color || preset.primary;
+  const finalAccent = accent_color || preset.accent;
+  const finalFont = font_family || preset.font;
+  const finalCategoriesJson = JSON.stringify(preset.categories);
+
   db.prepare(`
     INSERT INTO businesses (
       id, slug, name, category, status, creation_method, dfy_status, dfy_notes,
       plan_id, billing_cycle, subscription_status, subscription_expires_at, grace_period_days,
-      primary_color, accent_color, logo_text, description, about_text,
+      primary_color, accent_color, font_family, categories_json, logo_text, description, about_text,
       contact_phone, contact_email, address, working_hours_json, custom_domain,
       restricted_features_json, telegram_bot_token_masked, telegram_bot_username,
       telegram_channel_username, telegram_webhook_active, mini_app_published,
       mini_app_version, ai_generations_used, ai_generations_limit, owner_id, created_at
-    ) VALUES (?, ?, ?, ?, 'active', ?, ?, ?, 'growth', 'monthly', 'active', ?, 7, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', '[]', '', ?, '', 0, ?, 1, 0, 25, ?, ?)
+    ) VALUES (?, ?, ?, ?, 'active', ?, ?, ?, 'growth', 'monthly', 'active', ?, 7, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', '[]', '', ?, '', 0, ?, 1, 0, 25, ?, ?)
   `).run(
     bizId,
     slug,
@@ -336,15 +885,17 @@ app.post('/api/businesses', (req: Request, res: Response) => {
     dfyStatus,
     dfy_notes || '',
     expiresAt,
-    primary_color || '#0F172A',
-    accent_color || '#0284C7',
+    finalPrimary,
+    finalAccent,
+    finalFont,
+    finalCategoriesJson,
     initials,
-    description || `${name} official Telegram Mini App and Web Storefront.`,
-    `Welcome to ${name}. Order or book directly via Telegram or Web.`,
+    description || preset.heroSub,
+    `Welcome to ${name}. Order or book directly via Telegram Mini App or Web Storefront with fast delivery and verified checkout.`,
     contact_phone || '+251 911 000 000',
     contact_email || req.user.email,
     address || 'Addis Ababa, Ethiopia',
-    JSON.stringify({ mon_fri: '08:30 - 19:00', sat: '09:00 - 18:00', sun: 'Closed' }),
+    JSON.stringify({ mon_fri: '08:30 - 20:00', sat: '09:00 - 21:00', sun: '10:00 - 18:00' }),
     telegram_bot_username || `@${slug.replace(/-/g, '')}Bot`,
     published,
     req.user.id,
@@ -355,8 +906,8 @@ app.post('/api/businesses', (req: Request, res: Response) => {
   const branchId = 'br_' + crypto.randomBytes(4).toString('hex');
   db.prepare(`
     INSERT INTO business_branches (id, business_id, name, address, phone, manager_name, working_hours, is_main, status)
-    VALUES (?, ?, ?, ?, ?, ?, '08:30 - 19:00', 1, 'open')
-  `).run(branchId, bizId, `${name} Main Branch`, address || 'Addis Ababa', contact_phone || '+251 911 000 000', req.user.name);
+    VALUES (?, ?, ?, ?, ?, ?, '08:30 - 20:00', 1, 'open')
+  `).run(branchId, bizId, `${name} Flagship Branch`, address || 'Addis Ababa', contact_phone || '+251 911 000 000', req.user.name);
 
   // Create owner employee record
   db.prepare(`
@@ -364,31 +915,79 @@ app.post('/api/businesses', (req: Request, res: Response) => {
     VALUES (?, ?, ?, ?, ?, 'owner', '["all"]', ?, '{"shift":"Full Access"}', 'active', ?)
   `).run('emp_' + crypto.randomBytes(4).toString('hex'), bizId, req.user.id, req.user.name, req.user.email, branchId, now);
 
+  // Seed starter products so the owner immediately sees a rich visual storefront
+  const insertStarterProd = db.prepare(`
+    INSERT INTO products (
+      id, business_id, category_name, name, description, price, compare_at_price,
+      currency, stock, sku, variations_json, featured, available, image_type,
+      views_count, likes_count, purchases_count, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, 'ETB', 25, ?, ?, 1, 1, ?, 48, 19, 7, ?)
+  `);
+  preset.products.forEach((p, idx) => {
+    insertStarterProd.run(
+      'prd_' + crypto.randomBytes(4).toString('hex'),
+      bizId,
+      p.cat,
+      p.name,
+      p.desc,
+      p.price,
+      p.compare,
+      `${initials}-0${idx + 1}`,
+      JSON.stringify(p.vars),
+      p.img,
+      now
+    );
+  });
+
+  // Seed starter bookable service
+  db.prepare(`
+    INSERT INTO services_listings (id, business_id, name, description, duration_mins, price, currency, capacity, available_slots_json, available, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, 'ETB', 2, '["09:30","11:30","14:30","16:30"]', 1, ?)
+  `).run(
+    'srv_' + crypto.randomBytes(4).toString('hex'),
+    bizId,
+    preset.service.name,
+    preset.service.desc,
+    preset.service.mins,
+    preset.service.price,
+    now
+  );
+
+  // Seed starter welcome promotion
+  db.prepare(`
+    INSERT INTO promotions (id, business_id, code, name, discount_type, discount_value, min_order_amount, usage_count, max_uses, active, expires_at)
+    VALUES (?, ?, 'WELCOME15', '15% Off First Storefront Order', 'percentage', 15, 500, 1, 200, 1, ?)
+  `).run('prm_' + crypto.randomBytes(4).toString('hex'), bizId, expiresAt);
+
   // Create initial Mini App Version 1
   const initialLayout = JSON.stringify([
-    { id: 'sec_hero', type: 'hero', title: `Welcome to ${name}`, subtitle: description || 'Fast ordering and booking via Telegram & Web.', ctaText: 'Browse Offerings', visible: true },
-    { id: 'sec_catalog', type: 'product_grid', title: 'Featured Catalog', subtitle: 'Select items to order immediately.', visible: true },
-    { id: 'sec_bookings', type: 'booking_widget', title: 'Schedule an Appointment or Reservation', subtitle: 'Choose a date and time slot.', visible: true },
-    { id: 'sec_about', type: 'business_info', title: 'Location, Hours & Direct Support', subtitle: address || 'Addis Ababa', visible: true }
+    { id: 'sec_hero', type: 'hero', title: preset.heroTitle, subtitle: preset.heroSub, ctaText: 'Shop Now', visible: true },
+    { id: 'sec_featured', type: 'featured_products', title: 'Best Sellers', subtitle: 'Handpicked customer favorites.', visible: true },
+    { id: 'sec_catalog', type: 'product_grid', title: 'Shop By Category', subtitle: 'Select items and variations to order.', visible: true },
+    { id: 'sec_bookings', type: 'booking_widget', title: 'Book an Appointment or Fitting', subtitle: 'Choose your preferred date and time.', visible: true },
+    { id: 'sec_promo', type: 'promo_banner', title: 'Use code WELCOME15 for 15% OFF your first order', subtitle: 'Valid across Telegram & Web.', visible: true },
+    { id: 'sec_about', type: 'business_info', title: 'Location, Hours & Direct Support', subtitle: address || 'Addis Ababa', visible: true },
   ]);
   const initialTheme = JSON.stringify({
-    primaryColor: primary_color || '#0F172A',
-    accentColor: accent_color || '#0284C7',
-    cardRadius: '12px',
+    primaryColor: finalPrimary,
+    accentColor: finalAccent,
+    fontFamily: finalFont,
+    buttonStyle: '3d_solid',
+    cardRadius: '20px',
     showStockBadges: true,
     enableTelegramStars: true,
-    enableWebCheckout: true
+    enableWebCheckout: true,
   });
   const initialPages = JSON.stringify([
     { slug: 'home', title: 'Home', enabled: true },
-    { slug: 'catalog', title: 'Catalog', enabled: true },
+    { slug: 'catalog', title: 'Categories', enabled: true },
     { slug: 'bookings', title: 'Bookings', enabled: true },
-    { slug: 'about', title: 'About & Contact', enabled: true }
+    { slug: 'about', title: 'About & Contact', enabled: true },
   ]);
 
   db.prepare(`
     INSERT INTO mini_app_versions (id, business_id, version_number, layout_json, theme_json, pages_json, status, created_by, note, created_at)
-    VALUES (?, ?, 1, ?, ?, ?, ?, ?, 'Initial application creation', ?)
+    VALUES (?, ?, 1, ?, ?, ?, ?, ?, 'Initial visual template creation', ?)
   `).run('ver_' + crypto.randomBytes(4).toString('hex'), bizId, initialLayout, initialTheme, initialPages, published ? 'published' : 'draft', req.user.name, now);
 
   recordAuditLog({
@@ -399,11 +998,85 @@ app.post('/api/businesses', (req: Request, res: Response) => {
     action: 'CREATE_BUSINESS',
     targetType: 'business',
     targetId: bizId,
-    newValue: `${name} (${category}, ${creation_method})`,
+    newValue: `${name} (${category}, ${creation_method}, template=${chosenPresetKey})`,
   });
+
+  ensureDefaultBusinessPaymentMethods();
 
   const created = db.prepare('SELECT * FROM businesses WHERE id = ?').get(bizId);
   res.status(201).json(created);
+});
+
+// Quick 3-dot menu actions on a business store (Pause, Resume, Delete)
+app.post('/api/businesses/:id/quick-action', (req: Request, res: Response) => {
+  const access = verifyTenantAccess(req.user, req.params.id);
+  if (!access.allowed || (access.role !== 'owner' && access.role !== 'super_admin')) {
+    res.status(403).json({ error: 'Only the Business Owner or Platform Super Admin can perform this store action.' });
+    return;
+  }
+  const business = access.business;
+  const { action } = req.body; // 'pause' | 'resume' | 'delete'
+
+  if (action === 'pause') {
+    db.prepare("UPDATE businesses SET status = 'paused' WHERE id = ?").run(business.id);
+    recordAuditLog({
+      actorUserId: req.user!.id,
+      actorName: req.user!.name,
+      actorRole: access.role!,
+      businessId: business.id,
+      action: 'PAUSE_BUSINESS',
+      targetType: 'business',
+      targetId: business.id,
+      previousValue: business.status,
+      newValue: 'paused',
+      reason: 'Paused via Business Brand List 3-dot menu',
+    });
+    res.json({ success: true, status: 'paused' });
+    return;
+  }
+
+  if (action === 'resume') {
+    db.prepare("UPDATE businesses SET status = 'active', subscription_status = 'active' WHERE id = ?").run(business.id);
+    recordAuditLog({
+      actorUserId: req.user!.id,
+      actorName: req.user!.name,
+      actorRole: access.role!,
+      businessId: business.id,
+      action: 'RESTORE_ACCESS',
+      targetType: 'business',
+      targetId: business.id,
+      previousValue: business.status,
+      newValue: 'active',
+      reason: 'Resumed via Business Brand List 3-dot menu',
+    });
+    res.json({ success: true, status: 'active' });
+    return;
+  }
+
+  if (action === 'delete') {
+    const countRow = db.prepare('SELECT COUNT(*) as cnt FROM businesses').get() as { cnt: number };
+    if (countRow.cnt <= 1) {
+      res.status(400).json({ error: 'Cannot delete the last remaining business on the platform.' });
+      return;
+    }
+    db.prepare('DELETE FROM businesses WHERE id = ?').run(business.id);
+    recordAuditLog({
+      actorUserId: req.user!.id,
+      actorName: req.user!.name,
+      actorRole: access.role!,
+      businessId: null,
+      action: 'DELETE_BUSINESS',
+      targetType: 'business',
+      targetId: business.id,
+      previousValue: business.name,
+      newValue: 'DELETED',
+      reason: 'Deleted via Business Brand List 3-dot menu',
+    });
+    res.json({ success: true, deletedId: business.id });
+    return;
+  }
+
+  res.status(400).json({ error: 'Invalid quick action' });
 });
 
 // Get full tenant workspace data
@@ -558,6 +1231,7 @@ app.patch('/api/businesses/:id/settings', (req: Request, res: Response) => {
     custom_domain,
     primary_color,
     accent_color,
+    font_family,
     working_hours_json,
     dfy_status,
     dfy_notes,
@@ -568,7 +1242,7 @@ app.patch('/api/businesses/:id/settings', (req: Request, res: Response) => {
   db.prepare(`
     UPDATE businesses SET
       name = ?, description = ?, about_text = ?, contact_phone = ?, contact_email = ?,
-      address = ?, custom_domain = ?, primary_color = ?, accent_color = ?,
+      address = ?, custom_domain = ?, primary_color = ?, accent_color = ?, font_family = ?,
       working_hours_json = ?, dfy_status = ?, dfy_notes = ?, mini_app_published = ?
     WHERE id = ?
   `).run(
@@ -581,6 +1255,7 @@ app.patch('/api/businesses/:id/settings', (req: Request, res: Response) => {
     custom_domain ?? b.custom_domain,
     primary_color ?? b.primary_color,
     accent_color ?? b.accent_color,
+    font_family ?? (b.font_family || 'Plus Jakarta Sans'),
     working_hours_json ? (typeof working_hours_json === 'string' ? working_hours_json : JSON.stringify(working_hours_json)) : b.working_hours_json,
     dfy_status ?? b.dfy_status,
     dfy_notes ?? b.dfy_notes,
@@ -675,10 +1350,18 @@ app.post('/api/businesses/:id/builder/save', (req: Request, res: Response) => {
   );
 
   if (status === 'published') {
-    db.prepare('UPDATE businesses SET mini_app_version = ?, mini_app_published = 1, primary_color = ?, accent_color = ? WHERE id = ?').run(
+    db.prepare('UPDATE businesses SET mini_app_version = ?, mini_app_published = 1, primary_color = ?, accent_color = ?, font_family = ? WHERE id = ?').run(
       nextVer,
       theme?.primaryColor || access.business.primary_color,
       theme?.accentColor || access.business.accent_color,
+      theme?.fontFamily || access.business.font_family || 'Plus Jakarta Sans',
+      req.params.id
+    );
+  } else if (theme?.fontFamily || theme?.primaryColor || theme?.accentColor) {
+    db.prepare('UPDATE businesses SET primary_color = ?, accent_color = ?, font_family = ? WHERE id = ?').run(
+      theme?.primaryColor || access.business.primary_color,
+      theme?.accentColor || access.business.accent_color,
+      theme?.fontFamily || access.business.font_family || 'Plus Jakarta Sans',
       req.params.id
     );
   }
@@ -848,8 +1531,84 @@ CRITICAL RULES:
 });
 
 // ============================================================================
-// 5. STORE PRODUCTS, SERVICES, ORDERS, BOOKINGS & PAYMENTS
+// 5. STORE PRODUCTS, DEVICE PHOTO UPLOAD ENGINE, ORDERS, BOOKINGS & PAYMENTS
 // ============================================================================
+
+// High-Performance SHA-256 Deduplicated Image Upload Engine (Supports 1M+ Photos without bloating SQLite)
+app.post('/api/businesses/:id/media/upload', (req: Request, res: Response) => {
+  const access = verifyTenantAccess(req.user, req.params.id, 'products.manage');
+  if (!access.allowed) {
+    res.status(403).json({ error: access.error });
+    return;
+  }
+
+  const { dataUrl, width, height, originalSize } = req.body;
+  if (!dataUrl || typeof dataUrl !== 'string' || !dataUrl.startsWith('data:image/')) {
+    res.status(400).json({ error: 'Valid compressed image data URL is required.' });
+    return;
+  }
+
+  const match = dataUrl.match(/^data:(image\/[a-zA-Z0-9+.-]+);base64,(.+)$/);
+  if (!match) {
+    res.status(400).json({ error: 'Malformed image payload.' });
+    return;
+  }
+
+  const mimeType = match[1];
+  const base64Data = match[2];
+  const buffer = Buffer.from(base64Data, 'base64');
+  const byteSize = buffer.byteLength;
+
+  if (byteSize > 8 * 1024 * 1024) {
+    res.status(413).json({ error: 'Image exceeds 8MB limit after compression.' });
+    return;
+  }
+
+  // Content-Addressable SHA-256 hash so identical photos are deduplicated on disk
+  const sha256Hash = crypto.createHash('sha256').update(buffer).digest('hex');
+  const ext = mimeType.includes('webp') ? 'webp' : mimeType.includes('png') ? 'png' : 'jpg';
+  const fileName = `img_${sha256Hash.slice(0, 24)}.${ext}`;
+  const filePath = path.join(uploadsDir, fileName);
+  const publicUrl = `/uploads/media/${fileName}`;
+
+  if (!fs.existsSync(filePath)) {
+    fs.writeFileSync(filePath, buffer);
+  }
+
+  const origBytes = Number(originalSize || byteSize);
+  const ratio = origBytes > 0 ? Number((byteSize / origBytes).toFixed(2)) : 1.0;
+  const mediaId = 'med_' + crypto.randomBytes(5).toString('hex');
+
+  db.prepare(`
+    INSERT INTO media_assets (
+      id, business_id, owner_id, sha256_hash, file_path, public_url,
+      mime_type, width, height, byte_size, original_size, compression_ratio, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    mediaId,
+    req.params.id,
+    req.user?.id || null,
+    sha256Hash,
+    filePath,
+    publicUrl,
+    mimeType,
+    Number(width || 800),
+    Number(height || 800),
+    byteSize,
+    origBytes,
+    ratio,
+    new Date().toISOString()
+  );
+
+  res.status(201).json({
+    id: mediaId,
+    url: publicUrl,
+    sha256: sha256Hash,
+    byteSize,
+    originalSize: origBytes,
+    savedPercent: origBytes > byteSize ? Math.round((1 - byteSize / origBytes) * 100) : 0,
+  });
+});
 
 app.post('/api/businesses/:id/products', (req: Request, res: Response) => {
   const access = verifyTenantAccess(req.user, req.params.id, 'products.manage');
@@ -858,34 +1617,83 @@ app.post('/api/businesses/:id/products', (req: Request, res: Response) => {
     return;
   }
 
-  const { name, category_name, description, price, compare_at_price, stock, sku, variations, featured, image_type } = req.body;
+  const {
+    name,
+    category_name,
+    description,
+    price,
+    compare_at_price,
+    discount_percent,
+    stock,
+    sku,
+    variations,
+    featured,
+    image_type,
+    image_url,
+    gallery,
+  } = req.body;
+
   if (!name || price === undefined) {
     res.status(400).json({ error: 'Product name and price are required' });
     return;
   }
 
+  const numericPrice = Number(price);
+  let resolvedCompareAt: number | null = compare_at_price ? Number(compare_at_price) : null;
+  let resolvedDiscountPct = discount_percent ? Math.min(95, Math.max(0, Math.round(Number(discount_percent)))) : 0;
+
+  if (resolvedDiscountPct > 0 && (!resolvedCompareAt || resolvedCompareAt <= numericPrice)) {
+    resolvedCompareAt = Math.round(numericPrice / (1 - resolvedDiscountPct / 100));
+  } else if (resolvedCompareAt && resolvedCompareAt > numericPrice && resolvedDiscountPct === 0) {
+    resolvedDiscountPct = Math.round(((resolvedCompareAt - numericPrice) / resolvedCompareAt) * 100);
+  }
+
+  const galleryArr = Array.isArray(gallery)
+    ? gallery.filter(Boolean)
+    : image_url
+    ? [String(image_url)]
+    : [];
+  const primaryImageUrl = String(image_url || galleryArr[0] || '');
+
   const prodId = 'prd_' + crypto.randomBytes(4).toString('hex');
   db.prepare(`
     INSERT INTO products (
-      id, business_id, category_name, name, description, price, compare_at_price,
-      currency, stock, sku, variations_json, featured, available, image_type,
+      id, business_id, category_name, name, description, price, compare_at_price, discount_percent,
+      currency, stock, sku, variations_json, featured, available, image_type, image_url, gallery_json,
       views_count, likes_count, purchases_count, created_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, 'ETB', ?, ?, ?, ?, 1, ?, 1, 0, 0, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'ETB', ?, ?, ?, ?, 1, ?, ?, ?, 1, 0, 0, ?)
   `).run(
     prodId,
     req.params.id,
     category_name || 'General',
-    name,
+    String(name).trim(),
     description || '',
-    Number(price),
-    compare_at_price ? Number(compare_at_price) : null,
+    numericPrice,
+    resolvedCompareAt,
+    resolvedDiscountPct,
     Number(stock ?? 25),
     sku || 'SKU-' + crypto.randomBytes(2).toString('hex').toUpperCase(),
-    JSON.stringify(Array.isArray(variations) ? variations : (variations ? variations.split(',').map((s: string) => s.trim()) : ['Standard'])),
+    JSON.stringify(Array.isArray(variations) ? variations : (variations ? String(variations).split(',').map((s: string) => s.trim()).filter(Boolean) : ['S', 'M', 'L', 'XL'])),
     featured ? 1 : 0,
-    image_type || 'coffee',
+    image_type || 'thobe_white',
+    primaryImageUrl,
+    JSON.stringify(galleryArr),
     new Date().toISOString()
   );
+
+  // Ensure the product's category is also in the business categories_json list
+  if (category_name) {
+    try {
+      const bizRow = db.prepare('SELECT categories_json FROM businesses WHERE id = ?').get(req.params.id) as any;
+      const cats: string[] = JSON.parse(bizRow?.categories_json || '[]');
+      if (!cats.includes(String(category_name).trim())) {
+        cats.push(String(category_name).trim());
+        db.prepare('UPDATE businesses SET categories_json = ? WHERE id = ?').run(JSON.stringify(cats), req.params.id);
+      }
+    } catch {
+      // ignore
+    }
+  }
 
   const products = db.prepare('SELECT * FROM products WHERE business_id = ? ORDER BY created_at DESC').all(req.params.id);
   res.status(201).json(products);
@@ -904,22 +1712,153 @@ app.patch('/api/businesses/:id/products/:productId', (req: Request, res: Respons
     return;
   }
 
-  const { name, price, stock, available, featured } = req.body;
+  const {
+    name,
+    category_name,
+    description,
+    price,
+    compare_at_price,
+    discount_percent,
+    stock,
+    available,
+    featured,
+    variations,
+    image_type,
+    image_url,
+    gallery,
+  } = req.body;
+
+  const parsedVariations = variations !== undefined
+    ? JSON.stringify(Array.isArray(variations) ? variations : String(variations).split(',').map((s: string) => s.trim()).filter(Boolean))
+    : existing.variations_json;
+
+  const finalPrice = price !== undefined ? Number(price) : Number(existing.price);
+  let finalCompareAt = compare_at_price !== undefined
+    ? (compare_at_price ? Number(compare_at_price) : null)
+    : existing.compare_at_price;
+  let finalDiscountPct = discount_percent !== undefined
+    ? Math.min(95, Math.max(0, Math.round(Number(discount_percent))))
+    : Number(existing.discount_percent || 0);
+
+  if (discount_percent !== undefined && finalDiscountPct > 0 && (!finalCompareAt || finalCompareAt <= finalPrice)) {
+    finalCompareAt = Math.round(finalPrice / (1 - finalDiscountPct / 100));
+  } else if (finalCompareAt && finalCompareAt > finalPrice) {
+    finalDiscountPct = Math.round(((finalCompareAt - finalPrice) / finalCompareAt) * 100);
+  } else if (!finalCompareAt || finalCompareAt <= finalPrice) {
+    finalDiscountPct = 0;
+  }
+
+  const finalImageUrl = image_url !== undefined ? String(image_url) : (existing.image_url || '');
+  const finalGallery = gallery !== undefined
+    ? JSON.stringify(Array.isArray(gallery) ? gallery : [])
+    : (existing.gallery_json || '[]');
+
   db.prepare(`
-    UPDATE products SET name = ?, price = ?, stock = ?, available = ?, featured = ?
+    UPDATE products
+    SET name = ?, category_name = ?, description = ?, price = ?, compare_at_price = ?, discount_percent = ?,
+        stock = ?, available = ?, featured = ?, variations_json = ?, image_type = ?, image_url = ?, gallery_json = ?
     WHERE id = ? AND business_id = ?
   `).run(
     name ?? existing.name,
-    price !== undefined ? Number(price) : existing.price,
+    category_name !== undefined && String(category_name).trim() ? String(category_name).trim() : existing.category_name,
+    description !== undefined ? String(description) : existing.description,
+    finalPrice,
+    finalCompareAt,
+    finalDiscountPct,
     stock !== undefined ? Number(stock) : existing.stock,
     available !== undefined ? (available ? 1 : 0) : existing.available,
     featured !== undefined ? (featured ? 1 : 0) : existing.featured,
+    parsedVariations,
+    image_type || existing.image_type,
+    finalImageUrl,
+    finalGallery,
     req.params.productId,
     req.params.id
   );
 
   const products = db.prepare('SELECT * FROM products WHERE business_id = ? ORDER BY created_at DESC').all(req.params.id);
   res.json(products);
+});
+
+// Category Management CRUD (Add, Rename, Delete/Reassign categories)
+app.post('/api/businesses/:id/categories', (req: Request, res: Response) => {
+  const access = verifyTenantAccess(req.user, req.params.id, 'products.manage');
+  if (!access.allowed) {
+    res.status(403).json({ error: access.error });
+    return;
+  }
+  const categoryName = String(req.body.name || '').trim();
+  if (!categoryName) {
+    res.status(400).json({ error: 'Category name is required.' });
+    return;
+  }
+  let existingCats: string[] = [];
+  try {
+    existingCats = JSON.parse(access.business.categories_json || '[]');
+  } catch {
+    existingCats = [];
+  }
+  if (!existingCats.includes(categoryName)) {
+    existingCats.push(categoryName);
+  }
+  db.prepare('UPDATE businesses SET categories_json = ? WHERE id = ?').run(JSON.stringify(existingCats), req.params.id);
+  res.status(201).json({ categories: existingCats });
+});
+
+app.patch('/api/businesses/:id/categories', (req: Request, res: Response) => {
+  const access = verifyTenantAccess(req.user, req.params.id, 'products.manage');
+  if (!access.allowed) {
+    res.status(403).json({ error: access.error });
+    return;
+  }
+  const oldName = String(req.body.oldName || '').trim();
+  const newName = String(req.body.newName || '').trim();
+  if (!oldName || !newName) {
+    res.status(400).json({ error: 'Both current category name and new category name are required.' });
+    return;
+  }
+
+  db.prepare('UPDATE products SET category_name = ? WHERE business_id = ? AND category_name = ?').run(newName, req.params.id, oldName);
+
+  let existingCats: string[] = [];
+  try {
+    existingCats = JSON.parse(access.business.categories_json || '[]');
+  } catch {
+    existingCats = [];
+  }
+  const nextCats = Array.from(new Set(existingCats.map((c) => (c === oldName ? newName : c)).concat([newName])));
+  db.prepare('UPDATE businesses SET categories_json = ? WHERE id = ?').run(JSON.stringify(nextCats), req.params.id);
+
+  const products = db.prepare('SELECT * FROM products WHERE business_id = ? ORDER BY created_at DESC').all(req.params.id);
+  res.json({ categories: nextCats, products });
+});
+
+app.delete('/api/businesses/:id/categories', (req: Request, res: Response) => {
+  const access = verifyTenantAccess(req.user, req.params.id, 'products.manage');
+  if (!access.allowed) {
+    res.status(403).json({ error: access.error });
+    return;
+  }
+  const targetName = String(req.body.name || '').trim();
+  const fallbackCategory = String(req.body.reassignTo || 'General').trim();
+  if (!targetName) {
+    res.status(400).json({ error: 'Category name is required.' });
+    return;
+  }
+
+  db.prepare('UPDATE products SET category_name = ? WHERE business_id = ? AND category_name = ?').run(fallbackCategory, req.params.id, targetName);
+
+  let existingCats: string[] = [];
+  try {
+    existingCats = JSON.parse(access.business.categories_json || '[]');
+  } catch {
+    existingCats = [];
+  }
+  const nextCats = existingCats.filter((c) => c !== targetName);
+  db.prepare('UPDATE businesses SET categories_json = ? WHERE id = ?').run(JSON.stringify(nextCats), req.params.id);
+
+  const products = db.prepare('SELECT * FROM products WHERE business_id = ? ORDER BY created_at DESC').all(req.params.id);
+  res.json({ categories: nextCats, products });
 });
 
 app.post('/api/businesses/:id/services', (req: Request, res: Response) => {
@@ -1038,7 +1977,7 @@ app.post('/api/businesses/:id/payments/:paymentId/verify', (req: Request, res: R
     if (action === 'fail') {
       db.prepare('UPDATE payments SET status = ? WHERE id = ? AND business_id = ?').run('failed', payment.id, req.params.id);
       if (payment.order_id) {
-        db.prepare('UPDATE orders SET payment_status = ? WHERE id = ? AND business_id = ?').run('failed', payment.order_id, req.params.id);
+        db.prepare('UPDATE orders SET payment_status = ?, status = ? WHERE id = ? AND business_id = ?').run('failed', 'cancelled', payment.order_id, req.params.id);
       }
     } else if (action === 'refund') {
       db.prepare('UPDATE payments SET status = ? WHERE id = ? AND business_id = ?').run('refunded', payment.id, req.params.id);
@@ -1652,9 +2591,64 @@ app.get('/api/superadmin/overview', (req: Request, res: Response) => {
     return;
   }
 
-  const businesses = db.prepare('SELECT * FROM businesses ORDER BY created_at DESC').all() as any[];
+  const rawBusinesses = db.prepare('SELECT * FROM businesses ORDER BY created_at DESC').all() as any[];
   const allOrders = db.prepare('SELECT * FROM orders').all() as any[];
   const allPayments = db.prepare('SELECT * FROM payments').all() as any[];
+
+  // Enrich businesses with owner identity, full product/service catalog, and order status breakdown
+  const businesses = rawBusinesses.map((b) => {
+    const owner = db.prepare('SELECT id, name, email, owner_uid, telegram_username, account_status FROM users WHERE id = ?').get(b.owner_id) as any;
+    const bizOrders = allOrders.filter((o) => o.business_id === b.id);
+    const paidOrders = bizOrders.filter((o) => o.payment_status === 'paid');
+    const verifiedRevenue = paidOrders.reduce((s, o) => s + Number(o.total || 0), 0);
+    const finishedOrdersCount = bizOrders.filter((o) => o.status === 'completed').length;
+    const rejectedOrdersCount = bizOrders.filter(
+      (o) => o.status === 'cancelled' || o.status === 'refunded' || o.status === 'rejected' || o.payment_status === 'failed'
+    ).length;
+    const pendingPaymentRequestsCount = bizOrders.filter((o) => o.payment_status === 'pending_verification').length;
+    const catalogProducts = db.prepare(
+      'SELECT id, name, category_name, price, compare_at_price, discount_percent, currency, stock, available, image_type, image_url FROM products WHERE business_id = ? ORDER BY created_at DESC'
+    ).all(b.id);
+    const catalogServices = db.prepare(
+      'SELECT id, name, duration_mins, price, currency, available FROM services_listings WHERE business_id = ? ORDER BY created_at DESC'
+    ).all(b.id);
+
+    return {
+      ...b,
+      owner_name: owner?.name || 'Store Owner',
+      owner_email: owner?.email || '',
+      owner_uid: owner?.owner_uid || b.owner_uid || 'OWN-ID',
+      owner_status: owner?.account_status || 'active',
+      verifiedRevenue,
+      totalOrders: bizOrders.length,
+      finishedOrdersCount,
+      rejectedOrdersCount,
+      pendingPaymentRequestsCount,
+      productsCount: catalogProducts.length,
+      servicesCount: catalogServices.length,
+      catalogProducts,
+      catalogServices,
+    };
+  });
+
+  const rawUsers = db.prepare('SELECT id, name, email, platform_role, owner_uid, telegram_username, account_status, created_at FROM users ORDER BY created_at DESC').all() as any[];
+  const allUsers = rawUsers.map((u) => {
+    const owned = businesses.filter((b) => b.owner_id === u.id).map((b) => ({ id: b.id, name: b.name, category: b.category, status: b.status }));
+    return {
+      ...u,
+      account_status: u.account_status || 'active',
+      ownedBusinesses: owned,
+    };
+  });
+
+  const allCustomers = db.prepare(`
+    SELECT c.*, b.name as business_name, b.category as business_category
+    FROM customers c
+    JOIN businesses b ON b.id = c.business_id
+    ORDER BY c.last_seen_at DESC
+    LIMIT 200
+  `).all();
+
   const allEmployees = db.prepare(`
     SELECT e.*, b.name as business_name
     FROM employees e
@@ -1699,15 +2693,126 @@ app.get('/api/superadmin/overview', (req: Request, res: Response) => {
       verifiedTransactionsCount: allPayments.filter((p) => p.status === 'verified').length,
       subscriptionRevenue,
       addonRevenue,
+      totalStoreOwners: allUsers.filter((u) => u.platform_role !== 'super_admin').length,
+      totalCustomers: allCustomers.length,
       serviceHealth: '99.98% Operational (SQLite WAL + Express Multi-Tenant Engine)',
     },
     businesses,
+    allUsers,
+    allCustomers,
     addons,
     businessAddons,
     allEmployees,
     auditLogs,
     platformSupport: enrichedPlatformSupport,
   });
+});
+
+// Super Admin: Manage Store Owners & Platform Users (Block, Unblock, Reset Password, Delete)
+app.post('/api/superadmin/users/:userId/control', (req: Request, res: Response) => {
+  if (!req.user || req.user.platform_role !== 'super_admin') {
+    res.status(403).json({ error: 'Platform Super Admin authorization required.' });
+    return;
+  }
+
+  const targetUser = db.prepare('SELECT * FROM users WHERE id = ?').get(req.params.userId) as any;
+  if (!targetUser) {
+    res.status(404).json({ error: 'User not found' });
+    return;
+  }
+
+  const { action, reason } = req.body; // 'BLOCK_USER' | 'UNBLOCK_USER' | 'DELETE_USER'
+  if (targetUser.id === req.user.id && (action === 'BLOCK_USER' || action === 'DELETE_USER')) {
+    res.status(400).json({ error: 'You cannot block or delete your own active Super Admin account.' });
+    return;
+  }
+
+  if (action === 'BLOCK_USER') {
+    db.prepare("UPDATE users SET account_status = 'blocked' WHERE id = ?").run(targetUser.id);
+    db.prepare('UPDATE sessions SET revoked = 1 WHERE user_id = ?').run(targetUser.id);
+    db.prepare("UPDATE businesses SET status = 'suspended' WHERE owner_id = ?").run(targetUser.id);
+    recordAuditLog({
+      actorUserId: req.user.id,
+      actorName: req.user.name,
+      actorRole: 'super_admin',
+      action: 'BLOCK_STORE_OWNER',
+      targetType: 'user',
+      targetId: targetUser.id,
+      previousValue: `status: ${targetUser.account_status || 'active'}`,
+      newValue: 'status: blocked (stores suspended & sessions revoked)',
+      reason: reason || 'Blocked by Platform Admin',
+    });
+    res.json({ success: true, status: 'blocked' });
+    return;
+  }
+
+  if (action === 'UNBLOCK_USER') {
+    db.prepare("UPDATE users SET account_status = 'active' WHERE id = ?").run(targetUser.id);
+    db.prepare("UPDATE businesses SET status = 'active', subscription_status = 'active' WHERE owner_id = ?").run(targetUser.id);
+    recordAuditLog({
+      actorUserId: req.user.id,
+      actorName: req.user.name,
+      actorRole: 'super_admin',
+      action: 'UNBLOCK_STORE_OWNER',
+      targetType: 'user',
+      targetId: targetUser.id,
+      previousValue: `status: ${targetUser.account_status || 'blocked'}`,
+      newValue: 'status: active (stores restored)',
+      reason: reason || 'Restored by Platform Admin',
+    });
+    res.json({ success: true, status: 'active' });
+    return;
+  }
+
+  if (action === 'DELETE_USER') {
+    db.prepare('DELETE FROM businesses WHERE owner_id = ?').run(targetUser.id);
+    db.prepare('DELETE FROM users WHERE id = ?').run(targetUser.id);
+    recordAuditLog({
+      actorUserId: req.user.id,
+      actorName: req.user.name,
+      actorRole: 'super_admin',
+      action: 'DELETE_STORE_OWNER',
+      targetType: 'user',
+      targetId: targetUser.id,
+      previousValue: `${targetUser.name} (${targetUser.email})`,
+      newValue: 'DELETED',
+      reason: reason || 'Deleted by Platform Admin',
+    });
+    res.json({ success: true, deletedId: targetUser.id });
+    return;
+  }
+
+  res.status(400).json({ error: 'Unsupported user control action' });
+});
+
+// Super Admin: Manage Customer Records (Block, Unblock, Delete)
+app.post('/api/superadmin/customers/:customerId/control', (req: Request, res: Response) => {
+  if (!req.user || req.user.platform_role !== 'super_admin') {
+    res.status(403).json({ error: 'Platform Super Admin authorization required.' });
+    return;
+  }
+  const customer = db.prepare('SELECT * FROM customers WHERE id = ?').get(req.params.customerId) as any;
+  if (!customer) {
+    res.status(404).json({ error: 'Customer not found' });
+    return;
+  }
+  const { action } = req.body; // 'BLOCK_CUSTOMER' | 'UNBLOCK_CUSTOMER' | 'DELETE_CUSTOMER'
+  if (action === 'BLOCK_CUSTOMER') {
+    db.prepare("UPDATE customers SET status = 'blocked' WHERE id = ?").run(customer.id);
+    res.json({ success: true, status: 'blocked' });
+    return;
+  }
+  if (action === 'UNBLOCK_CUSTOMER') {
+    db.prepare("UPDATE customers SET status = 'active' WHERE id = ?").run(customer.id);
+    res.json({ success: true, status: 'active' });
+    return;
+  }
+  if (action === 'DELETE_CUSTOMER') {
+    db.prepare('DELETE FROM customers WHERE id = ?').run(customer.id);
+    res.json({ success: true, deletedId: customer.id });
+    return;
+  }
+  res.status(400).json({ error: 'Unsupported customer action' });
 });
 
 // 10 Separate Super Admin Controls with Mandatory Audit Logging
@@ -1915,15 +3020,21 @@ app.get('/api/storefront/:slug', (req: Request, res: Response) => {
     'SELECT id, method_name, account_name, account_number FROM business_payment_methods WHERE business_id = ? AND is_active = 1 ORDER BY sort_order ASC, created_at ASC'
   ).all(business.id);
 
+  const ownerUser = db.prepare('SELECT owner_uid, name FROM users WHERE id = ?').get(business.owner_id) as any;
+  const resolvedOwnerUid = business.owner_uid || ownerUser?.owner_uid || 'OWN-HAN-204881';
+
   res.json({
     business: {
       id: business.id,
       slug: business.slug,
       name: business.name,
+      owner_uid: resolvedOwnerUid,
       category: business.category,
       status: business.status,
       primary_color: business.primary_color,
       accent_color: business.accent_color,
+      font_family: business.font_family || 'Plus Jakarta Sans',
+      categories_json: business.categories_json || '[]',
       logo_text: business.logo_text,
       description: business.description,
       about_text: business.about_text,
@@ -1942,6 +3053,80 @@ app.get('/api/storefront/:slug', (req: Request, res: Response) => {
     promotions,
     faqs,
     paymentMethods,
+  });
+});
+
+// 24/7 Automatic Customer Identification & Store Owner Attribution Algorithm (Zero-Account Friction for Customers)
+app.post('/api/storefront/:slug/identify', (req: Request, res: Response) => {
+  const business = db.prepare('SELECT * FROM businesses WHERE slug = ? OR id = ?').get(req.params.slug, req.params.slug) as any;
+  if (!business) {
+    res.status(404).json({ error: 'Business not found' });
+    return;
+  }
+
+  const ownerRow = db.prepare('SELECT owner_uid FROM users WHERE id = ?').get(business.owner_id) as any;
+  const ownerUid = business.owner_uid || ownerRow?.owner_uid || 'OWN-HAN-204881';
+  const { device_fingerprint, telegram_id, telegram_username, source } = req.body;
+  const fp = String(device_fingerprint || 'fp_' + crypto.randomBytes(6).toString('hex')).trim();
+  const now = new Date().toISOString();
+
+  // Check if this visitor fingerprint or Telegram ID is already recognized for this business
+  let customer = db.prepare(`
+    SELECT * FROM customers
+    WHERE business_id = ? AND (device_fingerprint = ? OR (telegram_id != '' AND telegram_id = ?))
+    LIMIT 1
+  `).get(business.id, fp, String(telegram_id || '')) as any;
+
+  if (!customer) {
+    const cusId = 'cus_' + crypto.randomBytes(4).toString('hex');
+    const customerUid = generateCustomerUid(ownerUid);
+    const visitorLabel = telegram_username
+      ? `Telegram Visitor (${telegram_username})`
+      : `Store Visitor #${customerUid.slice(-4)}`;
+
+    db.prepare(`
+      INSERT INTO customers (
+        id, business_id, name, phone, telegram_id, telegram_username,
+        segment, loyalty_points, referral_code, consent_marketing,
+        source, visits_count, total_spent, last_seen_at, created_at,
+        customer_uid, owner_uid, device_fingerprint
+      ) VALUES (?, ?, ?, ?, ?, ?, 'first_time', 10, ?, 1, ?, 1, 0, ?, ?, ?, ?, ?)
+    `).run(
+      cusId,
+      business.id,
+      visitorLabel,
+      'Visitor-' + customerUid.slice(-4),
+      String(telegram_id || ''),
+      String(telegram_username || ''),
+      'REF-' + customerUid.slice(-4),
+      source === 'web' ? 'web_store' : 'telegram_mini_app',
+      now,
+      now,
+      customerUid,
+      ownerUid,
+      fp
+    );
+    customer = db.prepare('SELECT * FROM customers WHERE id = ?').get(cusId);
+  } else {
+    if (!customer.customer_uid) {
+      customer.customer_uid = generateCustomerUid(ownerUid);
+    }
+    db.prepare(`
+      UPDATE customers
+      SET visits_count = visits_count + 1, last_seen_at = ?, customer_uid = ?, owner_uid = ?
+      WHERE id = ?
+    `).run(now, customer.customer_uid, ownerUid, customer.id);
+  }
+
+  res.json({
+    identified: true,
+    customer_uid: customer.customer_uid,
+    owner_uid: ownerUid,
+    business_id: business.id,
+    business_name: business.name,
+    visits_count: customer.visits_count,
+    segment: customer.segment,
+    loyalty_points: customer.loyalty_points,
   });
 });
 
