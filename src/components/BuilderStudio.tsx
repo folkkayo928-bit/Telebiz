@@ -12,6 +12,18 @@ import {
   CheckCircle2,
   Plus,
   Trash2,
+  Palette,
+  Type,
+  LayoutGrid,
+  Sliders,
+  Check,
+  Moon,
+  Sun,
+  Crown,
+  Gem,
+  ShoppingBag,
+  Coffee,
+  Sparkle,
 } from 'lucide-react';
 import { BUSINESS_CATEGORIES } from '../i18n/translations';
 import { MiniAppStorefront } from './MiniAppStorefront';
@@ -26,24 +38,139 @@ interface BuilderStudioProps {
   onOpenFullPreview?: () => void;
 }
 
+export const TASTE_PRESETS = [
+  {
+    id: 'arabian_heritage',
+    name: 'Arabian Culture & Royal Wear',
+    subtitle: 'Thobes, Bishts, Agals, Oud & Gold Zari',
+    icon: '👑',
+    category: 'retail',
+    primaryColor: '#0F382A',
+    accentColor: '#C69C6D',
+    backgroundType: 'warm_sand',
+    backgroundColor: '#FAF7F0',
+    backgroundPattern: 'islamic_geometry',
+    pageDarkness: 'light',
+    fontFamily: 'Playfair Display',
+    headingTransform: 'capitalize',
+    productCardStyle: 'arabian_heritage',
+    productGridColumns: '2_cols',
+    productAspectRatio: 'aspect-[1/1.08]',
+    cardRadius: '22px',
+    cardBackgroundStyle: 'white',
+    headerStyle: 'royal_crest',
+    buttonStyle: '3d',
+  },
+  {
+    id: 'jewelry_luxury',
+    name: 'Chains, Necklaces & Luxury Jewelry',
+    subtitle: '18K Cuban Chains, Solitaire Diamonds, Signets & Watches',
+    icon: '💎',
+    category: 'retail',
+    primaryColor: '#D4AF37',
+    accentColor: '#F5D77F',
+    backgroundType: 'obsidian_velvet',
+    backgroundColor: '#0B0C10',
+    backgroundPattern: 'gold_dust',
+    pageDarkness: 'dark',
+    fontFamily: 'Cinzel',
+    headingTransform: 'uppercase',
+    productCardStyle: 'jewelry_pedestal',
+    productGridColumns: '2_cols',
+    productAspectRatio: 'aspect-[1/1.15]',
+    cardRadius: '16px',
+    cardBackgroundStyle: 'dark_surface',
+    headerStyle: 'royal_crest',
+    buttonStyle: 'sharp',
+  },
+  {
+    id: 'streetwear_baggy',
+    name: 'Baggy Fashion & Streetwear Drops',
+    subtitle: 'Heavy 420GSM Hoodies, Baggy Cargo, Boxy Tees & Denim',
+    icon: '🛹',
+    category: 'retail',
+    primaryColor: '#FF5500',
+    accentColor: '#FFFFFF',
+    backgroundType: 'street_concrete',
+    backgroundColor: '#121316',
+    backgroundPattern: 'concrete_grain',
+    pageDarkness: 'dark',
+    fontFamily: 'Space Grotesk',
+    headingTransform: 'uppercase',
+    productCardStyle: 'streetwear_lookbook',
+    productGridColumns: '2_cols',
+    productAspectRatio: 'aspect-[3/4.2]',
+    cardRadius: '0px',
+    cardBackgroundStyle: 'bordered_clear',
+    headerStyle: 'street_banner',
+    buttonStyle: 'sharp',
+  },
+  {
+    id: 'gourmet_food',
+    name: 'Gourmet Food, Coffee & Storage',
+    subtitle: 'Airtight Glass Canisters, Micro-Lots, Honey & Spices',
+    icon: '☕',
+    category: 'coffee_shop',
+    primaryColor: '#2D1810',
+    accentColor: '#C86432',
+    backgroundType: 'craft_paper',
+    backgroundColor: '#F6F2EB',
+    backgroundPattern: 'craft_fibers',
+    pageDarkness: 'light',
+    fontFamily: 'Fraunces',
+    headingTransform: 'capitalize',
+    productCardStyle: 'artisan_craft',
+    productGridColumns: '2_cols',
+    productAspectRatio: 'aspect-[1/1]',
+    cardRadius: '18px',
+    cardBackgroundStyle: 'craft_beige',
+    headerStyle: 'artisan_minimal',
+    buttonStyle: 'pill',
+  },
+  {
+    id: 'minimal_boutique',
+    name: 'Modern Minimalist Boutique',
+    subtitle: 'Clean Geometric Lines, Subtle Borders & Spacious Airy Grid',
+    icon: '🕊️',
+    category: 'retail',
+    primaryColor: '#09090B',
+    accentColor: '#2563EB',
+    backgroundType: 'clean_studio',
+    backgroundColor: '#FAFAFA',
+    backgroundPattern: 'subtle_grid',
+    pageDarkness: 'light',
+    fontFamily: 'Plus Jakarta Sans',
+    headingTransform: 'none',
+    productCardStyle: 'minimal_editorial',
+    productGridColumns: '2_cols',
+    productAspectRatio: 'aspect-[1/1.05]',
+    cardRadius: '14px',
+    cardBackgroundStyle: 'white',
+    headerStyle: 'modern_clean',
+    buttonStyle: 'pill',
+  },
+];
+
 const COLOR_PRESETS = [
+  { id: 'gold_vault', name: '24K Gold & Obsidian', primary: '#D4AF37', accent: '#F5D77F' },
+  { id: 'emerald', name: 'Botanical Emerald & Gold', primary: '#0F382A', accent: '#C69C6D' },
+  { id: 'street_orange', name: 'Cyber Neon & Slate', primary: '#FF5500', accent: '#FFFFFF' },
+  { id: 'espresso', name: 'Espresso & Terracotta', primary: '#2D1810', accent: '#C86432' },
   { id: 'indigo', name: 'Royal Indigo', primary: '#1E1B4B', accent: '#4F46E5' },
   { id: 'ocean', name: 'Midnight Sky', primary: '#0F172A', accent: '#0284C7' },
-  { id: 'emerald', name: 'Botanical Emerald', primary: '#064E3B', accent: '#059669' },
   { id: 'rose', name: 'Velvet Rose', primary: '#18181B', accent: '#E11D48' },
-  { id: 'amber', name: 'Roastery Espresso', primary: '#27170E', accent: '#D97706' },
-  { id: 'teal', name: 'Resort Lagoon', primary: '#134E4A', accent: '#0D9488' },
-  { id: 'violet', name: 'Electric Studio', primary: '#2E1065', accent: '#7C3AED' },
-  { id: 'coral', name: 'Sunset Coral', primary: '#1F2937', accent: '#EA580C' },
+  { id: 'monochrome', name: 'Monolith Black', primary: '#09090B', accent: '#2563EB' },
 ];
 
 const FONT_OPTIONS = [
-  { id: 'Plus Jakarta Sans', label: 'Plus Jakarta Sans', style: 'Modern Geometric', sample: 'Clean & Crisp' },
-  { id: 'Outfit', label: 'Outfit', style: 'Friendly Contemporary', sample: 'Smooth & Bold' },
-  { id: 'Playfair Display', label: 'Playfair Display', style: 'Luxury Editorial Serif', sample: 'Timeless Elegance' },
-  { id: 'Fraunces', label: 'Fraunces', style: 'Artisan Soft Serif', sample: 'Warm & Crafted' },
-  { id: 'Space Grotesk', label: 'Space Grotesk', style: 'Tech & Streetwear', sample: 'Sharp & Kinetic' },
-  { id: 'JetBrains Mono', label: 'JetBrains Mono', style: 'Precision Technical', sample: '0123-CODE' },
+  { id: 'Playfair Display', label: 'Playfair Display', style: 'Royal Editorial Serif (Heritage/Thobes)', sample: 'Timeless Elegance' },
+  { id: 'Cinzel', label: 'Cinzel', style: 'Imperial Gold Serif (Chains/Jewelry)', sample: 'ROYAL CHAINS' },
+  { id: 'Space Grotesk', label: 'Space Grotesk', style: 'Kinetic Grotesk (Streetwear/Baggy)', sample: 'OVERSIZED-92' },
+  { id: 'Syne', label: 'Syne', style: 'High Fashion Avant-Garde', sample: 'AVANT COUTURE' },
+  { id: 'Fraunces', label: 'Fraunces', style: 'Warm Artisan Serif (Gourmet Food/Coffee)', sample: 'Crafted & Warm' },
+  { id: 'Plus Jakarta Sans', label: 'Plus Jakarta Sans', style: 'Clean Geometric Sans', sample: 'Clean & Crisp' },
+  { id: 'Outfit', label: 'Outfit', style: 'Contemporary Smooth Sans', sample: 'Smooth & Bold' },
+  { id: 'JetBrains Mono', label: 'JetBrains Mono', style: 'Technical Drop Monospace', sample: 'DROP-EDITION' },
 ];
 
 export const BuilderStudio: React.FC<BuilderStudioProps> = ({
@@ -80,11 +207,33 @@ export const BuilderStudio: React.FC<BuilderStudioProps> = ({
       return [];
     }
   });
-  const [primaryColor, setPrimaryColor] = useState(business.primary_color || '#0F172A');
-  const [accentColor, setAccentColor] = useState(business.accent_color || '#0284C7');
-  const [fontFamily, setFontFamily] = useState(business.font_family || parsedLatestTheme.fontFamily || 'Plus Jakarta Sans');
+
+  // Comprehensive Editable Theme & Taste States
+  const [tastePreset, setTastePreset] = useState<string>(parsedLatestTheme.tastePreset || 'arabian_heritage');
+  const [primaryColor, setPrimaryColor] = useState(business.primary_color || parsedLatestTheme.primaryColor || '#0F382A');
+  const [accentColor, setAccentColor] = useState(business.accent_color || parsedLatestTheme.accentColor || '#C69C6D');
+  
+  // Background Customizer States
+  const [backgroundType, setBackgroundType] = useState<string>(parsedLatestTheme.backgroundType || 'warm_sand');
+  const [backgroundColor, setBackgroundColor] = useState<string>(parsedLatestTheme.backgroundColor || '#FAF7F0');
+  const [backgroundPattern, setBackgroundPattern] = useState<string>(parsedLatestTheme.backgroundPattern || 'islamic_geometry');
+  const [pageDarkness, setPageDarkness] = useState<'light' | 'dark' | 'auto'>(parsedLatestTheme.pageDarkness || 'light');
+
+  // Font & Typography States
+  const [fontFamily, setFontFamily] = useState(business.font_family || parsedLatestTheme.fontFamily || 'Playfair Display');
+  const [headingTransform, setHeadingTransform] = useState<'none' | 'uppercase' | 'capitalize'>(parsedLatestTheme.headingTransform || 'capitalize');
+
+  // Product Seating & Layout States ("How products are seated")
+  const [productCardStyle, setProductCardStyle] = useState<string>(parsedLatestTheme.productCardStyle || 'arabian_heritage');
+  const [productGridColumns, setProductGridColumns] = useState<string>(parsedLatestTheme.productGridColumns || '2_cols');
+  const [productAspectRatio, setProductAspectRatio] = useState<string>(parsedLatestTheme.productAspectRatio || 'aspect-[1/1.08]');
+  const [cardRadius, setCardRadius] = useState(parsedLatestTheme.cardRadius || '22px');
+  const [cardBackgroundStyle, setCardBackgroundStyle] = useState<string>(parsedLatestTheme.cardBackgroundStyle || 'white');
+  const [headerStyle, setHeaderStyle] = useState<string>(parsedLatestTheme.headerStyle || 'royal_crest');
   const [buttonStyle, setButtonStyle] = useState<'3d' | 'pill' | 'sharp'>(parsedLatestTheme.buttonStyle || '3d');
-  const [cardRadius, setCardRadius] = useState(parsedLatestTheme.cardRadius || '20px');
+  const [showStockBadges, setShowStockBadges] = useState<boolean>(parsedLatestTheme.showStockBadges !== false);
+  const [showStarRatings, setShowStarRatings] = useState<boolean>(parsedLatestTheme.showStarRatings !== false);
+
   const [versionNote, setVersionNote] = useState('');
   const [saving, setSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState('');
@@ -119,15 +268,70 @@ export const BuilderStudio: React.FC<BuilderStudioProps> = ({
         themeObj = {};
       }
     }
-    setPrimaryColor(business.primary_color || '#0F172A');
-    setAccentColor(business.accent_color || '#0284C7');
-    setFontFamily(business.font_family || themeObj.fontFamily || 'Plus Jakarta Sans');
+    setTastePreset(themeObj.tastePreset || 'arabian_heritage');
+    setPrimaryColor(business.primary_color || themeObj.primaryColor || '#0F382A');
+    setAccentColor(business.accent_color || themeObj.accentColor || '#C69C6D');
+    setBackgroundType(themeObj.backgroundType || 'warm_sand');
+    setBackgroundColor(themeObj.backgroundColor || '#FAF7F0');
+    setBackgroundPattern(themeObj.backgroundPattern || 'islamic_geometry');
+    setPageDarkness(themeObj.pageDarkness || 'light');
+    setFontFamily(business.font_family || themeObj.fontFamily || 'Playfair Display');
+    setHeadingTransform(themeObj.headingTransform || 'capitalize');
+    setProductCardStyle(themeObj.productCardStyle || 'arabian_heritage');
+    setProductGridColumns(themeObj.productGridColumns || '2_cols');
+    setProductAspectRatio(themeObj.productAspectRatio || 'aspect-[1/1.08]');
+    setCardRadius(themeObj.cardRadius || '22px');
+    setCardBackgroundStyle(themeObj.cardBackgroundStyle || 'white');
+    setHeaderStyle(themeObj.headerStyle || 'royal_crest');
     setButtonStyle(themeObj.buttonStyle || '3d');
-    setCardRadius(themeObj.cardRadius || '20px');
+    setShowStockBadges(themeObj.showStockBadges !== false);
+    setShowStarRatings(themeObj.showStarRatings !== false);
     setDfyNotes(business.dfy_notes || '');
     setDfyStatus(business.dfy_status || 'requested');
     setAiGenerationsUsed(Number(business.ai_generations_used || 0));
   }, [business.id, versions]);
+
+  const applyTastePreset = (presetId: string) => {
+    const p = TASTE_PRESETS.find((x) => x.id === presetId);
+    if (!p) return;
+    setTastePreset(p.id);
+    setPrimaryColor(p.primaryColor);
+    setAccentColor(p.accentColor);
+    setBackgroundType(p.backgroundType);
+    setBackgroundColor(p.backgroundColor);
+    setBackgroundPattern(p.backgroundPattern);
+    setPageDarkness(p.pageDarkness as any);
+    setFontFamily(p.fontFamily);
+    setHeadingTransform(p.headingTransform as any);
+    setProductCardStyle(p.productCardStyle);
+    setProductGridColumns(p.productGridColumns);
+    setProductAspectRatio(p.productAspectRatio);
+    setCardRadius(p.cardRadius);
+    setCardBackgroundStyle(p.cardBackgroundStyle);
+    setHeaderStyle(p.headerStyle);
+    setButtonStyle(p.buttonStyle as any);
+  };
+
+  const currentThemeObject = {
+    tastePreset,
+    primaryColor,
+    accentColor,
+    backgroundType,
+    backgroundColor,
+    backgroundPattern,
+    pageDarkness,
+    fontFamily,
+    headingTransform,
+    productCardStyle,
+    productGridColumns,
+    productAspectRatio,
+    cardRadius,
+    cardBackgroundStyle,
+    headerStyle,
+    buttonStyle,
+    showStockBadges,
+    showStarRatings,
+  };
 
   const moveSection = (index: number, direction: -1 | 1) => {
     const target = index + direction;
@@ -231,7 +435,7 @@ export const BuilderStudio: React.FC<BuilderStudioProps> = ({
         },
         body: JSON.stringify({
           layout: sections,
-          theme: { primaryColor, accentColor, fontFamily, buttonStyle, cardRadius },
+          theme: currentThemeObject,
           pages: [
             { slug: 'home', title: 'Storefront', enabled: true },
             { slug: 'catalog', title: 'Products', enabled: true },
@@ -512,7 +716,7 @@ export const BuilderStudio: React.FC<BuilderStudioProps> = ({
             <MiniAppStorefront
               slug={business.slug}
               mode="embedded_preview"
-              overrideTheme={{ primaryColor, accentColor, fontFamily, buttonStyle, cardRadius }}
+              overrideTheme={currentThemeObject}
               onOrderCreated={onRefresh}
             />
           </div>
@@ -524,61 +728,204 @@ export const BuilderStudio: React.FC<BuilderStudioProps> = ({
           {/* METHOD B: SELF-SERVICE VISUAL BUILDER */}
           {mode === 'visual' && (
             <div className="space-y-6">
-              {/* Branding, Custom Color Palettes & Typography */}
+              {/* 1. TASTE & AESTHETIC PRESET SELECTOR (1-Click Full Storefront Re-theming) */}
+              <div className="card-3d p-5 sm:p-6 space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div>
+                    <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-indigo-600 dark:text-indigo-400">
+                      Tailored Industry Aesthetics
+                    </div>
+                    <h3 className="text-base font-display font-bold text-slate-900 dark:text-white">
+                      1-Click Store Taste & Style Presets
+                    </h3>
+                    <p className="text-xs text-slate-500">
+                      Different stores require different aesthetics—jewelry chains need obsidian & gold, baggy fashion needs street concrete & tall lookbooks, Arabian wear needs sand & royal green, and food needs warm craft storage.
+                    </p>
+                  </div>
+                  <span className="shrink-0 px-2.5 py-1 rounded-full bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-200 dark:border-indigo-800 text-[11px] font-bold text-indigo-700 dark:text-indigo-300">
+                    Active: {TASTE_PRESETS.find((t) => t.id === tastePreset)?.name.split('&')[0] || 'Custom'}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                  {TASTE_PRESETS.map((preset) => {
+                    const isActive = tastePreset === preset.id;
+                    return (
+                      <button
+                        key={preset.id}
+                        type="button"
+                        onClick={() => applyTastePreset(preset.id)}
+                        className={`group relative rounded-2xl border p-4 text-left transition-all ${
+                          isActive
+                            ? 'border-indigo-600 bg-indigo-50/70 ring-2 ring-indigo-600/20 dark:bg-indigo-950/40'
+                            : 'border-slate-200 bg-white hover:border-slate-300 hover:shadow-sm dark:border-slate-800 dark:bg-slate-900'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="text-2xl">{preset.icon}</span>
+                          <span className="flex items-center -space-x-1">
+                            <span className="h-4 w-4 rounded-full border border-white shadow-xs" style={{ backgroundColor: preset.primaryColor }} />
+                            <span className="h-4 w-4 rounded-full border border-white shadow-xs" style={{ backgroundColor: preset.accentColor }} />
+                            <span className="h-4 w-4 rounded-full border border-white shadow-xs" style={{ backgroundColor: preset.backgroundColor }} />
+                          </span>
+                        </div>
+                        <div className="mt-2.5 text-xs font-extrabold text-slate-900 dark:text-white group-hover:text-indigo-600">
+                          {preset.name}
+                        </div>
+                        <p className="mt-1 text-[11px] leading-relaxed text-slate-500 dark:text-slate-400">
+                          {preset.subtitle}
+                        </p>
+                        <div className="mt-2.5 flex flex-wrap items-center gap-1.5 text-[10px]">
+                          <span className="rounded-md bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 font-medium text-slate-600 dark:text-slate-300" style={{ fontFamily: preset.fontFamily }}>
+                            {preset.fontFamily}
+                          </span>
+                          <span className="rounded-md bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 font-medium text-slate-600 dark:text-slate-300">
+                            {preset.productCardStyle.replace(/_/g, ' ')}
+                          </span>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* 2. BACKGROUND & SURFACE CUSTOMIZER (Fully Editable) */}
               <div className="card-3d p-5 sm:p-6 space-y-5">
                 <div className="flex items-center justify-between">
                   <div>
                     <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-indigo-600 dark:text-indigo-400">
-                      Storefront Identity
+                      Store Atmosphere
                     </div>
                     <h3 className="text-base font-display font-bold text-slate-900 dark:text-white">
-                      Custom Colors, Typography & 3D Feel
+                      Background, Atmosphere & Textures
                     </h3>
+                    <p className="text-xs text-slate-500">
+                      Store owners can choose light desert sand, deep obsidian velvet, street concrete, or organic craft paper.
+                    </p>
                   </div>
                   <div className="flex items-center gap-1.5">
-                    <span className="h-5 w-5 rounded-full border border-slate-200 shadow-inner" style={{ backgroundColor: primaryColor }} />
-                    <span className="h-5 w-5 rounded-full border border-slate-200 shadow-inner" style={{ backgroundColor: accentColor }} />
+                    <span className="h-6 w-6 rounded-lg border border-slate-300 shadow-inner" style={{ backgroundColor }} />
                   </div>
                 </div>
 
-                {/* Curated 1-Click Color Palettes */}
-                <div className="space-y-2">
-                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
-                    1-Click Color Palettes (Or pick any custom color below)
-                  </label>
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                    {COLOR_PRESETS.map((preset) => {
-                      const active = primaryColor.toLowerCase() === preset.primary.toLowerCase() && accentColor.toLowerCase() === preset.accent.toLowerCase();
-                      return (
-                        <button
-                          key={preset.id}
-                          type="button"
-                          onClick={() => {
-                            setPrimaryColor(preset.primary);
-                            setAccentColor(preset.accent);
-                          }}
-                          className={`flex items-center gap-2 rounded-xl border p-2 text-left text-xs font-semibold transition ${
-                            active
-                              ? 'border-indigo-600 bg-indigo-50/60 text-indigo-950 ring-1 ring-indigo-600 dark:bg-indigo-950/40 dark:text-white'
-                              : 'border-slate-200 hover:border-slate-300 dark:border-slate-800'
-                          }`}
-                        >
-                          <span className="flex shrink-0 -space-x-1.5">
-                            <span className="h-4 w-4 rounded-full border border-white" style={{ backgroundColor: preset.primary }} />
-                            <span className="h-4 w-4 rounded-full border border-white" style={{ backgroundColor: preset.accent }} />
-                          </span>
-                          <span className="truncate text-[11px]">{preset.name}</span>
-                        </button>
-                      );
-                    })}
-                  </div>
+                {/* Preset Background Atmosphere Tiles */}
+                <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5">
+                  {[
+                    { id: 'warm_sand', name: 'Desert Sand', color: '#FAF7F0', pattern: 'islamic_geometry', dark: 'light' },
+                    { id: 'obsidian_velvet', name: 'Obsidian Velvet', color: '#0B0C10', pattern: 'gold_dust', dark: 'dark' },
+                    { id: 'street_concrete', name: 'Raw Concrete', color: '#121316', pattern: 'concrete_grain', dark: 'dark' },
+                    { id: 'craft_paper', name: 'Craft Paper', color: '#F6F2EB', pattern: 'craft_fibers', dark: 'light' },
+                    { id: 'clean_studio', name: 'Studio White', color: '#FAFAFA', pattern: 'subtle_grid', dark: 'light' },
+                  ].map((bg) => {
+                    const active = backgroundType === bg.id;
+                    return (
+                      <button
+                        key={bg.id}
+                        type="button"
+                        onClick={() => {
+                          setBackgroundType(bg.id);
+                          setBackgroundColor(bg.color);
+                          setBackgroundPattern(bg.pattern);
+                          setPageDarkness(bg.dark as any);
+                        }}
+                        className={`rounded-xl border p-2.5 text-left transition ${
+                          active
+                            ? 'border-indigo-600 bg-indigo-50/60 ring-2 ring-indigo-600/20 dark:bg-indigo-950/40'
+                            : 'border-slate-200 hover:border-slate-300 dark:border-slate-800'
+                        }`}
+                      >
+                        <div className="h-7 w-full rounded-lg border border-slate-200/50 shadow-inner flex items-center justify-center" style={{ backgroundColor: bg.color }}>
+                          {bg.dark === 'dark' ? <Moon className="w-3.5 h-3.5 text-amber-400" /> : <Sun className="w-3.5 h-3.5 text-amber-600" />}
+                        </div>
+                        <div className="mt-2 text-xs font-bold text-slate-900 dark:text-white truncate">{bg.name}</div>
+                        <div className="text-[10px] text-slate-500 font-mono">{bg.color}</div>
+                      </button>
+                    );
+                  })}
                 </div>
 
-                {/* Custom Hex & Color Pickers */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {/* Custom Hex Color & Background Tone */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-1">
                   <div>
                     <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
-                      Hero / Primary Surface Color
+                      Store Background Color
+                    </label>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="color"
+                        value={backgroundColor}
+                        onChange={(e) => {
+                          setBackgroundColor(e.target.value);
+                          setBackgroundType('custom_color');
+                        }}
+                        className="w-10 h-10 rounded-xl border border-slate-200 cursor-pointer shadow-sm"
+                      />
+                      <input
+                        type="text"
+                        value={backgroundColor}
+                        onChange={(e) => {
+                          setBackgroundColor(e.target.value);
+                          setBackgroundType('custom_color');
+                        }}
+                        className="flex-1 px-3 py-2 text-xs font-mono rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
+                      Background Subtle Texture
+                    </label>
+                    <select
+                      value={backgroundPattern}
+                      onChange={(e) => setBackgroundPattern(e.target.value)}
+                      className="w-full px-3 py-2.5 text-xs font-medium rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
+                    >
+                      <option value="none">Flat Solid (No Pattern)</option>
+                      <option value="islamic_geometry">Islamic Star Geometry (Heritage)</option>
+                      <option value="gold_dust">Gold Stardust (Jewelry & Chains)</option>
+                      <option value="concrete_grain">Concrete Grain (Streetwear)</option>
+                      <option value="craft_fibers">Craft Fibers (Food & Roastery)</option>
+                      <option value="subtle_grid">Subtle Blueprint Grid (Minimal)</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
+                      Store Dark / Light Tone
+                    </label>
+                    <div className="grid grid-cols-2 gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => setPageDarkness('light')}
+                        className={`py-2 px-2.5 rounded-xl border text-[11px] font-bold flex items-center justify-center gap-1.5 ${
+                          pageDarkness === 'light'
+                            ? 'btn-3d-white'
+                            : 'border-slate-200 text-slate-600 hover:bg-slate-50 dark:border-slate-800 dark:text-slate-300'
+                        }`}
+                      >
+                        <Sun className="w-3.5 h-3.5 text-amber-500" /> Light Tone
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setPageDarkness('dark')}
+                        className={`py-2 px-2.5 rounded-xl border text-[11px] font-bold flex items-center justify-center gap-1.5 ${
+                          pageDarkness === 'dark'
+                            ? 'btn-3d-dark'
+                            : 'border-slate-200 text-slate-600 hover:bg-slate-50 dark:border-slate-800 dark:text-slate-300'
+                        }`}
+                      >
+                        <Moon className="w-3.5 h-3.5 text-indigo-400" /> Dark Tone
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Primary & Interactive Accent Colors */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2 border-t border-slate-100 dark:border-slate-800">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
+                      Header / Primary Accent Color
                     </label>
                     <div className="flex items-center gap-2">
                       <input
@@ -597,7 +944,7 @@ export const BuilderStudio: React.FC<BuilderStudioProps> = ({
                   </div>
                   <div>
                     <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
-                      Buttons & Interactive Accent Color
+                      Buttons & Interactive Gold / Highlight Color
                     </label>
                     <div className="flex items-center gap-2">
                       <input
@@ -615,53 +962,245 @@ export const BuilderStudio: React.FC<BuilderStudioProps> = ({
                     </div>
                   </div>
                 </div>
+              </div>
 
-                {/* Storefront Font Family Selector */}
+              {/* 3. TYPOGRAPHY & FONT CUSTOMIZER (Fully Editable) */}
+              <div className="card-3d p-5 sm:p-6 space-y-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-indigo-600 dark:text-indigo-400">
+                      Storefront Typography
+                    </div>
+                    <h3 className="text-base font-display font-bold text-slate-900 dark:text-white">
+                      Curated Font Families & Heading Transform
+                    </h3>
+                    <p className="text-xs text-slate-500">
+                      Every font brings a distinct taste: Cinzel for Royal Jewelry, Space Grotesk for Baggy Fashion, Playfair for Traditional Wear, and Fraunces for Gourmet Coffee.
+                    </p>
+                  </div>
+                  <span className="text-xs font-bold text-slate-800 dark:text-slate-200" style={{ fontFamily }}>
+                    Active: {fontFamily}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
+                  {FONT_OPTIONS.map((f) => {
+                    const selected = fontFamily === f.id;
+                    return (
+                      <button
+                        key={f.id}
+                        type="button"
+                        onClick={() => setFontFamily(f.id)}
+                        className={`rounded-xl border p-3 text-left transition ${
+                          selected
+                            ? 'border-indigo-600 bg-indigo-50/70 ring-2 ring-indigo-600/20 dark:bg-indigo-950/50'
+                            : 'border-slate-200 hover:border-slate-300 dark:border-slate-800 bg-white dark:bg-slate-900'
+                        }`}
+                      >
+                        <div className="text-xs font-bold text-slate-900 dark:text-white">{f.label}</div>
+                        <div className="mt-0.5 text-[10px] text-slate-500 truncate">{f.style}</div>
+                        <div className="mt-2 text-sm font-bold text-indigo-600 dark:text-indigo-400 truncate" style={{ fontFamily: f.id }}>
+                          {f.sample}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* Heading Transform Options */}
+                <div className="pt-2 flex flex-wrap items-center gap-2">
+                  <span className="text-xs font-semibold text-slate-600 dark:text-slate-400">Heading Lettering:</span>
+                  {[
+                    { id: 'capitalize', label: 'Title Case (Elegance)' },
+                    { id: 'uppercase', label: 'UPPERCASE (Streetwear / Jewelry)' },
+                    { id: 'none', label: 'Natural Lowercase' },
+                  ].map((ht) => (
+                    <button
+                      key={ht.id}
+                      type="button"
+                      onClick={() => setHeadingTransform(ht.id as any)}
+                      className={`px-3 py-1.5 rounded-lg border text-xs font-bold ${
+                        headingTransform === ht.id
+                          ? 'btn-3d-dark'
+                          : 'border-slate-200 text-slate-600 hover:bg-slate-100 dark:border-slate-800 dark:text-slate-300'
+                      }`}
+                    >
+                      {ht.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* 4. PRODUCT SEATING & CARD STYLER ("How products are seated") */}
+              <div className="card-3d p-5 sm:p-6 space-y-5">
+                <div>
+                  <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-indigo-600 dark:text-indigo-400">
+                    Product Presentation
+                  </div>
+                  <h3 className="text-base font-display font-bold text-slate-900 dark:text-white">
+                    How Products Are Seated & Displayed
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Customize the card frame, aspect ratio, corner curve, hallmark badges, and button styling so products fit their category perfectly.
+                  </p>
+                </div>
+
+                {/* Product Card Style Presets */}
                 <div className="space-y-2">
                   <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
-                    Storefront Font Family (6 Distinct Typography Styles)
+                    Card Presentation Style
                   </label>
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-                    {FONT_OPTIONS.map((f) => {
-                      const selected = fontFamily === f.id;
+                    {[
+                      {
+                        id: 'arabian_heritage',
+                        title: 'Arabian Heritage Frame',
+                        desc: 'Framed ivory cards with deep green & gold badges',
+                      },
+                      {
+                        id: 'jewelry_pedestal',
+                        title: 'Jewelry Gold Pedestal',
+                        desc: 'Dark obsidian card with 18K gold hallmark tags',
+                      },
+                      {
+                        id: 'streetwear_lookbook',
+                        title: 'Streetwear Tall Lookbook',
+                        desc: 'Tall 3:4.2 proportion, sharp 0px corners & drop stencils',
+                      },
+                      {
+                        id: 'artisan_craft',
+                        title: 'Artisan Food & Storage Craft',
+                        desc: 'Warm craft paper card with airtight & freshness pills',
+                      },
+                      {
+                        id: 'minimal_editorial',
+                        title: 'Clean Minimalist Grid',
+                        desc: 'Airy borders, crisp geometry & spacious margins',
+                      },
+                    ].map((style) => {
+                      const active = productCardStyle === style.id;
                       return (
                         <button
-                          key={f.id}
+                          key={style.id}
                           type="button"
-                          onClick={() => setFontFamily(f.id)}
-                          style={{ fontFamily: f.id }}
+                          onClick={() => setProductCardStyle(style.id)}
                           className={`rounded-xl border p-3 text-left transition ${
-                            selected
-                              ? 'border-indigo-600 bg-indigo-50/70 ring-1 ring-indigo-600 dark:bg-indigo-950/50'
+                            active
+                              ? 'border-indigo-600 bg-indigo-50/70 ring-2 ring-indigo-600/20 dark:bg-indigo-950/40'
                               : 'border-slate-200 hover:border-slate-300 dark:border-slate-800'
                           }`}
                         >
-                          <div className="text-xs font-bold text-slate-900 dark:text-white">{f.label}</div>
-                          <div className="mt-0.5 text-[10px] text-slate-500">{f.style}</div>
-                          <div className="mt-1.5 text-sm font-semibold text-indigo-600 dark:text-indigo-400">{f.sample}</div>
+                          <div className="text-xs font-bold text-slate-900 dark:text-white">{style.title}</div>
+                          <div className="mt-1 text-[11px] text-slate-500 leading-snug">{style.desc}</div>
                         </button>
                       );
                     })}
                   </div>
                 </div>
 
-                {/* Button & Card 3D Elevation Options */}
+                {/* Aspect Ratio & Corner Softness */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-1">
                   <div>
                     <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1.5">
-                      Button & Card Tactile Style
+                      Product Photo Aspect Ratio
+                    </label>
+                    <div className="grid grid-cols-2 gap-2">
+                      {[
+                        { id: 'aspect-[1/1.08]', label: '1:1.08 Classic Boutique' },
+                        { id: 'aspect-[3/4.2]', label: '3:4.2 Tall Lookbook (Baggy)' },
+                        { id: 'aspect-[1/1]', label: '1:1 Square Balanced' },
+                        { id: 'aspect-[1/1.15]', label: '1:1.15 Jewelry Pedestal' },
+                      ].map((ar) => (
+                        <button
+                          key={ar.id}
+                          type="button"
+                          onClick={() => setProductAspectRatio(ar.id)}
+                          className={`p-2 rounded-xl border text-left text-xs font-semibold ${
+                            productAspectRatio === ar.id
+                              ? 'btn-3d-dark'
+                              : 'border-slate-200 text-slate-600 hover:bg-slate-50 dark:border-slate-800 dark:text-slate-300'
+                          }`}
+                        >
+                          {ar.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1.5">
+                      Card Corner Softness
+                    </label>
+                    <div className="grid grid-cols-3 gap-1.5">
+                      {[
+                        { id: '0px', label: '0px Sharp Stencil' },
+                        { id: '8px', label: '8px Crisp' },
+                        { id: '16px', label: '16px Modern' },
+                        { id: '22px', label: '22px Sculpted' },
+                        { id: '32px', label: '32px Organic Pill' },
+                      ].map((cr) => (
+                        <button
+                          key={cr.id}
+                          type="button"
+                          onClick={() => setCardRadius(cr.id)}
+                          className={`py-2 px-2 rounded-xl border text-[11px] font-bold text-center ${
+                            cardRadius === cr.id
+                              ? 'btn-3d-primary'
+                              : 'border-slate-200 text-slate-600 hover:bg-slate-50 dark:border-slate-800 dark:text-slate-300'
+                          }`}
+                        >
+                          {cr.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Card Background Surface & Button Style */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-1">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1.5">
+                      Card Surface Style
+                    </label>
+                    <div className="grid grid-cols-3 gap-1.5">
+                      {[
+                        { id: 'white', label: 'White Surface' },
+                        { id: 'dark_surface', label: 'Obsidian Velvet' },
+                        { id: 'craft_beige', label: 'Craft Beige' },
+                        { id: 'glass', label: 'Frosted Glass' },
+                        { id: 'bordered_clear', label: 'Raw Clear' },
+                      ].map((cs) => (
+                        <button
+                          key={cs.id}
+                          type="button"
+                          onClick={() => setCardBackgroundStyle(cs.id)}
+                          className={`py-2 px-2 rounded-xl border text-[11px] font-bold text-center ${
+                            cardBackgroundStyle === cs.id
+                              ? 'btn-3d-dark'
+                              : 'border-slate-200 text-slate-600 hover:bg-slate-50 dark:border-slate-800 dark:text-slate-300'
+                          }`}
+                        >
+                          {cs.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1.5">
+                      Interactive Button Feel
                     </label>
                     <div className="grid grid-cols-3 gap-1.5">
                       {[
                         { id: '3d', label: '3D Tactile' },
                         { id: 'pill', label: 'Rounded Pill' },
-                        { id: 'sharp', label: 'Crisp Modern' },
+                        { id: 'sharp', label: 'Sharp Crisp' },
                       ].map((bs) => (
                         <button
                           key={bs.id}
                           type="button"
                           onClick={() => setButtonStyle(bs.id as any)}
-                          className={`py-2 px-2.5 rounded-xl border text-[11px] font-bold ${
+                          className={`py-2 px-2.5 rounded-xl border text-[11px] font-bold text-center ${
                             buttonStyle === bs.id
                               ? 'btn-3d-primary'
                               : 'border-slate-200 text-slate-600 hover:bg-slate-50 dark:border-slate-800 dark:text-slate-300'
@@ -672,31 +1211,28 @@ export const BuilderStudio: React.FC<BuilderStudioProps> = ({
                       ))}
                     </div>
                   </div>
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1.5">
-                      Card Corner Softness
-                    </label>
-                    <div className="grid grid-cols-3 gap-1.5">
-                      {[
-                        { id: '12px', label: '12px Classic' },
-                        { id: '20px', label: '20px Modern' },
-                        { id: '28px', label: '28px Sculpted' },
-                      ].map((cr) => (
-                        <button
-                          key={cr.id}
-                          type="button"
-                          onClick={() => setCardRadius(cr.id)}
-                          className={`py-2 px-2.5 rounded-xl border text-[11px] font-bold ${
-                            cardRadius === cr.id
-                              ? 'btn-3d-dark'
-                              : 'border-slate-200 text-slate-600 hover:bg-slate-50 dark:border-slate-800 dark:text-slate-300'
-                          }`}
-                        >
-                          {cr.label}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
+                </div>
+
+                {/* Card Badges & Indicators Toggles */}
+                <div className="flex flex-wrap items-center gap-4 pt-2 border-t border-slate-100 dark:border-slate-800">
+                  <label className="flex items-center gap-2 cursor-pointer text-xs font-bold text-slate-800 dark:text-slate-200">
+                    <input
+                      type="checkbox"
+                      checked={showStockBadges}
+                      onChange={(e) => setShowStockBadges(e.target.checked)}
+                      className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 h-4 w-4"
+                    />
+                    <span>Show Stock & Bestseller Badges</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer text-xs font-bold text-slate-800 dark:text-slate-200">
+                    <input
+                      type="checkbox"
+                      checked={showStarRatings}
+                      onChange={(e) => setShowStarRatings(e.target.checked)}
+                      className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 h-4 w-4"
+                    />
+                    <span>Show Customer Star Ratings (4.8 ★)</span>
+                  </label>
                 </div>
               </div>
 

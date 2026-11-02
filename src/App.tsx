@@ -230,29 +230,32 @@ export default function App() {
 
   const loadAccountAndBusinesses = useCallback(async () => {
     try {
-      const res = await fetch('/api/auth/me', { headers: headersWithAuth() });
-      const data = await res.json();
-      if (res.ok && data.user) {
-        setCurrentUser(data.user);
-        setProfileNameInput(data.user.name || '');
-        setProfileEmailInput(data.user.email || '');
-        setProfileTgInput(data.user.telegram_username || '');
-        setLang((data.user.preferred_language as LanguageCode) || 'en');
-        setAvailableAccounts(data.availableAccounts || []);
-        setBusinesses(data.businesses || []);
-        if (data.businesses?.length > 0) {
-          const exists = data.businesses.some((b: any) => b.id === selectedBusinessId);
-          if (!exists) {
-            setSelectedBusinessId(data.businesses[0].id);
+      const res = await fetch('/api/auth/me', { headers: headersWithAuth() }).catch(() => null);
+      if (res && res.ok) {
+        const data = await res.json().catch(() => null);
+        if (data && data.user) {
+          setCurrentUser(data.user);
+          setProfileNameInput(data.user.name || '');
+          setProfileEmailInput(data.user.email || '');
+          setProfileTgInput(data.user.telegram_username || '');
+          setLang((data.user.preferred_language as LanguageCode) || 'en');
+          setAvailableAccounts(data.availableAccounts || []);
+          setBusinesses(data.businesses || []);
+          if (data.businesses?.length > 0) {
+            const exists = data.businesses.some((b: any) => b.id === selectedBusinessId);
+            if (!exists) {
+              setSelectedBusinessId(data.businesses[0].id);
+            }
           }
         }
       }
-      const admRes = await fetch('/api/superadmin/admins', { headers: headersWithAuth() });
-      if (admRes.ok) {
-        setCoAdminsList(await admRes.json());
+      const admRes = await fetch('/api/superadmin/admins', { headers: headersWithAuth() }).catch(() => null);
+      if (admRes && admRes.ok) {
+        const admins = await admRes.json().catch(() => null);
+        if (Array.isArray(admins)) setCoAdminsList(admins);
       }
-    } catch {
-      // ignore
+    } catch (err) {
+      console.warn('Account load warning:', err);
     }
   }, [headersWithAuth, selectedBusinessId]);
 
@@ -261,32 +264,40 @@ export default function App() {
     setLoading(true);
     try {
       const [wsRes, anRes, supRes, addRes] = await Promise.all([
-        fetch(`/api/businesses/${bizId}/workspace`, { headers: headersWithAuth() }),
-        fetch(`/api/businesses/${bizId}/analytics`, { headers: headersWithAuth() }),
-        fetch(`/api/businesses/${bizId}/support`, { headers: headersWithAuth() }),
-        fetch('/api/addons', { headers: headersWithAuth() }),
+        fetch(`/api/businesses/${bizId}/workspace`, { headers: headersWithAuth() }).catch(() => null),
+        fetch(`/api/businesses/${bizId}/analytics`, { headers: headersWithAuth() }).catch(() => null),
+        fetch(`/api/businesses/${bizId}/support`, { headers: headersWithAuth() }).catch(() => null),
+        fetch('/api/addons', { headers: headersWithAuth() }).catch(() => null),
       ]);
 
-      if (wsRes.ok) {
-        const ws = await wsRes.json();
-        setWorkspace(ws);
-        setTgBotUsername(ws.business?.telegram_bot_username || '');
-        setTgChannelUsername(ws.business?.telegram_channel_username || '');
-        setCustomDomainInput(ws.business?.custom_domain || '');
-      }
-      if (anRes.ok) {
-        setAnalyticsData(await anRes.json());
-      }
-      if (supRes.ok) {
-        const threads = await supRes.json();
-        setSupportThreads(threads);
-        if (threads.length > 0 && !selectedConvId) {
-          setSelectedConvId(threads[0].id);
+      if (wsRes && wsRes.ok) {
+        const ws = await wsRes.json().catch(() => null);
+        if (ws) {
+          setWorkspace(ws);
+          setTgBotUsername(ws.business?.telegram_bot_username || '');
+          setTgChannelUsername(ws.business?.telegram_channel_username || '');
+          setCustomDomainInput(ws.business?.custom_domain || '');
         }
       }
-      if (addRes.ok) {
-        setMarketplaceAddons(await addRes.json());
+      if (anRes && anRes.ok) {
+        const an = await anRes.json().catch(() => null);
+        if (an) setAnalyticsData(an);
       }
+      if (supRes && supRes.ok) {
+        const threads = await supRes.json().catch(() => []);
+        if (Array.isArray(threads)) {
+          setSupportThreads(threads);
+          if (threads.length > 0 && !selectedConvId) {
+            setSelectedConvId(threads[0].id);
+          }
+        }
+      }
+      if (addRes && addRes.ok) {
+        const addons = await addRes.json().catch(() => []);
+        if (Array.isArray(addons)) setMarketplaceAddons(addons);
+      }
+    } catch (err) {
+      console.warn('Workspace load warning:', err);
     } finally {
       setLoading(false);
     }
@@ -4667,22 +4678,42 @@ export default function App() {
                     {
                       id: 'royal_boutique',
                       cat: 'retail',
-                      title: 'Al-Saudia Luxury Boutique',
-                      subtitle: 'Thobes, Apparel, Watches & Retail',
+                      title: 'Al-Saudia Traditional & Luxury Wear',
+                      subtitle: 'Thobes, Agal, Bishts, Jalabiyas & Arabian Culture',
                       primary: '#0F382A',
-                      accent: '#C69C53',
+                      accent: '#C69C6D',
                       cats: ['Thobes', 'Agal', 'Bishts', 'Jalabiyas', 'Accessories'],
-                      badge: 'Matches Reference Photo',
+                      badge: 'Arabian Heritage',
                     },
                     {
-                      id: 'artisanal_coffee',
+                      id: 'luxury_chains_jewelry',
+                      cat: 'retail',
+                      title: 'Aurum & Stone Royal Chains & Fine Jewelry',
+                      subtitle: '18K Cuban Chains, Solitaire Diamonds, Signets & Watches',
+                      primary: '#D4AF37',
+                      accent: '#F5D77F',
+                      cats: ['Chains', 'Necklaces', 'Rings', 'Watches', 'Bracelets'],
+                      badge: 'Chains & Jewelry',
+                    },
+                    {
+                      id: 'baggy_streetwear',
+                      cat: 'retail',
+                      title: 'District 92 Oversize & Baggy Streetwear',
+                      subtitle: 'Heavy 420GSM Hoodies, Parachute Cargo & Boxy Tees',
+                      primary: '#FF5500',
+                      accent: '#FFFFFF',
+                      cats: ['Hoodies', 'Baggy Cargo', 'Vintage Tees', 'Outerwear'],
+                      badge: 'Baggy Fashion Drop',
+                    },
+                    {
+                      id: 'gourmet_food_roastery',
                       cat: 'coffee_shop',
-                      title: 'Specialty Coffee & Roastery',
-                      subtitle: 'Roasted Beans, Espresso & Gifts',
-                      primary: '#3C2415',
-                      accent: '#C69C53',
-                      cats: ['Whole Bean', 'Ground', 'Brew Gear', 'Pastry'],
-                      badge: 'Popular Cafe',
+                      title: 'Kaffa Origin Roastery & Gourmet Food',
+                      subtitle: 'Borosilicate Glass Storage Canisters, Honey & Coffee',
+                      primary: '#2D1810',
+                      accent: '#C86432',
+                      cats: ['Single-Origin Coffee', 'Storage Canisters', 'Raw Honey', 'Brew Gear'],
+                      badge: 'Gourmet Food & Storage',
                     },
                     {
                       id: 'digital_menu',
@@ -4693,16 +4724,6 @@ export default function App() {
                       accent: '#D97706',
                       cats: ['Signature Platters', 'Mains', 'Beverages', 'Desserts'],
                       badge: 'Food & Menu',
-                    },
-                    {
-                      id: 'luxury_hotel',
-                      cat: 'hotel',
-                      title: 'Hospitality & Resort Suites',
-                      subtitle: 'Room Bookings, Spa & Airport Transfer',
-                      primary: '#1E293B',
-                      accent: '#B45309',
-                      cats: ['Suites', 'Dining', 'Spa Packages', 'VIP Transfers'],
-                      badge: 'Bookings + Store',
                     },
                     {
                       id: 'wellness_salon',

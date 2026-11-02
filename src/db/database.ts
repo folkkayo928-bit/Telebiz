@@ -602,12 +602,24 @@ export function ensureDefaultBusinessPaymentMethods() {
       { id: 'sec_about', type: 'business_info', title: 'Showroom Hours, Guarantee & Concierge Support', subtitle: '3-Year Tailoring Guarantee · Express Delivery', visible: true },
     ]);
     const boutiqueTheme = JSON.stringify({
+      tastePreset: 'arabian_heritage',
       primaryColor: '#0F382A',
-      accentColor: '#0F382A',
+      accentColor: '#C69C6D',
+      backgroundType: 'warm_sand',
+      backgroundColor: '#FAF7F0',
+      backgroundPattern: 'islamic_geometry',
+      pageDarkness: 'light',
       fontFamily: 'Playfair Display',
-      buttonStyle: '3d_solid',
-      cardRadius: '20px',
+      headingTransform: 'capitalize',
+      productCardStyle: 'arabian_heritage',
+      productGridColumns: '2_cols',
+      productAspectRatio: 'aspect-[1/1.08]',
+      cardRadius: '22px',
+      cardBackgroundStyle: 'white',
+      headerStyle: 'royal_crest',
+      buttonStyle: '3d',
       showStockBadges: true,
+      showStarRatings: true,
       enableTelegramStars: true,
       enableWebCheckout: true,
     });
@@ -619,7 +631,7 @@ export function ensureDefaultBusinessPaymentMethods() {
     ]);
     db.prepare(`
       INSERT INTO mini_app_versions (id, business_id, version_number, layout_json, theme_json, pages_json, status, created_by, note, created_at)
-      VALUES ('ver_boutique_1', 'biz_boutique', 2, ?, ?, ?, 'published', 'Sheikh Tariq Al-Saudia', 'Luxury Boutique Storefront Theme', ?)
+      VALUES ('ver_boutique_1', 'biz_boutique', 2, ?, ?, ?, 'published', 'Sheikh Tariq Al-Saudia', 'Arabian Heritage Boutique Storefront Theme', ?)
     `).run(boutiqueLayout, boutiqueTheme, boutiquePages, now);
 
     const insertProd = db.prepare(`
@@ -693,17 +705,267 @@ export function ensureDefaultBusinessPaymentMethods() {
     `).run(now, now, now, now, now, now);
   }
 
-  // Ensure biz_kaffa also has a sample Rejected order so Store Owner 2 sees finished, pending, and rejected
-  const existingKaffaRejected = db.prepare("SELECT id FROM orders WHERE id = 'ord_1007'").get();
-  if (!existingKaffaRejected) {
+  // Ensure dedicated owner for Aurum & Stone Royal Chains & Jewelry exists (usr_owner_5)
+  const existingJewelryOwner = db.prepare("SELECT id FROM users WHERE id = 'usr_owner_5'").get() as { id: string } | undefined;
+  if (!existingJewelryOwner) {
     db.prepare(`
-      INSERT OR IGNORE INTO orders (id, order_number, business_id, customer_id, customer_name, customer_phone, source, items_json, subtotal, discount_amount, total, currency, status, payment_status, payment_method, delivery_address, delivery_status, created_at)
-      VALUES ('ord_1007', 'ORD-2026-1007', 'biz_kaffa', null, 'Nahom Tesfaye', '+251 944 881 122', 'telegram', '[{"name":"Artisan Matte Ceramic V60 Pour-Over Kit","qty":1,"price":3450,"variation":"Obsidian Matte"}]', 3450, 0, 3450, 'ETB', 'cancelled', 'failed', 'Telebirr SuperApp', 'Megenagna Square', 'awaiting_dispatch', ?)
-    `).run(now);
+      INSERT INTO users (id, email, name, password_hash, platform_role, telegram_id, telegram_username, preferred_language, owner_uid, recovery_passcode_hash, recovery_hint, account_status, created_at)
+      VALUES ('usr_owner_5', 'marcus@aurumstone.store', 'Marcus Sterling', ?, 'user', '9481023', '@marcus_aurum', 'en', 'OWN-AUR-882190', ?, 'Default demo recovery passcode: 2026', 'active', ?)
+    `).run(hashPassword('owner123'), hashPassword('2026'), now);
+  }
+
+  // Ensure Aurum & Stone Royal Chains & Jewelry business exists
+  const existingJewelryBiz = db.prepare("SELECT id FROM businesses WHERE id = 'biz_jewelry'").get();
+  if (!existingJewelryBiz) {
+    const jewelryCategories = JSON.stringify(['Chains', 'Necklaces', 'Rings', 'Pendants', 'Watches']);
+    const jewelryHours = JSON.stringify({ mon_fri: '10:00 - 20:00', sat: '10:00 - 21:00', sun: '12:00 - 18:00' });
     db.prepare(`
-      INSERT OR IGNORE INTO payments (id, scope, business_id, reference_code, order_id, booking_id, amount, currency, method, provider_tx_id, status, verified_at, verified_by, description, created_at)
-      VALUES ('pay_1007', 'business', 'biz_kaffa', 'TX-TB-1007', 'ord_1007', null, 3450, 'ETB', 'Telebirr SuperApp', 'UNMATCHED-TX', 'failed', null, null, 'Order ORD-2026-1007 rejected payment request', ?)
-    `).run(now);
+      INSERT INTO businesses (
+        id, slug, name, category, status, creation_method, dfy_status, dfy_notes,
+        plan_id, billing_cycle, subscription_status, subscription_expires_at, grace_period_days,
+        primary_color, accent_color, font_family, categories_json, logo_text, description, about_text,
+        contact_phone, contact_email, address, working_hours_json, custom_domain,
+        restricted_features_json, telegram_bot_token_masked, telegram_bot_username,
+        telegram_channel_username, telegram_webhook_active, mini_app_published,
+        mini_app_version, ai_generations_used, ai_generations_limit, owner_id, owner_uid, created_at
+      ) VALUES (?, ?, ?, ?, 'active', 'self_service', 'not_applicable', '', 'enterprise', 'yearly', 'active', ?, 14, ?, ?, 'Cinzel', ?, 'AS', ?, ?, '+251 911 334 556', 'concierge@aurumstone.store', 'Bole Rwanda VIP Jewelry Galleria, Addis Ababa', ?, 'shop.aurumstone.store', '[]', '819201:AAH...4xQz', '@AurumJewelryBot', '@AurumVault', 1, 1, 1, 3, 100, 'usr_owner_5', 'OWN-AUR-882190', ?)
+    `).run(
+      'biz_jewelry',
+      'aurum-chains-jewelry',
+      'Aurum & Stone Royal Chains & Fine Jewelry',
+      'retail',
+      new Date(Date.now() + 365 * 86400000).toISOString(),
+      '#D4AF37',
+      '#F5D77F',
+      jewelryCategories,
+      'Solid 18K & 24K Gold Chains, Solitaire Diamond Necklaces, Handcrafted Signet Rings & Luxury Chronographs.',
+      'Every piece is hallmarked, authenticated with laser certification, and presented in a velvet vault chest. Direct insured delivery via Telegram & Web.',
+      jewelryHours,
+      now
+    );
+
+    const jewelryLayout = JSON.stringify([
+      { id: 'sec_hero', type: 'hero', title: 'The Gold Standard of Elegance', subtitle: 'Handcrafted solid 18K gold chains, certified diamond necklaces & collector timepieces.', ctaText: 'Explore Vault', visible: true },
+      { id: 'sec_featured', type: 'featured_products', title: 'Vault Highlights', subtitle: 'Heirloom Cuban chains, solitaire necklaces, and diamond rings.', visible: true },
+      { id: 'sec_catalog', type: 'product_grid', title: 'Curated Jewelry Showcase', subtitle: 'Solid gold, fine silver, and certified gems.', visible: true },
+      { id: 'sec_bookings', type: 'booking_widget', title: 'Private VIP Vault Consultation', subtitle: 'Book a private viewing or custom chain sizing at our gallery.', visible: true },
+      { id: 'sec_about', type: 'business_info', title: 'Lifetime Certification & Showroom', subtitle: 'Certified Authenticity · Insured Armored Delivery', visible: true },
+    ]);
+    const jewelryTheme = JSON.stringify({
+      tastePreset: 'jewelry_luxury',
+      primaryColor: '#D4AF37',
+      accentColor: '#F5D77F',
+      backgroundType: 'obsidian_velvet',
+      backgroundColor: '#0B0C10',
+      backgroundPattern: 'gold_dust',
+      pageDarkness: 'dark',
+      fontFamily: 'Cinzel',
+      headingTransform: 'uppercase',
+      productCardStyle: 'jewelry_pedestal',
+      productGridColumns: '2_cols',
+      productAspectRatio: 'aspect-[1/1.15]',
+      cardRadius: '16px',
+      cardBackgroundStyle: 'dark_surface',
+      headerStyle: 'royal_crest',
+      buttonStyle: 'sharp',
+      showStockBadges: true,
+      showStarRatings: true,
+      enableTelegramStars: true,
+      enableWebCheckout: true,
+    });
+    const jewelryPages = JSON.stringify([
+      { slug: 'home', title: 'Vault', enabled: true },
+      { slug: 'catalog', title: 'Jewelry', enabled: true },
+      { slug: 'bookings', title: 'VIP Consultation', enabled: true },
+      { slug: 'about', title: 'Guarantee', enabled: true },
+    ]);
+    db.prepare(`
+      INSERT INTO mini_app_versions (id, business_id, version_number, layout_json, theme_json, pages_json, status, created_by, note, created_at)
+      VALUES ('ver_jewelry_1', 'biz_jewelry', 1, ?, ?, ?, 'published', 'Marcus Sterling', 'Obsidian Velvet & Gold Jewelry Theme', ?)
+    `).run(jewelryLayout, jewelryTheme, jewelryPages, now);
+
+    const insertJewelryProd = db.prepare(`
+      INSERT INTO products (
+        id, business_id, category_name, name, description, price, compare_at_price,
+        currency, stock, sku, variations_json, featured, available, image_type,
+        views_count, likes_count, purchases_count, created_at
+      ) VALUES (?, 'biz_jewelry', ?, ?, ?, ?, ?, 'ETB', ?, ?, ?, ?, 1, ?, ?, ?, ?, ?)
+    `);
+    insertJewelryProd.run('prd_j1', 'Chains', 'Miami Cuban Link 18K Solid Gold Chain (10mm)', 'Heavy hand-polished 18K yellow gold Cuban link chain with custom double safety lock clasp. Hallmarked 750.', 34500, 42000, 12, 'AUR-CHN-01', JSON.stringify(['20 inch (50cm)', '22 inch (55cm)', '24 inch (60cm)']), 1, 'jewelry_chain', 920, 312, 45, now);
+    insertJewelryProd.run('prd_j2', 'Necklaces', 'Solitaire Diamond Pendant Necklace', '0.75-carat brilliant cut certified lab diamond set in 18K white gold bezel with 1.2mm delicate wheat chain.', 26800, 32000, 8, 'AUR-NCK-01', JSON.stringify(['18K White Gold', '18K Yellow Gold', 'Rose Gold']), 1, 'jewelry_necklace', 840, 278, 38, now);
+    insertJewelryProd.run('prd_j3', 'Chains', 'Artisan Diamond-Cut Franco Chain (5mm)', 'Italian crafted 18K gold four-sided Franco chain with mirror-reflective diamond facets.', 19200, 23500, 15, 'AUR-CHN-02', JSON.stringify(['18 inch', '20 inch', '22 inch']), 1, 'jewelry_chain', 650, 195, 29, now);
+    insertJewelryProd.run('prd_j4', 'Rings', 'Obsidian & 18K Gold Royal Signet Ring', 'Solid cushion-top signet ring featuring natural black obsidian stone framed in brushed 18K gold.', 14800, 17500, 20, 'AUR-RNG-01', JSON.stringify(['US 8 (18.2mm)', 'US 9 (19.0mm)', 'US 10 (19.8mm)', 'US 11 (20.6mm)']), 1, 'jewelry_ring', 510, 162, 31, now);
+    insertJewelryProd.run('prd_j5', 'Pendants', 'Colombian Emerald Cut Solitaire Pendant', '2.2-carat deep forest green emerald cut gemstone set in 4-prong heavy 18K yellow gold setting.', 22500, 27000, 7, 'AUR-PND-01', JSON.stringify(['Pendant Only', 'With 18K Box Chain']), 1, 'accessories_gold', 430, 148, 22, now);
+    insertJewelryProd.run('prd_j6', 'Watches', 'Chronograph Master Brushed Gold Watch', 'Precision automatic movement, sapphire crystal glass, brushed 18K gold finish with exhibition caseback.', 48000, 56000, 5, 'AUR-WTC-01', JSON.stringify(['Oyster Gold Bracelet', 'Alligator Leather Strap']), 1, 'jewelry_watch', 1100, 420, 19, now);
+  }
+
+  // Ensure District 92 Oversize & Baggy Streetwear business exists
+  const existingStreetwearBiz = db.prepare("SELECT id FROM businesses WHERE id = 'biz_streetwear'").get();
+  if (!existingStreetwearBiz) {
+    const streetCategories = JSON.stringify(['Baggy Pants & Cargo', 'Oversized Hoodies', 'Heavy Graphic Tees', 'Outerwear', 'Headwear']);
+    const streetHours = JSON.stringify({ mon_fri: '11:00 - 22:00', sat: '11:00 - 23:00', sun: '13:00 - 21:00' });
+    db.prepare(`
+      INSERT INTO businesses (
+        id, slug, name, category, status, creation_method, dfy_status, dfy_notes,
+        plan_id, billing_cycle, subscription_status, subscription_expires_at, grace_period_days,
+        primary_color, accent_color, font_family, categories_json, logo_text, description, about_text,
+        contact_phone, contact_email, address, working_hours_json, custom_domain,
+        restricted_features_json, telegram_bot_token_masked, telegram_bot_username,
+        telegram_channel_username, telegram_webhook_active, mini_app_published,
+        mini_app_version, ai_generations_used, ai_generations_limit, owner_id, owner_uid, created_at
+      ) VALUES (?, ?, ?, ?, 'active', 'self_service', 'not_applicable', '', 'growth', 'monthly', 'active', ?, 14, ?, ?, 'Space Grotesk', ?, 'D92', ?, ?, '+251 944 556 778', 'drops@district92.store', 'Bole Snap Plaza Basement #B4, Addis Ababa', ?, 'shop.district92.store', '[]', '902194:AAH...8uVp', '@District92Bot', '@District92Drops', 1, 1, 1, 2, 25, 'usr_owner_4', 'OWN-YON-529104', ?)
+    `).run(
+      'biz_streetwear',
+      'district-92-streetwear',
+      'District 92 Oversize & Baggy Streetwear',
+      'retail',
+      new Date(Date.now() + 365 * 86400000).toISOString(),
+      '#FF5500',
+      '#FFFFFF',
+      streetCategories,
+      'Raw Boxy Fits, Heavyweight Cotton Drop-Shoulder Hoodies, Wide-Leg Parachute Pants & Skate Essentials.',
+      'Designed in Addis Ababa. Heavy-density fabrics from 260GSM to 460GSM with raw distressing, double-knee reinforcement and relaxed skater silhouettes.',
+      streetHours,
+      now
+    );
+
+    const streetLayout = JSON.stringify([
+      { id: 'sec_hero', type: 'hero', title: 'SEASON 04: OVERSIZED SILHOUETTES', subtitle: '420GSM Heavyweight Fleece · Wide-Leg Parachute Pants · Raw Boxy Cuts.', ctaText: 'Shop Drop', visible: true },
+      { id: 'sec_featured', type: 'featured_products', title: 'Current Drop Highlights', subtitle: 'Heavyweight cotton and baggy relaxed silhouettes.', visible: true },
+      { id: 'sec_catalog', type: 'product_grid', title: 'Full Streetwear Line', subtitle: 'Filter by garment category, fit, and drop.', visible: true },
+      { id: 'sec_promo', type: 'promo_banner', title: 'Use code DROP92 for 20% OFF orders over 3,000 ETB', subtitle: 'Includes free die-cut vinyl sticker pack.', visible: true },
+      { id: 'sec_about', type: 'business_info', title: 'Flagship Basement Store & Delivery', subtitle: 'Same-day motorbike express across Addis Ababa.', visible: true },
+    ]);
+    const streetTheme = JSON.stringify({
+      tastePreset: 'streetwear_baggy',
+      primaryColor: '#FF5500',
+      accentColor: '#FFFFFF',
+      backgroundType: 'street_concrete',
+      backgroundColor: '#121316',
+      backgroundPattern: 'concrete_grain',
+      pageDarkness: 'dark',
+      fontFamily: 'Space Grotesk',
+      headingTransform: 'uppercase',
+      productCardStyle: 'streetwear_lookbook',
+      productGridColumns: '2_cols',
+      productAspectRatio: 'aspect-[3/4.2]',
+      cardRadius: '0px',
+      cardBackgroundStyle: 'bordered_clear',
+      headerStyle: 'street_banner',
+      buttonStyle: 'sharp',
+      showStockBadges: true,
+      showStarRatings: true,
+      enableTelegramStars: true,
+      enableWebCheckout: true,
+    });
+    const streetPages = JSON.stringify([
+      { slug: 'home', title: 'Drop', enabled: true },
+      { slug: 'catalog', title: 'Apparel', enabled: true },
+      { slug: 'about', title: 'Brand', enabled: true },
+    ]);
+    db.prepare(`
+      INSERT INTO mini_app_versions (id, business_id, version_number, layout_json, theme_json, pages_json, status, created_by, note, created_at)
+      VALUES ('ver_streetwear_1', 'biz_streetwear', 1, ?, ?, ?, 'published', 'Yonas Kebede', 'Raw Concrete Streetwear Lookbook Theme', ?)
+    `).run(streetLayout, streetTheme, streetPages, now);
+
+    const insertStreetProd = db.prepare(`
+      INSERT INTO products (
+        id, business_id, category_name, name, description, price, compare_at_price,
+        currency, stock, sku, variations_json, featured, available, image_type,
+        views_count, likes_count, purchases_count, created_at
+      ) VALUES (?, 'biz_streetwear', ?, ?, ?, ?, ?, 'ETB', ?, ?, ?, ?, 1, ?, ?, ?, ?, ?)
+    `);
+    insertStreetProd.run('prd_s1', 'Oversized Hoodies', 'Heavyweight Boxy Drop-Shoulder Hoodie (420GSM)', 'Ultra-dense 100% French terry cotton with exaggerated boxy silhouette, double-layered hood without drawstrings, and kangaroo pouch.', 4200, 5200, 24, 'D92-HD-01', JSON.stringify(['M (Oversized)', 'L (Oversized)', 'XL (Ultra Baggy)']), 1, 'streetwear_hoodie', 890, 310, 64, now);
+    insertStreetProd.run('prd_s2', 'Baggy Pants & Cargo', 'Wide-Leg Parachute Baggy Cargo Pants', 'Ripstop tactical weave with knee darting, adjustable ankle bungee toggles, and 6 deep utility pockets.', 3950, 4800, 18, 'D92-CRG-01', JSON.stringify(['30 (Loose)', '32 (Baggy)', '34 (Ultra Baggy)', '36 (Mega Baggy)']), 1, 'streetwear_cargo', 980, 345, 78, now);
+    insertStreetProd.run('prd_s3', 'Heavy Graphic Tees', 'Acid-Wash Vintage Oversized Graphic Tee (260GSM)', 'Thick combed cotton with acid-wash vintage fade, 1.25-inch ribbed collar, and raw distressed chest print.', 2400, 2950, 35, 'D92-TEE-01', JSON.stringify(['M (Boxy)', 'L (Boxy)', 'XL (Wide Boxy)']), 1, 'streetwear_tee', 720, 260, 52, now);
+    insertStreetProd.run('prd_s4', 'Baggy Pants & Cargo', 'Loose Skater Double-Knee Carpenter Denim', '14oz washed indigo denim with heavy utility tool loop, reinforced knee panels, and relaxed puddle hem.', 4600, 5500, 15, 'D92-DNM-01', JSON.stringify(['30W / 32L', '32W / 32L', '34W / 34L']), 1, 'streetwear_cargo', 610, 215, 39, now);
+    insertStreetProd.run('prd_s5', 'Outerwear', 'Cropped Oversized Matte Street Puffer', 'Matte black shell with high thermal down fill, cropped boxy cut, bungee cinch hem, and fleece-lined collar.', 7800, 9200, 9, 'D92-OUT-01', JSON.stringify(['M (Boxy)', 'L (Oversized)']), 1, 'streetwear_hoodie', 540, 182, 28, now);
+    insertStreetProd.run('prd_s6', 'Headwear', 'Waffle Rib Thermal Streetwear Beanie', 'Chunky acrylic-wool blend with wide foldover cuff and tonal embroidered District 92 logo tab.', 1200, 1500, 40, 'D92-ACC-01', JSON.stringify(['One Size (Stretchy)']), 0, 'accessories_gold', 380, 120, 44, now);
+  }
+
+  // Ensure Kaffa Origin Roastery & Artisan Food Store has the gourmet food theme and food storage products
+  const kaffaBiz = db.prepare("SELECT id FROM businesses WHERE id = 'biz_kaffa'").get() as any;
+  if (kaffaBiz) {
+    db.prepare(`
+      UPDATE businesses SET
+        name = 'Kaffa Origin Roastery & Artisan Food Store',
+        font_family = 'Fraunces',
+        primary_color = '#2D1810',
+        accent_color = '#C86432',
+        categories_json = ?
+      WHERE id = 'biz_kaffa'
+    `).run(JSON.stringify(['Single-Origin Beans', 'Food Storage & Hardware', 'Artisan Honey & Pantry', 'Cold Brew & RTD']));
+
+    // Insert food storage canister and pantry items if not present
+    const existingCanister = db.prepare("SELECT id FROM products WHERE id = 'prd_k_canister'").get();
+    if (!existingCanister) {
+      db.prepare(`
+        INSERT INTO products (
+          id, business_id, category_name, name, description, price, compare_at_price,
+          currency, stock, sku, variations_json, featured, available, image_type,
+          views_count, likes_count, purchases_count, created_at
+        ) VALUES (?, 'biz_kaffa', ?, ?, ?, ?, ?, 'ETB', ?, ?, ?, 1, 1, ?, 410, 185, 39, ?)
+      `).run(
+        'prd_k_canister',
+        'Food Storage & Hardware',
+        'Airtight UV-Shield Borosilicate Glass Food & Coffee Canister (1200ml)',
+        'Heavy thermal-shock borosilicate glass with one-way CO2 degassing valve and airtight acacia wood lid. Keeps roasted beans and pantry goods fresh for months.',
+        1850,
+        2300,
+        28,
+        'KO-STR-01',
+        JSON.stringify(['800ml (Compact)', '1200ml (Standard)', '1800ml (Pantry Max)']),
+        'food_canister',
+        now
+      );
+      db.prepare(`
+        INSERT INTO products (
+          id, business_id, category_name, name, description, price, compare_at_price,
+          currency, stock, sku, variations_json, featured, available, image_type,
+          views_count, likes_count, purchases_count, created_at
+        ) VALUES (?, 'biz_kaffa', ?, ?, ?, ?, ?, 'ETB', ?, ?, ?, 1, 1, ?, 340, 142, 27, ?)
+      `).run(
+        'prd_k_honey',
+        'Artisan Honey & Pantry',
+        'Highland Organic Wild White Forest Honey Jar (500g)',
+        'Unpasteurized raw organic honey harvested from high-elevation cloud forests in Southwestern Ethiopia with creamy floral notes.',
+        950,
+        1200,
+        35,
+        'KO-HON-01',
+        JSON.stringify(['500g Jar', '1kg Family Crock']),
+        'food_canister',
+        now
+      );
+    }
+
+    // Update kaffa version theme to gourmet_food
+    const kaffaVer = db.prepare("SELECT id FROM mini_app_versions WHERE business_id = 'biz_kaffa' ORDER BY version_number DESC LIMIT 1").get() as any;
+    if (kaffaVer) {
+      const kaffaThemeObj = JSON.stringify({
+        tastePreset: 'gourmet_food',
+        primaryColor: '#2D1810',
+        accentColor: '#C86432',
+        backgroundType: 'craft_paper',
+        backgroundColor: '#F6F2EB',
+        backgroundPattern: 'craft_fibers',
+        pageDarkness: 'light',
+        fontFamily: 'Fraunces',
+        headingTransform: 'capitalize',
+        productCardStyle: 'artisan_craft',
+        productGridColumns: '2_cols',
+        productAspectRatio: 'aspect-[1/1]',
+        cardRadius: '18px',
+        cardBackgroundStyle: 'craft_beige',
+        headerStyle: 'artisan_minimal',
+        buttonStyle: 'pill',
+        showStockBadges: true,
+        showStarRatings: true,
+        enableTelegramStars: true,
+        enableWebCheckout: true,
+      });
+      db.prepare('UPDATE mini_app_versions SET theme_json = ? WHERE id = ?').run(kaffaThemeObj, kaffaVer.id);
+    }
   }
 
   // Sync owner_uid across all businesses and backfill customer_uid + owner_uid for all customers

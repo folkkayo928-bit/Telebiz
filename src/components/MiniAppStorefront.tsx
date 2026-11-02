@@ -40,11 +40,24 @@ interface StorefrontProps {
   slug: string;
   mode?: 'embedded_preview' | 'full_storefront';
   overrideTheme?: {
+    tastePreset?: string;
     primaryColor?: string;
     accentColor?: string;
+    backgroundType?: string;
+    backgroundColor?: string;
+    backgroundPattern?: string;
+    pageDarkness?: 'light' | 'dark' | 'auto';
     fontFamily?: string;
-    buttonStyle?: string;
+    headingTransform?: 'none' | 'uppercase' | 'capitalize';
+    productCardStyle?: string;
+    productGridColumns?: string;
+    productAspectRatio?: string;
     cardRadius?: string;
+    cardBackgroundStyle?: string;
+    headerStyle?: string;
+    buttonStyle?: '3d' | 'pill' | 'sharp';
+    showStockBadges?: boolean;
+    showStarRatings?: boolean;
   };
   canQuickEdit?: boolean;
   authToken?: string;
@@ -96,6 +109,28 @@ const PRODUCT_SWATCHES: Record<string, Array<{ name: string; hex: string }>> = {
     { name: 'Black & Gold Zari', hex: '#1C1917' },
     { name: 'Camel & Gold Zari', hex: '#C29B61' },
     { name: 'Cream & Gold Zari', hex: '#F5EFE6' },
+  ],
+  jewelry_chain: [
+    { name: '18K Yellow Gold', hex: '#D4AF37' },
+    { name: '18K Rose Gold', hex: '#B76E79' },
+    { name: 'White Gold / Platinum', hex: '#E5E7EB' },
+  ],
+  jewelry_necklace: [
+    { name: '18K Yellow Gold', hex: '#D4AF37' },
+    { name: '18K White Gold', hex: '#E5E7EB' },
+    { name: 'Rose Gold', hex: '#B76E79' },
+  ],
+  streetwear_hoodie: [
+    { name: 'Washed Charcoal', hex: '#1C1D22' },
+    { name: 'Bone White', hex: '#F0ECE1' },
+    { name: 'Cyber Orange', hex: '#FF5500' },
+    { name: 'Military Olive', hex: '#4B5320' },
+  ],
+  streetwear_cargo: [
+    { name: 'Stealth Black', hex: '#141518' },
+    { name: 'Vintage Olive', hex: '#3B443B' },
+    { name: 'Sand Khaki', hex: '#C2B280' },
+    { name: 'Concrete Gray', hex: '#71797E' },
   ],
   default: [
     { name: 'Signature', hex: '#0F382A' },
@@ -235,6 +270,111 @@ export function ProductVisualCard({
           <circle cx="90" cy="82" r="46" fill="none" stroke="#27272A" strokeWidth="10" />
           <circle cx="90" cy="82" r="46" fill="none" stroke="#D4AF37" strokeWidth="1.5" strokeDasharray="6 6" />
           <path d="M78,128 L72,162 M102,128 L108,162" stroke="#18181B" strokeWidth="5" strokeLinecap="round" />
+        </svg>
+      );
+    }
+
+    if (imageType === 'jewelry_chain' || imageType === 'jewelry_necklace') {
+      return (
+        <svg viewBox="0 0 180 200" className="h-[84%] w-[84%] drop-shadow-[0_16px_32px_rgba(212,175,55,0.25)] transition-transform duration-300 group-hover:scale-108">
+          {/* Black velvet jewelry bust silhouette */}
+          <path d="M50,190 L58,95 Q90,118 122,95 L130,190 Z" fill="#141418" stroke="#D4AF37" strokeWidth="1" opacity="0.6" />
+          {/* Cuban Link / Gold Chain drape */}
+          <path d="M60,65 Q90,150 120,65" fill="none" stroke="#D4AF37" strokeWidth="7" strokeLinecap="round" strokeDasharray="4 2" />
+          <path d="M62,65 Q90,150 118,65" fill="none" stroke="#FFF0BA" strokeWidth="2.5" strokeLinecap="round" strokeDasharray="4 2" />
+          {/* Solitaire Diamond Pendant if necklace */}
+          {imageType === 'jewelry_necklace' && (
+            <g transform="translate(90, 142)">
+              <polygon points="0,-12 12,0 0,12 -12,0" fill="#FFFFFF" stroke="#D4AF37" strokeWidth="1.5" />
+              <polygon points="0,-6 6,0 0,6 -6,0" fill="#E0F2FE" />
+              <circle cx="0" cy="0" r="1.5" fill="#FFFFFF" />
+            </g>
+          )}
+          {/* Hallmark 18K / 24K Vault Badge */}
+          <rect x="68" y="170" width="44" height="15" rx="3" fill="#D4AF37" opacity="0.9" />
+          <text x="90" y="181" fill="#0A0A0C" fontSize="9" fontWeight="bold" textAnchor="middle" letterSpacing="1">18K SOLID</text>
+        </svg>
+      );
+    }
+
+    if (imageType === 'jewelry_ring' || imageType === 'jewelry_watch') {
+      return (
+        <svg viewBox="0 0 180 180" className="h-[80%] w-[80%] drop-shadow-[0_16px_28px_rgba(212,175,55,0.3)] transition-transform duration-300 group-hover:scale-105">
+          {imageType === 'jewelry_watch' ? (
+            <g>
+              {/* Watch Strap */}
+              <rect x="70" y="15" width="40" height="150" rx="4" fill="#D4AF37" stroke="#9A7B1C" strokeWidth="1.5" strokeDasharray="2 3" />
+              {/* Watch Bezel */}
+              <circle cx="90" cy="90" r="42" fill="#0C0D12" stroke="#D4AF37" strokeWidth="5" />
+              <circle cx="90" cy="90" r="34" fill="#141722" stroke="#F5D77F" strokeWidth="1" />
+              {/* Watch Hands */}
+              <line x1="90" y1="90" x2="90" y2="68" stroke="#FFFFFF" strokeWidth="2.5" strokeLinecap="round" />
+              <line x1="90" y1="90" x2="108" y2="90" stroke="#FFFFFF" strokeWidth="2" strokeLinecap="round" />
+              <circle cx="90" cy="90" r="3.5" fill="#D4AF37" />
+            </g>
+          ) : (
+            <g>
+              {/* Solid Signet Ring */}
+              <ellipse cx="90" cy="115" rx="42" ry="18" fill="none" stroke="#D4AF37" strokeWidth="10" />
+              <polygon points="62,75 118,75 128,95 52,95" fill="#D4AF37" stroke="#9A7B1C" strokeWidth="1.5" />
+              <polygon points="66,78 114,78 122,92 58,92" fill="#0C0D12" />
+              <text x="90" y="88" fill="#D4AF37" fontSize="10" fontWeight="bold" textAnchor="middle">♛</text>
+            </g>
+          )}
+        </svg>
+      );
+    }
+
+    if (imageType === 'streetwear_hoodie' || imageType === 'streetwear_cargo' || imageType === 'streetwear_tee') {
+      return (
+        <svg viewBox="0 0 180 200" className="h-[84%] w-[84%] drop-shadow-[0_16px_28px_rgba(0,0,0,0.45)] transition-transform duration-300 group-hover:scale-105">
+          {imageType === 'streetwear_cargo' ? (
+            <g>
+              {/* Baggy Cargo Pants Silhouette */}
+              <path d="M50,30 L130,30 L138,180 L102,180 L90,85 L78,180 L42,180 Z" fill="#1C1F26" stroke="#FF5500" strokeWidth="1.5" />
+              <rect x="36" y="80" width="18" height="32" rx="2" fill="#282C37" stroke="#FF5500" strokeWidth="1" />
+              <rect x="126" y="80" width="18" height="32" rx="2" fill="#282C37" stroke="#FF5500" strokeWidth="1" />
+              <line x1="50" y1="52" x2="130" y2="52" stroke="#374151" strokeWidth="2" />
+              <rect x="68" y="34" width="44" height="12" rx="2" fill="#FF5500" />
+              <text x="90" y="43" fill="#FFFFFF" fontSize="8" fontWeight="bold" textAnchor="middle" letterSpacing="1">WIDE-LEG</text>
+            </g>
+          ) : (
+            <g>
+              {/* Boxy Oversized Streetwear Hoodie or Tee */}
+              <path d="M42,45 L68,26 L112,26 L138,45 L158,110 L134,116 L124,78 L126,175 L54,175 L56,78 L46,116 L22,110 Z" fill="#181B22" stroke="#FF5500" strokeWidth="1.5" />
+              {/* Drop Shoulder Seams */}
+              <line x1="52" y1="62" x2="68" y2="66" stroke="#374151" strokeWidth="2" />
+              <line x1="128" y1="62" x2="112" y2="66" stroke="#374151" strokeWidth="2" />
+              {/* Double-layer hood drape */}
+              <path d="M68,26 Q90,46 112,26 L106,12 Q90,8 74,12 Z" fill="#232733" stroke="#FF5500" strokeWidth="1" />
+              {/* Chest Stencil Graphic */}
+              <rect x="65" y="85" width="50" height="24" rx="2" fill="#FF5500" opacity="0.9" />
+              <text x="90" y="100" fill="#FFFFFF" fontSize="10" fontWeight="900" textAnchor="middle" letterSpacing="1.5">DISTRICT</text>
+              <text x="90" y="125" fill="#9CA3AF" fontSize="8" fontWeight="bold" textAnchor="middle" letterSpacing="2">420 GSM</text>
+            </g>
+          )}
+        </svg>
+      );
+    }
+
+    if (imageType === 'food_canister') {
+      return (
+        <svg viewBox="0 0 180 200" className="h-[82%] w-[82%] drop-shadow-[0_16px_26px_rgba(62,39,35,0.2)] transition-transform duration-300 group-hover:scale-105">
+          {/* Acacia Wood Lid */}
+          <rect x="52" y="22" width="76" height="18" rx="5" fill="#8D5B3A" stroke="#5C381E" strokeWidth="1.5" />
+          <ellipse cx="90" cy="22" rx="38" ry="8" fill="#A47148" />
+          {/* Borosilicate Glass Cylinder Container */}
+          <rect x="54" y="40" width="72" height="130" rx="10" fill="#FFFFFF" opacity="0.88" stroke="#8D5B3A" strokeWidth="2" />
+          {/* Storage Content Fill (Roasted coffee beans / pantry grains) */}
+          <rect x="58" y="70" width="64" height="95" rx="6" fill="#3E2723" opacity="0.85" />
+          {/* Coffee beans texture dots inside canister */}
+          <circle cx="75" cy="90" r="4" fill="#6D4C41" />
+          <circle cx="95" cy="98" r="4.5" fill="#5D4037" />
+          <circle cx="85" cy="120" r="4" fill="#6D4C41" />
+          <circle cx="105" cy="135" r="4.5" fill="#5D4037" />
+          {/* Airtight Seal Badge */}
+          <rect x="66" y="52" width="48" height="14" rx="3" fill="#C86432" />
+          <text x="90" y="62" fill="#FFFFFF" fontSize="7.5" fontWeight="bold" textAnchor="middle">AIRTIGHT CO2</text>
         </svg>
       );
     }
@@ -520,6 +660,57 @@ export const MiniAppStorefront: React.FC<StorefrontProps> = ({
   const primaryColor = livePrimary || overrideTheme?.primaryColor || business.primary_color || '#0F382A';
   const accentColor = liveAccent || overrideTheme?.accentColor || business.accent_color || '#C69C6D';
   const storeFontFamily = liveFont || overrideTheme?.fontFamily || business.font_family || versionTheme?.fontFamily || 'Playfair Display';
+
+  // Dynamic Taste, Atmosphere, Typography & Product Seating Resolution
+  const tastePreset = overrideTheme?.tastePreset || versionTheme?.tastePreset || (business.category === 'jewelry' ? 'jewelry_luxury' : business.category === 'streetwear_baggy' || business.category === 'clothing' ? 'streetwear_baggy' : business.category === 'coffee_shop' || business.category === 'gourmet_food' ? 'gourmet_food' : 'arabian_heritage');
+  const backgroundType = overrideTheme?.backgroundType || versionTheme?.backgroundType || (tastePreset === 'jewelry_luxury' ? 'obsidian_velvet' : tastePreset === 'streetwear_baggy' ? 'street_concrete' : tastePreset === 'gourmet_food' ? 'craft_paper' : 'warm_sand');
+  const backgroundColor = overrideTheme?.backgroundColor || versionTheme?.backgroundColor || (backgroundType === 'obsidian_velvet' ? '#0B0C10' : backgroundType === 'street_concrete' ? '#121316' : backgroundType === 'craft_paper' ? '#F6F2EB' : backgroundType === 'clean_studio' ? '#FAFAFA' : '#FAF7F0');
+  const backgroundPattern = overrideTheme?.backgroundPattern || versionTheme?.backgroundPattern || (tastePreset === 'jewelry_luxury' ? 'gold_dust' : tastePreset === 'streetwear_baggy' ? 'concrete_grain' : tastePreset === 'gourmet_food' ? 'craft_fibers' : 'islamic_geometry');
+  const isDarkTheme = (overrideTheme?.pageDarkness || versionTheme?.pageDarkness) === 'dark' || ((overrideTheme?.pageDarkness || versionTheme?.pageDarkness) !== 'light' && (backgroundColor === '#0B0C10' || backgroundColor === '#121316' || backgroundColor === '#09090B' || backgroundColor === '#18181B' || backgroundColor === '#000000'));
+  const headingTransform = overrideTheme?.headingTransform || versionTheme?.headingTransform || (tastePreset === 'streetwear_baggy' || tastePreset === 'jewelry_luxury' ? 'uppercase' : 'capitalize');
+  const productCardStyle = overrideTheme?.productCardStyle || versionTheme?.productCardStyle || (tastePreset === 'jewelry_luxury' ? 'jewelry_pedestal' : tastePreset === 'streetwear_baggy' ? 'streetwear_lookbook' : tastePreset === 'gourmet_food' ? 'artisan_craft' : 'arabian_heritage');
+  const productAspectRatio = overrideTheme?.productAspectRatio || versionTheme?.productAspectRatio || (productCardStyle === 'streetwear_lookbook' ? 'aspect-[3/4.2]' : productCardStyle === 'jewelry_pedestal' ? 'aspect-[1/1.15]' : productCardStyle === 'artisan_craft' ? 'aspect-[1/1]' : 'aspect-[1/1.08]');
+  const cardRadius = overrideTheme?.cardRadius || versionTheme?.cardRadius || (productCardStyle === 'streetwear_lookbook' ? '0px' : productCardStyle === 'jewelry_pedestal' ? '16px' : productCardStyle === 'artisan_craft' ? '18px' : '22px');
+  const cardBackgroundStyle = overrideTheme?.cardBackgroundStyle || versionTheme?.cardBackgroundStyle || (isDarkTheme ? 'dark_surface' : productCardStyle === 'artisan_craft' ? 'craft_beige' : 'white');
+  const headerStyle = overrideTheme?.headerStyle || versionTheme?.headerStyle || (tastePreset === 'streetwear_baggy' ? 'street_banner' : tastePreset === 'gourmet_food' ? 'artisan_minimal' : 'royal_crest');
+  const buttonStyle = (overrideTheme?.buttonStyle || versionTheme?.buttonStyle || (productCardStyle === 'streetwear_lookbook' ? 'sharp' : '3d')) as '3d' | 'pill' | 'sharp';
+  const showStockBadges = overrideTheme?.showStockBadges ?? versionTheme?.showStockBadges ?? true;
+  const showStarRatings = overrideTheme?.showStarRatings ?? versionTheme?.showStarRatings ?? true;
+
+  const getBackgroundPatternStyle = () => {
+    if (backgroundPattern === 'islamic_geometry') {
+      return {
+        backgroundImage: `radial-gradient(circle at 50% 50%, rgba(198, 156, 109, 0.08) 2px, transparent 2px), radial-gradient(circle at 0% 0%, rgba(198, 156, 109, 0.06) 2px, transparent 2px)`,
+        backgroundSize: '24px 24px',
+      };
+    }
+    if (backgroundPattern === 'gold_dust') {
+      return {
+        backgroundImage: `radial-gradient(circle at 20% 30%, rgba(212, 175, 55, 0.14) 1.5px, transparent 1.5px), radial-gradient(circle at 80% 70%, rgba(245, 215, 127, 0.1) 2px, transparent 2px)`,
+        backgroundSize: '36px 36px',
+      };
+    }
+    if (backgroundPattern === 'concrete_grain') {
+      return {
+        backgroundImage: `radial-gradient(rgba(255, 85, 0, 0.06) 1.2px, transparent 0)`,
+        backgroundSize: '16px 16px',
+      };
+    }
+    if (backgroundPattern === 'craft_fibers') {
+      return {
+        backgroundImage: `radial-gradient(rgba(141, 91, 58, 0.09) 1.5px, transparent 0)`,
+        backgroundSize: '22px 22px',
+      };
+    }
+    if (backgroundPattern === 'subtle_grid') {
+      return {
+        backgroundImage: `linear-gradient(to right, rgba(100, 116, 139, 0.07) 1px, transparent 1px), linear-gradient(to bottom, rgba(100, 116, 139, 0.07) 1px, transparent 1px)`,
+        backgroundSize: '24px 24px',
+      };
+    }
+    return {};
+  };
+
   const selectedService = services.find((service: any) => service.id === selectedServiceId) || services[0];
   const availableTimes = parseJsonArray(selectedService?.available_slots_json, ['09:30', '11:00', '14:30', '16:30']);
   const heroSection = layoutSections.find((section) => section.type === 'hero' && section.visible !== false);
@@ -772,27 +963,73 @@ export const MiniAppStorefront: React.FC<StorefrontProps> = ({
     const ratingVal = (4.7 + ((index * 7) % 3) * 0.1).toFixed(1);
     const galleryUrls = parseJsonArray(prod.gallery_json, []);
 
+    const cardSurfaceClasses = (() => {
+      if (cardBackgroundStyle === 'dark_surface' || (isDarkTheme && cardBackgroundStyle !== 'white')) {
+        return 'bg-[#12131A] border-[#252736] text-white shadow-[0_12px_32px_rgba(0,0,0,0.5)]';
+      }
+      if (cardBackgroundStyle === 'craft_beige') {
+        return 'bg-[#F4EFE6] border-[#DED3C4] text-[#2D1810] shadow-[0_8px_24px_rgba(45,24,16,0.06)]';
+      }
+      if (cardBackgroundStyle === 'bordered_clear') {
+        return 'bg-transparent border-2 border-slate-700/80 text-white shadow-none';
+      }
+      if (cardBackgroundStyle === 'glass') {
+        return isDarkTheme
+          ? 'bg-slate-900/70 backdrop-blur-md border-slate-700 text-white'
+          : 'bg-white/80 backdrop-blur-md border-stone-200 text-slate-900';
+      }
+      return 'bg-white border-[#EBE5DA] text-slate-900 shadow-[0_8px_26px_rgba(15,23,42,0.05)]';
+    })();
+
+    const buttonClass = (() => {
+      if (buttonStyle === 'sharp') return 'rounded-none shadow-none';
+      if (buttonStyle === 'pill') return 'rounded-full shadow-sm';
+      return 'rounded-xl shadow-[0_3px_0_rgba(15,23,42,0.28)]';
+    })();
+
     return (
       <article
         key={prod.id}
         onClick={() => openProductDetail(prod)}
-        className="group relative flex cursor-pointer flex-col overflow-hidden rounded-[22px] border border-[#EBE5DA] bg-white p-2.5 shadow-[0_8px_26px_rgba(15,23,42,0.05)] transition-all duration-200 hover:-translate-y-1 hover:shadow-[0_16px_36px_rgba(15,23,42,0.1)]"
+        className={`group relative flex cursor-pointer flex-col overflow-hidden border p-2.5 transition-all duration-200 hover:-translate-y-1 ${cardSurfaceClasses}`}
+        style={{
+          borderRadius: cardRadius,
+          fontFamily: storeFontFamily,
+        }}
       >
         {/* Framed Product Studio Image (Uploaded Photo or Studio Illustration) */}
-        <div className="relative overflow-hidden rounded-[16px]">
+        <div className="relative overflow-hidden" style={{ borderRadius: cardRadius === '0px' ? '0px' : '14px' }}>
           <ProductVisualCard
             imageType={prod.image_type}
             imageUrl={prod.image_url}
             galleryUrls={galleryUrls}
             title={prod.name}
             accentColor={primaryColor}
-            aspectClass="aspect-[1/1.08]"
+            aspectClass={productAspectRatio}
           />
-          {badgeLabel && (
+
+          {/* Domain-Specific Seating Badges (Jewelry Hallmarks, Streetwear Stencils, Food Airtight Seals) */}
+          {productCardStyle === 'jewelry_pedestal' && (
+            <span className="absolute left-2.5 top-2.5 rounded border border-[#D4AF37]/60 bg-black/80 px-2 py-0.5 text-[8px] font-mono font-bold tracking-widest text-[#D4AF37] uppercase backdrop-blur-xs">
+              18K SOLID GOLD
+            </span>
+          )}
+          {productCardStyle === 'streetwear_lookbook' && (
+            <span className="absolute left-2 top-2 bg-black px-2 py-0.5 font-mono text-[9px] font-black uppercase tracking-wider text-[#FF5500]">
+              DROP 04 // 420 GSM
+            </span>
+          )}
+          {productCardStyle === 'artisan_craft' && (
+            <span className="absolute left-2.5 top-2.5 rounded-full bg-[#4E342E] px-2.5 py-0.5 text-[8px] font-bold tracking-wide text-amber-200 shadow-xs">
+              AIRTIGHT · CO2 VALVE
+            </span>
+          )}
+
+          {showStockBadges && badgeLabel && productCardStyle !== 'jewelry_pedestal' && productCardStyle !== 'streetwear_lookbook' && (
             <span
               className="absolute left-2.5 top-2.5 rounded-full px-2.5 py-1 text-[10px] font-bold tracking-wide text-white shadow-sm"
               style={{
-                backgroundColor: badgeLabel === 'Bestseller' ? '#C69C6D' : primaryColor,
+                backgroundColor: badgeLabel === 'Bestseller' ? accentColor : primaryColor,
               }}
             >
               {badgeLabel}
@@ -802,7 +1039,7 @@ export const MiniAppStorefront: React.FC<StorefrontProps> = ({
             type="button"
             onClick={(e) => handleToggleWishlist(prod.id, e)}
             aria-label={'Save ' + prod.name}
-            className="absolute right-2.5 top-2.5 flex h-8 w-8 items-center justify-center rounded-full bg-black/20 text-white backdrop-blur-md transition hover:scale-110 hover:bg-black/35"
+            className="absolute right-2.5 top-2.5 flex h-8 w-8 items-center justify-center rounded-full bg-black/25 text-white backdrop-blur-md transition hover:scale-110 hover:bg-black/40"
           >
             <Heart className={'h-4 w-4 ' + (isLiked ? 'fill-rose-500 text-rose-500' : 'text-white')} />
           </button>
@@ -811,15 +1048,31 @@ export const MiniAppStorefront: React.FC<StorefrontProps> = ({
         {/* Product Info */}
         <div className="flex flex-1 flex-col justify-between px-1 pt-3 pb-1">
           <div>
-            <h4 className="line-clamp-1 text-sm font-bold text-slate-900">{prod.name}</h4>
-            <p className="mt-0.5 line-clamp-1 text-[11px] text-stone-500">
-              {prod.category_name || 'Premium Selection'}
+            <h4
+              className={`line-clamp-1 text-sm font-bold ${isDarkTheme ? 'text-white' : 'text-slate-900'}`}
+              style={{
+                textTransform: headingTransform,
+                fontFamily: storeFontFamily,
+              }}
+            >
+              {prod.name}
+            </h4>
+            <p className={`mt-0.5 line-clamp-1 text-[11px] ${isDarkTheme ? 'text-slate-400' : 'text-stone-500'}`}>
+              {prod.category_name || 'Signature Offering'}
             </p>
 
             {/* Price, Compare Price, Discount Pill & Star Rating */}
             <div className="mt-2 flex flex-wrap items-center justify-between gap-1">
               <div className="flex items-baseline gap-1.5">
-                <span className="text-sm font-extrabold tabular-nums text-slate-950">
+                <span
+                  className={`text-sm font-extrabold tabular-nums ${
+                    productCardStyle === 'jewelry_pedestal'
+                      ? 'text-[#D4AF37] font-serif font-black'
+                      : isDarkTheme
+                      ? 'text-white'
+                      : 'text-slate-950'
+                  }`}
+                >
                   {formatMoney(prod.price, prod.currency)}
                 </span>
                 {hasDiscount && (
@@ -835,35 +1088,35 @@ export const MiniAppStorefront: React.FC<StorefrontProps> = ({
                 >
                   {discountPct}% OFF
                 </span>
-              ) : (
-                <span className="inline-flex items-center gap-0.5 text-[11px] font-bold text-slate-700">
+              ) : showStarRatings ? (
+                <span className={`inline-flex items-center gap-0.5 text-[11px] font-bold ${isDarkTheme ? 'text-slate-300' : 'text-slate-700'}`}>
                   {ratingVal} <Star className="h-3 w-3 fill-amber-400 text-amber-400" />
                 </span>
-              )}
+              ) : null}
             </div>
           </div>
 
-          {/* Full-Width Deep Emerald / Brand Add to Cart Button */}
+          {/* Full-Width Add to Cart Button */}
           <div className="mt-3 space-y-2.5" onClick={(e) => e.stopPropagation()}>
             {inBagItem ? (
               <div
-                className="flex items-center justify-between rounded-xl border-2 px-2 py-1"
+                className={`flex items-center justify-between border-2 px-2 py-1 ${buttonClass}`}
                 style={{ borderColor: primaryColor }}
               >
                 <button
                   type="button"
                   onClick={() => handleAdjustCartQty(prod.id, -1)}
-                  className="flex h-7 w-7 items-center justify-center rounded-lg bg-stone-100 font-bold text-slate-900"
+                  className={`flex h-7 w-7 items-center justify-center font-bold ${isDarkTheme ? 'bg-slate-800 text-white' : 'bg-stone-100 text-slate-900'} ${buttonClass}`}
                 >
                   <Minus className="h-3.5 w-3.5" />
                 </button>
-                <span className="text-xs font-extrabold tabular-nums text-slate-900">
+                <span className={`text-xs font-extrabold tabular-nums ${isDarkTheme ? 'text-white' : 'text-slate-900'}`}>
                   {inBagItem.qty} in cart
                 </span>
                 <button
                   type="button"
                   onClick={() => handleAddToCart(prod, activeVar, activeSwatch)}
-                  className="flex h-7 w-7 items-center justify-center rounded-lg font-bold text-white"
+                  className={`flex h-7 w-7 items-center justify-center font-bold text-white ${buttonClass}`}
                   style={{ backgroundColor: primaryColor }}
                 >
                   <Plus className="h-3.5 w-3.5" />
@@ -874,10 +1127,10 @@ export const MiniAppStorefront: React.FC<StorefrontProps> = ({
                 type="button"
                 disabled={Number(prod.stock) <= 0}
                 onClick={() => handleAddToCart(prod, activeVar, activeSwatch)}
-                className="flex w-full items-center justify-center gap-1.5 rounded-xl py-2.5 text-xs font-bold text-white shadow-sm transition hover:brightness-110 active:translate-y-0.5 disabled:opacity-40"
+                className={`flex w-full items-center justify-center gap-1.5 py-2.5 text-xs font-bold text-white shadow-sm transition hover:brightness-110 active:translate-y-0.5 disabled:opacity-40 ${buttonClass}`}
                 style={{
                   backgroundColor: primaryColor,
-                  boxShadow: '0 3px 0 rgba(15, 23, 42, 0.28)',
+                  color: productCardStyle === 'jewelry_pedestal' ? '#0A0A0A' : '#FFFFFF',
                 }}
               >
                 <ShoppingCart className="h-3.5 w-3.5" />
@@ -904,11 +1157,11 @@ export const MiniAppStorefront: React.FC<StorefrontProps> = ({
                     />
                   );
                 })}
-                <span className="text-[10px] font-semibold text-stone-400">
+                <span className={`text-[10px] font-semibold ${isDarkTheme ? 'text-slate-400' : 'text-stone-400'}`}>
                   +{Math.max(1, variations.length - 1)}
                 </span>
               </div>
-              <span className="text-[10px] font-semibold text-stone-400">{activeVar}</span>
+              <span className={`text-[10px] font-semibold ${isDarkTheme ? 'text-slate-400' : 'text-stone-400'}`}>{activeVar}</span>
             </div>
           </div>
         </div>
@@ -1176,12 +1429,17 @@ export const MiniAppStorefront: React.FC<StorefrontProps> = ({
   return (
     <div
       className={
-        'telebiz-storefront relative mx-auto flex w-full max-w-[1280px] flex-col overflow-hidden rounded-[32px] border border-[#E6DFD3] bg-[#FAF8F5] text-slate-900 shadow-[0_24px_80px_rgba(15,23,42,0.12)] ' +
+        `telebiz-storefront relative mx-auto flex w-full max-w-[1280px] flex-col overflow-hidden rounded-[32px] border transition-colors ${
+          isDarkTheme ? 'border-slate-800 text-white' : 'border-[#E6DFD3] text-slate-900'
+        } shadow-[0_24px_80px_rgba(15,23,42,0.12)] ` +
         (mode === 'full_storefront' ? 'my-2 min-h-[min(920px,calc(100vh-24px))]' : 'min-h-[680px]')
       }
       style={{
         ['--store-primary' as any]: primaryColor,
         ['--store-accent' as any]: accentColor,
+        backgroundColor,
+        fontFamily: `'${storeFontFamily}', sans-serif`,
+        ...getBackgroundPatternStyle(),
       }}
     >
       {/* Minimal Customer Preview Bar */}
@@ -1469,51 +1727,77 @@ export const MiniAppStorefront: React.FC<StorefrontProps> = ({
            ===================================================================== */
         <>
           {/* Centered Luxury Crest & Brand Header (Matches Reference Photo) */}
-          <header className="relative z-10 border-b border-[#EBE4D8] bg-[#FAF8F5] px-4 py-3.5 sm:px-8">
+          <header
+            className={`relative z-10 border-b transition-colors px-4 py-3.5 sm:px-8 ${
+              isDarkTheme
+                ? 'border-slate-800 bg-[#121319]/90 text-white shadow-md'
+                : 'border-[#EBE4D8] bg-[#FAF8F5]/90 text-slate-900 shadow-2xs'
+            } backdrop-blur-md`}
+          >
             <div className="flex items-center justify-between gap-4">
               {/* Left: Menu / Category Drawer Trigger & Channel Switcher */}
               <div className="flex items-center gap-2">
                 <button
                   type="button"
                   onClick={() => navigateTo(activeTab === 'catalog' ? 'home' : 'catalog')}
-                  className="flex h-10 w-10 items-center justify-center rounded-xl border border-[#E5DEC9] bg-white text-slate-800 shadow-2xs transition hover:bg-stone-50"
+                  className={`flex h-10 w-10 items-center justify-center rounded-xl border shadow-2xs transition ${
+                    isDarkTheme
+                      ? 'border-slate-700 bg-slate-900 text-white hover:bg-slate-800'
+                      : 'border-[#E5DEC9] bg-white text-slate-800 hover:bg-stone-50'
+                  }`}
                   aria-label="Browse categories"
                 >
                   <Menu className="h-5 w-5" />
                 </button>
-                <div className="hidden items-center gap-1 rounded-full border border-[#E5DEC9] bg-white px-2.5 py-1 text-[11px] font-semibold text-stone-600 sm:inline-flex">
+                <div
+                  className={`hidden items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-semibold sm:inline-flex ${
+                    isDarkTheme ? 'border-slate-700 bg-slate-900 text-slate-300' : 'border-[#E5DEC9] bg-white text-stone-600'
+                  }`}
+                >
                   <span>{String(catMeta.label || business.category).replace(/^\d+\.\s*/, '')}</span>
                   {business.telegram_bot_username && (
                     <>
                       <span>·</span>
-                      <span className="font-mono text-[10px] text-slate-800">{business.telegram_bot_username}</span>
+                      <span className="font-mono text-[10px] text-indigo-400">{business.telegram_bot_username}</span>
                     </>
                   )}
                 </div>
               </div>
 
-              {/* Center: Royal Crest Emblem + Serif Brand Title + Subtitle */}
+              {/* Center: Dynamic Brand Header based on headerStyle */}
               <button
                 type="button"
                 onClick={() => navigateTo('home')}
                 className="group flex flex-col items-center text-center"
               >
+                {headerStyle === 'royal_crest' && (
+                  <span className="flex h-5 w-5 items-center justify-center text-xs font-bold transition group-hover:scale-110" style={{ color: accentColor }}>
+                    ♛
+                  </span>
+                )}
+                {headerStyle === 'artisan_minimal' && (
+                  <span className="flex h-5 w-5 items-center justify-center text-xs transition group-hover:scale-110">
+                    ☕
+                  </span>
+                )}
+                {headerStyle === 'street_banner' && (
+                  <span className="font-mono text-[9px] font-black tracking-widest text-[#FF5500] uppercase">
+                    EST. 2026 // DROP STUDIO
+                  </span>
+                )}
                 <span
-                  className="flex h-6 w-6 items-center justify-center rounded-full text-xs font-bold transition group-hover:scale-110"
-                  style={{ color: '#9C6F38' }}
-                >
-                  ♛
-                </span>
-                <span
-                  className="text-xl font-bold tracking-tight sm:text-2xl"
+                  className={`text-xl font-bold tracking-tight sm:text-2xl ${
+                    headerStyle === 'street_banner' ? 'font-mono font-black uppercase' : ''
+                  }`}
                   style={{
-                    color: '#7A542E',
-                    fontFamily: `'${storeFontFamily}', 'Playfair Display', Georgia, serif`,
+                    color: isDarkTheme ? (headerStyle === 'royal_crest' ? '#F5D77F' : '#FFFFFF') : (headerStyle === 'royal_crest' ? '#7A542E' : '#1C1917'),
+                    fontFamily: headerStyle === 'street_banner' ? 'Space Grotesk, sans-serif' : `'${storeFontFamily}', serif`,
+                    textTransform: headingTransform,
                   }}
                 >
                   {business.name}
                 </span>
-                <span className="mt-0.5 text-[9px] font-extrabold uppercase tracking-[0.24em] text-stone-500">
+                <span className={`mt-0.5 text-[9px] font-extrabold uppercase tracking-[0.24em] ${isDarkTheme ? 'text-slate-400' : 'text-stone-500'}`}>
                   {String(catMeta.label || business.category || 'Official Storefront').replace(/^\d+\.\s*/, '')}
                 </span>
               </button>
@@ -1570,8 +1854,14 @@ export const MiniAppStorefront: React.FC<StorefrontProps> = ({
 
             {/* Pill Search Bar + Filter Sliders Button (Matches Reference Photo) */}
             <div className="mx-auto mt-3.5 flex max-w-2xl items-center gap-2">
-              <div className="flex flex-1 items-center gap-2.5 rounded-full border border-[#E5DEC9] bg-[#F2EDE3] px-4 py-2.5 transition focus-within:border-stone-400 focus-within:bg-white">
-                <Search className="h-4 w-4 shrink-0 text-stone-500" />
+              <div
+                className={`flex flex-1 items-center gap-2.5 rounded-full border px-4 py-2.5 transition focus-within:ring-2 focus-within:ring-indigo-500/20 ${
+                  isDarkTheme
+                    ? 'border-slate-700 bg-slate-900 text-white focus-within:border-slate-500'
+                    : 'border-[#E5DEC9] bg-[#F2EDE3] text-slate-900 focus-within:border-stone-400 focus-within:bg-white'
+                }`}
+              >
+                <Search className={`h-4 w-4 shrink-0 ${isDarkTheme ? 'text-slate-400' : 'text-stone-500'}`} />
                 <input
                   type="search"
                   value={searchQuery}
@@ -1583,10 +1873,12 @@ export const MiniAppStorefront: React.FC<StorefrontProps> = ({
                     }
                   }}
                   placeholder={`Search for ${productCategories.slice(1, 4).join(', ').toLowerCase() || 'products'}...`}
-                  className="w-full bg-transparent text-xs text-slate-900 placeholder:text-stone-500 outline-none"
+                  className={`w-full bg-transparent text-xs outline-none ${
+                    isDarkTheme ? 'text-white placeholder:text-slate-400' : 'text-slate-900 placeholder:text-stone-500'
+                  }`}
                 />
                 {searchQuery && (
-                  <button type="button" onClick={() => setSearchQuery('')} className="text-stone-400 hover:text-slate-800">
+                  <button type="button" onClick={() => setSearchQuery('')} className="text-stone-400 hover:text-white">
                     <X className="h-3.5 w-3.5" />
                   </button>
                 )}
@@ -1594,7 +1886,11 @@ export const MiniAppStorefront: React.FC<StorefrontProps> = ({
               <button
                 type="button"
                 onClick={() => setFilterDrawerOpen((prev) => !prev)}
-                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-[#E5DEC9] bg-[#F2EDE3] text-slate-800 transition hover:bg-white"
+                className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full border transition ${
+                  isDarkTheme
+                    ? 'border-slate-700 bg-slate-900 text-white hover:bg-slate-800'
+                    : 'border-[#E5DEC9] bg-[#F2EDE3] text-slate-800 hover:bg-white'
+                }`}
                 aria-label="Sort and filter products"
               >
                 <SlidersHorizontal className="h-4 w-4" />
