@@ -194,28 +194,18 @@ function ensureUserHasOwnStore(user: {
   platform_role?: string;
 }) {
   if (!user || !user.id || user.platform_role === 'super_admin') return;
-  const existingCount = (
-    db
-      .prepare('SELECT COUNT(*) as cnt FROM businesses WHERE owner_id = ?')
-      .get(user.id) as { cnt: number }
-  ).cnt;
+  const existingCount = (db.prepare('SELECT COUNT(*) as cnt FROM businesses WHERE owner_id = ?').get(user.id) as { cnt: number }).cnt;
   if (existingCount > 0) return;
 
-  const bizId = 'biz_' + crypto.randomBytes(5).toString('hex');
-  const cleanBase = String(user.name || 'my-store')
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-|-$/g, '')
-    .slice(0, 22);
-  const slug = `${cleanBase || 'store'}-${crypto.randomBytes(2).toString('hex')}`;
-  const botHandle = user.telegram_username
-    ? `@${String(user.telegram_username).replace(/^@+/, '')}Bot`
-    : `@${(cleanBase || 'Store').replace(/[^a-z0-9]/gi, '')}Bot`;
+  const bizId = 'biz_' + crypto.randomBytes(8).toString('hex');
+  const cleanBase = String(user.name || 'my-store').toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 22);
+  const slug = `${cleanBase || 'store'}-${crypto.randomBytes(3).toString('hex')}`;
   const now = new Date().toISOString();
   const expiresAt = new Date(Date.now() + 30 * 86400000).toISOString();
-  const storeName = `${user.name}'s Store`;
+  const storeName = 'My Store';
+  const description = 'Starter storefront draft. Add your real business details and catalog before publishing.';
   const initials = String(user.name || 'ST').slice(0, 2).toUpperCase();
-  const description = `Official Telegram Mini App & Web Storefront managed by ${user.name}.`;
 
   db.prepare(`
     INSERT INTO businesses (
@@ -231,75 +221,48 @@ function ensureUserHasOwnStore(user: {
       ?, ?, ?, 'retail', 'active', 'self_service', 'not_applicable', '',
       'growth', 'monthly', 'active', ?, 7,
       '#0F172A', '#6366F1', 'Plus Jakarta Sans', '#F8FAFC', 'light', 'subtle_grid', 'clean_modern',
-      ?, ?, ?, ?,
-      '+251 911 000 000', ?, 'Addis Ababa, Ethiopia', ?, ?,
-      '[]', '819203:AAF...verified', ?,
-      '', 1, 1,
+      '[]', ?, ?, ?,
+      '', ?, '', ?,
+      '',
+      '[]', '', '',
+      '', 0, 0,
       1, 0, 25, ?, ?, ?
     )
   `).run(
-    bizId,
-    slug,
-    storeName,
-    expiresAt,
-    JSON.stringify(['Featured', 'New Arrivals', 'Best Sellers']),
-    initials,
-    description,
-    description,
-    user.email || `${slug}@telebiz.os`,
-    JSON.stringify({ mon_fri: '08:30 - 20:00', sat: '09:00 - 21:00', sun: '10:00 - 18:00' }),
-    `shop.${slug}.et`,
-    botHandle,
-    user.id,
-    user.owner_uid || '',
-    now
+    bizId, slug, storeName, expiresAt, initials, description, description,
+    user.email || '', JSON.stringify({}), user.id, user.owner_uid || '', now
   );
 
-  db.prepare(`
-    UPDATE users SET last_selected_business_id = ?
-    WHERE id = ? AND (last_selected_business_id IS NULL OR last_selected_business_id = '')
-  `).run(bizId, user.id);
+  db.prepare(
+    "UPDATE users SET last_selected_business_id = ? WHERE id = ? AND (last_selected_business_id IS NULL OR last_selected_business_id = '')"
+  ).run(bizId, user.id);
 
-  const branchId = 'br_' + crypto.randomBytes(4).toString('hex');
+  const branchId = 'br_' + crypto.randomBytes(6).toString('hex');
   db.prepare(`
     INSERT INTO business_branches (id, business_id, name, address, phone, manager_name, working_hours, is_main, status)
-    VALUES (?, ?, ?, 'Addis Ababa, Ethiopia', '+251 911 000 000', ?, '08:30 - 20:00', 1, 'open')
-  `).run(branchId, bizId, `${storeName} Main Branch`, user.name);
+    VALUES (?, ?, ?, '', '', ?, '', 1, 'open')
+  `).run(branchId, bizId, 'Main Branch', user.name);
 
   db.prepare(`
     INSERT INTO employees (id, business_id, user_id, name, email, role, permissions_json, branch_id, schedule_json, status, created_at)
-    VALUES (?, ?, ?, ?, ?, 'owner', '["all"]', ?, '{"shift":"Full Access"}', 'active', ?)
-  `).run('emp_' + crypto.randomBytes(4).toString('hex'), bizId, user.id, user.name, user.email || `${slug}@telebiz.os`, branchId, now);
+    VALUES (?, ?, ?, ?, ?, 'owner', '[\"all\"]', ?, '{\"shift\":\"Full Access\"}', 'active', ?)
+  `).run('emp_' + crypto.randomBytes(6).toString('hex'), bizId, user.id, user.name, user.email || '', branchId, now);
 
   const initialLayout = JSON.stringify([
     { id: 'sec_hero', type: 'hero', title: storeName, subtitle: description, ctaText: 'Shop Catalog', visible: true },
-    { id: 'sec_catalog', type: 'product_grid', title: 'Catalog Offerings', subtitle: 'Explore our latest collection and products.', visible: true },
-    { id: 'sec_about', type: 'business_info', title: 'Location & Direct Support', subtitle: 'Addis Ababa, Ethiopia', visible: true },
+    { id: 'sec_catalog', type: 'product_grid', title: 'Products & Services', subtitle: 'Your catalog will appear here after you add items.', visible: true },
+    { id: 'sec_about', type: 'business_info', title: 'About & Contact', subtitle: 'Add your contact information in settings.', visible: true },
   ]);
-
   const initialTheme = JSON.stringify({
-    tastePreset: 'clean_modern',
-    primaryColor: '#0F172A',
-    accentColor: '#6366F1',
-    backgroundType: 'clean_studio',
-    backgroundColor: '#F8FAFC',
-    backgroundPattern: 'subtle_grid',
-    pageDarkness: 'light',
-    fontFamily: 'Plus Jakarta Sans',
-    headingTransform: 'capitalize',
-    productCardStyle: 'modern_clean',
-    productGridColumns: '2_cols',
-    productAspectRatio: 'aspect-[1/1]',
-    cardRadius: '16px',
-    cardBackgroundStyle: 'white',
-    headerStyle: 'modern_clean',
-    buttonStyle: '3d',
-    showStockBadges: true,
-    showStarRatings: true,
-    enableTelegramStars: true,
-    enableWebCheckout: true,
+    tastePreset: 'clean_modern', primaryColor: '#0F172A', accentColor: '#6366F1',
+    backgroundType: 'clean_studio', backgroundColor: '#F8FAFC',
+    backgroundPattern: 'subtle_grid', pageDarkness: 'light',
+    fontFamily: 'Plus Jakarta Sans', headingTransform: 'capitalize',
+    productCardStyle: 'modern_clean', productGridColumns: '2_cols',
+    productAspectRatio: 'aspect-[1/1]', cardRadius: '16px',
+    cardBackgroundStyle: 'white', headerStyle: 'modern_clean', buttonStyle: '3d',
+    showStockBadges: true, showStarRatings: true, enableTelegramStars: false, enableWebCheckout: true,
   });
-
   const initialPages = JSON.stringify([
     { slug: 'home', title: 'Home', enabled: true },
     { slug: 'catalog', title: 'Catalog', enabled: true },
@@ -308,12 +271,9 @@ function ensureUserHasOwnStore(user: {
 
   db.prepare(`
     INSERT INTO mini_app_versions (id, business_id, version_number, layout_json, theme_json, pages_json, status, created_by, note, created_at)
-    VALUES (?, ?, 1, ?, ?, ?, 'published', ?, 'Initial store setup', ?)
-  `).run('ver_' + crypto.randomBytes(4).toString('hex'), bizId, initialLayout, initialTheme, initialPages, user.name, now);
-
-  ensureDefaultBusinessPaymentMethods();
+    VALUES (?, ?, 1, ?, ?, ?, 'draft', ?, 'Initial storefront draft', ?)
+  `).run('ver_' + crypto.randomBytes(6).toString('hex'), bizId, initialLayout, initialTheme, initialPages, user.name, now);
 }
-
 app.post('/api/auth/logout', (req: Request, res: Response) => {
   const authHeader = req.headers.authorization;
   if (authHeader && authHeader.startsWith('Bearer ')) {
@@ -359,7 +319,7 @@ app.get('/api/auth/me', (req: Request, res: Response) => {
     const paidOrders = orders.filter((o) => o.payment_status === 'paid');
     const verifiedRevenue = paidOrders.reduce((sum, o) => sum + Number(o.total || 0), 0);
     const todayRevenue = paidOrders
-      .filter((o) => String(o.created_at || '').startsWith('2026-11-01'))
+      .filter((o) => String(o.created_at || '').startsWith(new Date().toISOString().slice(0, 10)))
       .reduce((sum, o) => sum + Number(o.total || 0), 0);
     const pendingOrdersCount = orders.filter((o) => o.payment_status === 'pending_verification' || o.payment_status === 'unpaid').length;
     const pendingPaymentRequestsCount = orders.filter((o) => o.payment_status === 'pending_verification').length;
@@ -1814,7 +1774,7 @@ app.post('/api/businesses', (req: Request, res: Response) => {
   const now = new Date().toISOString();
   const expiresAt = new Date(Date.now() + 30 * 86400000).toISOString();
   const dfyStatus = creation_method === 'done_for_you' ? 'requested' : 'not_applicable';
-  const published = creation_method === 'done_for_you' ? 0 : 1;
+  const published = 0;
   const initials = name.split(' ').map((w: string) => w[0]).join('').slice(0, 2).toUpperCase() || 'TB';
 
   // Process user categories (never force Arabian or preset mock categories)
@@ -1962,34 +1922,14 @@ app.post('/api/businesses', (req: Request, res: Response) => {
     `Welcome to ${name}. Order directly via Telegram Mini App or Web Storefront with fast delivery and verified checkout.`,
     contact_phone || '+251 911 000 000',
     contact_email || req.user.email,
-    address || 'Addis Ababa, Ethiopia',
+    address || '',
     JSON.stringify({ mon_fri: '08:30 - 20:00', sat: '09:00 - 21:00', sun: '10:00 - 18:00' }),
-    telegram_bot_username || `@${slug.replace(/[^a-z0-9]/g, '')}Bot`,
+    telegram_bot_username || '',
     published,
     req.user.id,
     ownerRow?.owner_uid || '',
     now
   );
-
-  // If the user had an untouched auto-generated default placeholder store ("<Name>'s Store") with 0 products & 0 orders,
-  // remove that empty placeholder so the user's newly created custom store is their primary store!
-  try {
-    const autoStoreName = `${req.user.name}'s Store`;
-    if (name !== autoStoreName) {
-      const placeholderStores = db.prepare(
-        'SELECT id FROM businesses WHERE owner_id = ? AND name = ? AND id != ?'
-      ).all(req.user.id, autoStoreName, bizId) as Array<{ id: string }>;
-      for (const ph of placeholderStores) {
-        const pCount = (db.prepare('SELECT COUNT(*) as cnt FROM products WHERE business_id = ?').get(ph.id) as { cnt: number }).cnt;
-        const oCount = (db.prepare('SELECT COUNT(*) as cnt FROM orders WHERE business_id = ?').get(ph.id) as { cnt: number }).cnt;
-        if (pCount === 0 && oCount === 0) {
-          db.prepare('DELETE FROM businesses WHERE id = ?').run(ph.id);
-        }
-      }
-    }
-  } catch (cleanupErr) {
-    console.warn('Placeholder store cleanup warning:', cleanupErr);
-  }
 
   // Persist the newly created business as the user's active selected store across reloads and logouts
   db.prepare('UPDATE users SET last_selected_business_id = ? WHERE id = ?').run(bizId, req.user.id);
@@ -1999,7 +1939,7 @@ app.post('/api/businesses', (req: Request, res: Response) => {
   db.prepare(`
     INSERT INTO business_branches (id, business_id, name, address, phone, manager_name, working_hours, is_main, status)
     VALUES (?, ?, ?, ?, ?, ?, '08:30 - 20:00', 1, 'open')
-  `).run(branchId, bizId, `${name} Main Branch`, address || 'Addis Ababa', contact_phone || '+251 911 000 000', req.user.name);
+  `).run(branchId, bizId, `${name} Main Branch`, address || '', contact_phone || '', req.user.name);
 
   // Create owner employee record
   db.prepare(`
@@ -2058,8 +1998,6 @@ app.post('/api/businesses', (req: Request, res: Response) => {
     targetId: bizId,
     newValue: `${name} (${category}, ${creation_method}, template=${template_id || 'custom'})`,
   });
-
-  ensureDefaultBusinessPaymentMethods();
 
   const created = db.prepare('SELECT * FROM businesses WHERE id = ?').get(bizId);
   res.status(201).json(created);
@@ -3641,8 +3579,8 @@ app.get('/api/businesses/:id/analytics', (req: Request, res: Response) => {
   const paidOrders = orders.filter((o) => o.payment_status === 'paid');
   const totalRevenue = paidOrders.reduce((acc, o) => acc + Number(o.total), 0);
 
-  const now = new Date('2026-11-01T23:59:59Z');
-  const todayStr = '2026-11-01';
+  const now = new Date();
+  const todayStr = new Date().toISOString().slice(0, 10);
   const todayRevenue = paidOrders
     .filter((o) => o.created_at.startsWith(todayStr))
     .reduce((acc, o) => acc + Number(o.total), 0);
@@ -4475,6 +4413,11 @@ app.get('/api/storefront/:slug', (req: Request, res: Response) => {
   const business = db.prepare('SELECT * FROM businesses WHERE slug = ? OR id = ?').get(req.params.slug, req.params.slug) as any;
   if (!business) {
     res.status(404).json({ error: 'Business Mini App not found' });
+    return;
+  }
+
+  if (!business.mini_app_published && !verifyTenantAccess(req.user, business.id).allowed) {
+    res.status(404).json({ error: 'This storefront has not been published yet.' });
     return;
   }
 
