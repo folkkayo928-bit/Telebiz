@@ -113,7 +113,7 @@ function recordAuditLog(params: {
   );
 }
 
-// Authentication Middleware (Supports Bearer token or defaults to demo active session for immediate usability)
+// Authentication Middleware: only valid, unexpired bearer sessions establish req.user.
 function authMiddleware(req: Request, _res: Response, next: NextFunction) {
   const authHeader = req.headers.authorization;
   if (authHeader && authHeader.startsWith('Bearer ')) {
@@ -138,8 +138,7 @@ function authMiddleware(req: Request, _res: Response, next: NextFunction) {
     }
   }
 
-  // If no valid session token was provided, leave req.user undefined.
-  // Only users who explicitly log in with folkkayo928@gmail.com or other admin credentials get platform_role 'super_admin'.
+  // If no valid session token was provided, leave req.user undefined. Admin roles are assigned only by an authorized platform administrator.
   next();
 }
 
@@ -795,7 +794,7 @@ app.post('/api/auth/register', authRateLimit, (req: Request, res: Response) => {
 });
 
 // Unified Google Authentication Handler (Seamless Direct Connect, Log In, and Sign Up)
-app.post('/api/auth/google', async (req: Request, res: Response) => {
+app.post('/api/auth/google', authRateLimit, async (req: Request, res: Response) => {
   const credential = typeof req.body?.credential === 'string' ? req.body.credential : '';
   const identity = await verifyGoogleIdToken(credential);
   if (!identity) {
@@ -867,7 +866,7 @@ app.post('/api/auth/google', async (req: Request, res: Response) => {
 // Google OAuth Authorization URL endpoint (prompts user to choose an account)
 const pendingGoogleOAuthStates = new Map<string, number>();
 
-app.get('/api/auth/google/url', (req: Request, res: Response) => {
+app.get('/api/auth/google/url', authRateLimit, (req: Request, res: Response) => {
   const clientId = process.env.GOOGLE_CLIENT_ID || process.env.CLIENT_ID;
   const clientSecret = process.env.GOOGLE_CLIENT_SECRET || process.env.CLIENT_SECRET;
   if (!clientId || !clientSecret) {
@@ -969,6 +968,22 @@ app.get('/api/auth/google/url', (req: Request, res: Response) => {
     `).run(token, user.id, new Date(Date.now() + 30 * 86400000).toISOString(), req.ip || '', req.headers['user-agent'] || '', now);
     const refreshed = db.prepare('SELECT * FROM users WHERE id = ?').get(user.id) as any;
 
+    const googleAuthPayload = JSON.stringify({
+      token,
+      user: {
+        id: refreshed.id,
+        email: refreshed.email,
+        name: refreshed.name,
+        owner_uid: refreshed.owner_uid,
+        telegram_username: refreshed.telegram_username || '',
+        platform_role: refreshed.platform_role,
+        preferred_language: refreshed.preferred_language || 'en',
+        last_selected_business_id: refreshed.last_selected_business_id || '',
+      },
+    }).replace(/[<>&\u2028\u2029]/g, (character) =>
+      '\\u' + character.charCodeAt(0).toString(16).padStart(4, '0')
+    );
+
     res.send(`
       <!doctype html>
       <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -978,20 +993,8 @@ app.get('/api/auth/google/url', (req: Request, res: Response) => {
       <h2>Google sign-in verified</h2><p>You can close this window.</p></main>
       <script>
         if (window.opener) {
-          window.opener.postMessage({
-            type: 'GOOGLE_AUTH_SUCCESS',
-            token: ${JSON.stringify(token)},
-            user: ${JSON.stringify({
-              id: refreshed.id,
-              email: refreshed.email,
-              name: refreshed.name,
-              owner_uid: refreshed.owner_uid,
-              telegram_username: refreshed.telegram_username || '',
-              platform_role: refreshed.platform_role,
-              preferred_language: refreshed.preferred_language || 'en',
-              last_selected_business_id: refreshed.last_selected_business_id || '',
-            })}
-          }, window.location.origin);
+          const payload = ${googleAuthPayload};
+          window.opener.postMessage({ type: 'GOOGLE_AUTH_SUCCESS', ...payload }, window.location.origin);
           window.close();
         } else {
           window.location.href = '/';
@@ -1011,7 +1014,7 @@ app.post('/api/auth/sign-out', (req, res, next) => (app._router.handle as any)({
 app.get('/api/auth/session', (req, res, next) => (app._router.handle as any)({ ...req, url: '/api/auth/me' }, res, next));
 
 // Telegram Redirect & Direct Connect Auth Initiation
-app.post('/api/auth/telegram/redirect', (req: Request, res: Response) => {
+app.post('/api/auth/telegram/redirect', authRateLimit, (req: Request, res: Response) => {
   const { role = 'store_owner', business_id } = req.body;
   const authKey = 'tgauth_' + crypto.randomBytes(32).toString('hex');
   const now = new Date().toISOString();
@@ -1432,7 +1435,7 @@ function handleStoreOwnerTelegramAuth(req: Request, res: Response) {
 }
 
 // Confirm or Connect Telegram Account (for Store Owner or Customer)
-app.post('/api/auth/telegram/confirm', (req: Request, res: Response) => {
+app.post('/api/auth/telegram/confirm', authRateLimit, (req: Request, res: Response) => {
   const {
     auth_key,
     telegram_username,
