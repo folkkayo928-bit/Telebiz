@@ -127,6 +127,7 @@ export default function App() {
   // Modals & Interactive States
   const [fullStorefrontOpen, setFullStorefrontOpen] = useState(false);
   const [newBizModalOpen, setNewBizModalOpen] = useState(false);
+  const [newBizCreating, setNewBizCreating] = useState(false);
   const [launchGuideOpen, setLaunchGuideOpen] = useState(false);
   const [authModalOpen, setAuthModalOpen] = useState(false);
   const [statusBanner, setStatusBanner] = useState('');
@@ -491,8 +492,8 @@ export default function App() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               telegram_username: handle,
-              telegram_id: String(tgWebAppUser.id),
               name: fullName,
+              initData: (window as any).Telegram?.WebApp?.initData || '',
               intent: 'auto',
               role: 'store_owner',
             }),
@@ -560,6 +561,7 @@ export default function App() {
               setSelectedBusinessId(targetBizId);
               await loadTenantWorkspace(targetBizId, effectiveToken);
             } else {
+              if (data.user.platform_role !== 'super_admin') setNewBizModalOpen(true);
               setLoading(false);
             }
           }
@@ -913,8 +915,8 @@ export default function App() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             telegram_username: handle,
-            telegram_id: String(tgWebAppUser.id),
             name: fullName,
+            initData: (window as any).Telegram?.WebApp?.initData || '',
             intent: 'auto',
             role: 'store_owner',
           }),
@@ -1001,6 +1003,7 @@ export default function App() {
 
   useEffect(() => {
     const handleOAuthMessage = (event: MessageEvent) => {
+      if (event.origin !== window.location.origin) return;
       if (event.data?.type === 'GOOGLE_AUTH_SUCCESS' && event.data?.token && event.data?.user) {
         const { token, user } = event.data;
         localStorage.setItem('telebiz_remember_me', 'true');
@@ -1043,24 +1046,23 @@ export default function App() {
   };
 
   const handleGoogleAuth = async (
-    emailToUse: string,
-    nameToUse?: string,
-    options?: {
+    _emailToUse: string,
+    _nameToUse?: string,
+    _options?: {
       directConnect?: boolean;
       intent?: 'login' | 'signup' | 'auto';
       passcode?: string;
       telegramHandle?: string;
     }
   ) => {
-    const cleanEmail = emailToUse.trim().toLowerCase();
-    const isDirect = Boolean(options?.directConnect);
-    const resolvedName = (nameToUse ?? customGoogleName).trim() || cleanEmail.split('@')[0];
-    const resolvedPasscode = (options?.passcode ?? customGooglePasscode).trim();
-    const resolvedTg = (options?.telegramHandle ?? customGoogleTg).trim();
-
-    if (!cleanEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
-      setAuthFieldErrors({ email: 'Please enter a valid Google email address (e.g. yourname@gmail.com).' });
-      setAuthError('Please enter a valid Google email address.');
+    // Open synchronously so the browser does not block the OAuth popup.
+    const popup = window.open(
+      'about:blank',
+      'telebizGoogleAuth',
+      'popup=yes,width=520,height=680,left=120,top=80'
+    );
+    if (!popup) {
+      setAuthError('Your browser blocked the Google sign-in popup. Allow popups for this site and try again.');
       return;
     }
 
@@ -1068,42 +1070,16 @@ export default function App() {
     setAuthError('');
     setAuthFieldErrors({});
     try {
-      const res = await fetch('/api/auth/google', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          email: cleanEmail,
-          name: resolvedName,
-          telegram_username: resolvedTg || undefined,
-          recovery_passcode: resolvedPasscode || undefined,
-          intent: 'auto',
-          direct_connect: isDirect,
-        }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        if (data.fieldErrors) {
-          setAuthFieldErrors(data.fieldErrors);
-        }
-        setAuthError(data.error || 'Google authentication failed.');
-        return;
+      const response = await fetch('/api/auth/google/url');
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data.configured || !data.url) {
+        popup.close();
+        throw new Error(data.error || 'Google sign-in is not configured. Add GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET on the server.');
       }
-      saveDeviceGoogleAccount(data.user.email, data.user.name || resolvedName);
-      localStorage.setItem('telebiz_remember_me', 'true');
-      localStorage.setItem('telebiz_remembered_identifier', data.user.email);
-      setCustomGoogleEmail('');
-      setCustomGoogleName('');
-      setCustomGoogleTg('');
-      setCustomGooglePasscode('');
-      setShowAddGoogleAccount(false);
-      await completeAuthenticatedSession(
-        data.token,
-        data.user,
-        `Signed in with Google as ${data.user.name} (${data.user.email}) · ID: ${data.user.owner_uid}`,
-        'overview'
-      );
-    } catch (err: any) {
-      setAuthError(err.message || 'Network error during Google sign in.');
+      popup.location.href = data.url;
+    } catch (error: any) {
+      popup.close();
+      setAuthError(error.message || 'Could not start Google sign-in.');
     } finally {
       setGoogleAuthLoading(false);
     }
@@ -1149,7 +1125,8 @@ export default function App() {
           auth_key: tgWaitingForSession && tgAuthKey ? tgAuthKey : undefined,
           telegram_username: cleanTg,
           name: rawName || cleanTgNoAt,
-          recovery_passcode: rawPass || '2026',
+          recovery_passcode: rawPass,
+          initData: (window as any).Telegram?.WebApp?.initData || '',
           intent: 'auto',
           role: 'store_owner',
           language: lang,
@@ -1183,7 +1160,7 @@ export default function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           identifier: authEmail.trim(),
-          recovery_passcode: authRecoveryPasscode.trim() || '2026',
+          recovery_passcode: authRecoveryPasscode.trim(),
           new_password: authRecoverNewPassword.trim() || undefined,
         }),
       });
@@ -1213,8 +1190,11 @@ export default function App() {
       if (!cleanEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
         regErrors.email = 'A valid Email Address is required (e.g. owner@yourbrand.com).';
       }
-      if (!authPassword.trim() || authPassword.trim().length < 4) {
-        regErrors.password = 'Password must be at least 4 characters.';
+      if (!authPassword.trim() || authPassword.trim().length < 8) {
+        regErrors.password = 'Password must be at least 8 characters.';
+      }
+      if (authRecoveryPasscode.trim().length < 8) {
+        regErrors.recovery_passcode = 'Recovery passcode must be at least 8 characters.';
       }
       if (Object.keys(regErrors).length > 0) {
         setAuthFieldErrors(regErrors);
@@ -1245,7 +1225,7 @@ export default function App() {
         email: authEmail.trim(),
         password: authPassword.trim(),
         telegram_username: authTgUsername.trim(),
-        recovery_passcode: authRecoveryPasscode.trim() || '2026',
+        recovery_passcode: authRecoveryPasscode.trim(),
         recovery_hint: authRecoveryHint,
         language: lang,
       }),
@@ -1366,6 +1346,7 @@ export default function App() {
 
   const handleCreateBusiness = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!newBizName.trim() || !newBizCategory || newBizCreating) return;
     const templatePresetMap: Record<string, { primary: string; accent: string; font: string; bg: string; darkness: string; pattern: string }> = {
       clean_modern: { primary: '#0F172A', accent: '#6366F1', font: 'Plus Jakarta Sans', bg: '#F8FAFC', darkness: 'light', pattern: 'subtle_grid' },
       luxury_chains_jewelry: { primary: '#121214', accent: '#D4AF37', font: 'Cinzel', bg: '#0B0C10', darkness: 'dark', pattern: 'gold_dust' },
@@ -1375,44 +1356,52 @@ export default function App() {
       digital_menu: { primary: '#450A0A', accent: '#D97706', font: 'Space Grotesk', bg: '#180707', darkness: 'dark', pattern: 'subtle_grid' },
     };
     const chosenPreset = templatePresetMap[newBizTemplate] || templatePresetMap.clean_modern;
-
-    const res = await fetch('/api/businesses', {
-      method: 'POST',
-      headers: headersWithAuth(),
-      body: JSON.stringify({
-        name: newBizName,
-        store_id: newBizSlug.trim() || undefined,
-        categories: newBizCustomCats.trim() ? newBizCustomCats.split(',').map((c) => c.trim()).filter(Boolean) : undefined,
-        category: newBizCategory,
-        template_id: newBizTemplate,
-        primary_color: chosenPreset.primary,
-        accent_color: chosenPreset.accent,
-        font_family: chosenPreset.font,
-        background_color: chosenPreset.bg,
-        page_darkness: chosenPreset.darkness,
-        background_pattern: chosenPreset.pattern,
-        creation_method: newBizMethod,
-        description: newBizDesc,
-        contact_phone: newBizPhone,
-        address: newBizAddress,
-        telegram_bot_username: newBizBot,
-        dfy_notes: newBizDfyNotes,
-      }),
-    });
-    const created = await res.json();
-    if (res.ok && created?.id) {
+    setNewBizCreating(true);
+    setCommerceError('');
+    try {
+      const res = await fetch('/api/businesses', {
+        method: 'POST',
+        headers: headersWithAuth(),
+        body: JSON.stringify({
+          name: newBizName.trim(),
+          store_id: newBizSlug.trim() || undefined,
+          categories: newBizCustomCats.trim() ? newBizCustomCats.split(',').map((c) => c.trim()).filter(Boolean) : undefined,
+          category: newBizCategory,
+          template_id: newBizTemplate,
+          primary_color: chosenPreset.primary,
+          accent_color: chosenPreset.accent,
+          font_family: chosenPreset.font,
+          background_color: chosenPreset.bg,
+          page_darkness: chosenPreset.darkness,
+          background_pattern: chosenPreset.pattern,
+          creation_method: newBizMethod,
+          description: newBizDesc.trim(),
+          contact_phone: newBizPhone.trim(),
+          address: newBizAddress.trim(),
+          telegram_bot_username: newBizBot.trim(),
+          dfy_notes: newBizDfyNotes.trim(),
+        }),
+      });
+      const created = await res.json().catch(() => ({}));
+      if (!res.ok || !created?.id) throw new Error(created.error || 'The store could not be created. Please try again.');
       setNewBizModalOpen(false);
       setNewBizName('');
       setNewBizSlug('');
       setNewBizCustomCats('');
       setNewBizDesc('');
+      setNewBizPhone('');
+      setNewBizAddress('');
+      setNewBizBot('');
+      setNewBizDfyNotes('');
       localStorage.setItem('telebiz_selected_business_id', created.id);
       setSelectedBusinessId(created.id);
-      await loadAccountAndBusinesses(undefined, created.id);
+      await loadAccountAndBusinesses(authToken || undefined, created.id);
       setFullStorefrontOpen(true);
-      setStatusBanner(
-        `Store "${created.name}" created and saved! Your catalog starts with a clean slate so you can add your products, prices, and categories.`
-      );
+      setStatusBanner(`"${created.name}" was created as a private draft. Add your real products, payment methods, contact details, and Telegram bot before publishing it.`);
+    } catch (error: any) {
+      setCommerceError(error.message || 'Network error. The store was not created.');
+    } finally {
+      setNewBizCreating(false);
     }
   };
 
@@ -6879,7 +6868,7 @@ export default function App() {
                   Create Your Business Storefront & Telegram Mini App
                 </h3>
                 <p className="text-slate-500 mt-0.5">
-                  Pick a visual template below — we automatically build your store with sample categories, products, and checkout so you can preview and edit immediately.
+                  Pick a visual template for your design. Telebiz creates an empty private draft; add your real products, payment methods, and Telegram connection before publishing.
                 </p>
               </div>
               <button
@@ -6894,6 +6883,11 @@ export default function App() {
             </div>
 
             <form onSubmit={handleCreateBusiness} className="space-y-4">
+              {commerceError && (
+                <div role="alert" className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700">
+                  {commerceError}
+                </div>
+              )}
               {/* STEP 1: STORE IDENTITY & CUSTOM STORE ID */}
               <div className="card-3d rounded-2xl p-4 bg-slate-50/70 dark:bg-slate-950/40 border border-slate-200 dark:border-slate-800 space-y-3">
                 <div className="font-extrabold text-sm text-slate-900 dark:text-white flex items-center justify-between">
@@ -7131,9 +7125,9 @@ export default function App() {
                   </button>
                   <button
                     type="submit"
-                    className="btn-3d-primary px-5 py-2.5 rounded-xl text-white font-extrabold text-xs flex-1 sm:flex-none"
+                    className="btn-3d-primary px-5 py-2.5 rounded-xl text-white font-extrabold text-xs flex-1 sm:flex-none disabled:opacity-60" disabled={newBizCreating}
                   >
-                    Save &amp; Open Store Preview →
+                    {newBizCreating ? 'Creating…' : 'Create Private Draft →'}
                   </button>
                 </div>
               </div>
@@ -7177,7 +7171,7 @@ export default function App() {
                   </h4>
                 </div>
                 <p className="text-slate-600 dark:text-slate-300 leading-relaxed">
-                  Store owners register an account (or click <strong>+ Create New Business</strong>) and pick a visual template like <strong>Al-Saudia Luxury Boutique</strong>. The platform automatically generates their storefront with pre-built categories, 4 sample products (with sizes, color swatches, compare-at discounts), a booking service, and opens the <strong>Live Storefront Preview</strong> immediately.
+                  Store owners register an account, create a private draft, and choose a visual template. They then add their real products, services, payment instructions, contact details, and Telegram bot before publishing the store.
                 </p>
                 <button
                   type="button"
@@ -7823,7 +7817,7 @@ export default function App() {
                           setAuthPassword(e.target.value);
                           if (authFieldErrors.password) setAuthFieldErrors((p) => ({ ...p, password: '' }));
                         }}
-                        placeholder="Min 6 characters"
+                        placeholder="Minimum 8 characters"
                         className={`w-full px-3.5 py-2.5 rounded-xl border bg-white dark:bg-slate-950 ${
                           authFieldErrors.password
                             ? 'border-2 border-rose-500 ring-2 ring-rose-500/20 bg-rose-50/30'
@@ -7842,14 +7836,14 @@ export default function App() {
                     <div className="flex items-center justify-between">
                       <span className="font-extrabold text-indigo-950 dark:text-indigo-200 flex items-center gap-1.5">
                         <KeyRound className="w-3.5 h-3.5 text-indigo-600" />
-                        Secondary Recovery Passcode (Optional)
+                        Secondary Recovery Passcode *
                       </span>
                       <span className="px-2 py-0.5 rounded-full bg-indigo-600/10 text-indigo-700 dark:text-indigo-300 text-[9px] font-bold">
-                        Default: 2026
+                        Required · 8+ characters
                       </span>
                     </div>
                     <p className="text-[10px] text-slate-600 dark:text-slate-300">
-                      Used to log in with your Telegram handle or recover your store account if you forget your password.
+                      Use a unique 8+ character recovery code. Keep it private and do not reuse your account password.
                     </p>
                     <input
                       type="password"
@@ -7860,12 +7854,13 @@ export default function App() {
                           setAuthFieldErrors((p) => ({ ...p, recovery_passcode: '' }));
                         }
                       }}
-                      placeholder="e.g. 2026 or secret PIN (defaults to 2026)"
+                      placeholder="Choose a unique recovery code (8+ characters)"
                       className={`w-full px-3 py-2 rounded-xl border bg-white dark:bg-slate-950 font-mono tracking-widest text-xs ${
                         authFieldErrors.recovery_passcode
                           ? 'border-2 border-rose-500 ring-2 ring-rose-500/20 bg-rose-50/30'
                           : 'border-indigo-200 dark:border-indigo-800'
                       }`}
+                      required
                     />
                     {authFieldErrors.recovery_passcode && (
                       <p className="text-[10px] font-bold text-rose-600 mt-1">{authFieldErrors.recovery_passcode}</p>
@@ -8282,7 +8277,7 @@ export default function App() {
                             ✓ Valid
                           </span>
                         ) : (
-                          <span className="text-slate-400 text-[10px] font-semibold shrink-0">4+ chars/digits</span>
+                          <span className="text-slate-400 text-[10px] font-semibold shrink-0">8+ characters for new accounts</span>
                         )}
                       </div>
                       <input
@@ -8302,7 +8297,7 @@ export default function App() {
                         placeholder={
                           tgVerifyStatus?.checked && tgVerifyStatus.exists
                             ? 'Enter your account passcode'
-                            : '4+ digit passcode (e.g. 2026)'
+                            : 'Choose an 8+ character recovery passcode'
                         }
                         className={`w-full px-3.5 py-2.5 rounded-xl border bg-white dark:bg-slate-950 font-mono text-xs ${
                           authFieldErrors.recovery_passcode
@@ -8432,7 +8427,7 @@ export default function App() {
                         type="password"
                         value={authRecoverNewPassword}
                         onChange={(e) => setAuthRecoverNewPassword(e.target.value)}
-                        placeholder="New password (min 6 chars)"
+                        placeholder="New password (min 8 characters)"
                         className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950"
                       />
                     </div>
@@ -8601,187 +8596,12 @@ export default function App() {
             {/* Google Log In vs. Sign Up Form */}
             {showAddGoogleAccount && (
               <div className="space-y-3">
-                {/* Mode Tabs: Log In vs. Sign Up */}
-                <div className="grid grid-cols-2 gap-1.5 bg-slate-100 dark:bg-slate-950 p-1 rounded-2xl">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setGoogleSubMode('login');
-                      setAuthError('');
-                      setAuthFieldErrors({});
-                    }}
-                    className={`py-2 px-3 rounded-xl font-bold text-xs transition ${
-                      googleSubMode === 'login'
-                        ? 'bg-slate-950 text-white dark:bg-indigo-600 shadow-xs'
-                        : 'text-slate-600 dark:text-slate-400'
-                    }`}
-                  >
-                    Log In (Existing)
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setGoogleSubMode('signup');
-                      setAuthError('');
-                      setAuthFieldErrors({});
-                    }}
-                    className={`py-2 px-3 rounded-xl font-bold text-xs transition ${
-                      googleSubMode === 'signup'
-                        ? 'bg-emerald-600 text-white shadow-xs'
-                        : 'text-slate-600 dark:text-slate-400'
-                    }`}
-                  >
-                    Sign Up (New Store Owner)
-                  </button>
+                <div className="rounded-2xl border border-indigo-200 dark:border-indigo-900 bg-indigo-50/70 dark:bg-indigo-950/30 p-4 space-y-2">
+                  <h4 className="font-extrabold text-slate-900 dark:text-white">Secure Google sign-in</h4>
+                  <p className="text-xs leading-relaxed text-slate-600 dark:text-slate-300">
+                    Continue in Google's sign-in window. Google verifies the account's identity and email; Telebiz does not accept a typed email address as proof of ownership. New accounts are created automatically after Google verifies them.
+                  </p>
                 </div>
-
-                <div>
-                  <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
-                    Google Email Address *
-                  </label>
-                  <div className="flex gap-2">
-                    <input
-                      type="email"
-                      value={customGoogleEmail}
-                      onChange={(e) => {
-                        setCustomGoogleEmail(e.target.value);
-                        setGoogleVerifyStatus(null);
-                        if (authFieldErrors.email) {
-                          setAuthFieldErrors((p) => {
-                            const c = { ...p };
-                            delete c.email;
-                            return c;
-                          });
-                        }
-                      }}
-                      onBlur={() => {
-                        if (customGoogleEmail.trim()) {
-                          checkGoogleEmail(customGoogleEmail);
-                        }
-                      }}
-                      placeholder="yourname@gmail.com"
-                      className={`flex-1 px-3.5 py-2.5 rounded-xl border bg-white dark:bg-slate-950 text-xs font-medium ${
-                        authFieldErrors.email ? 'border-rose-400 bg-rose-50/30' : 'border-slate-200 dark:border-slate-700'
-                      }`}
-                      autoFocus
-                    />
-                    <button
-                      type="button"
-                      onClick={() => checkGoogleEmail(customGoogleEmail)}
-                      disabled={!customGoogleEmail.trim() || Boolean(googleVerifyStatus?.checking)}
-                      className="btn-3d-white px-3 py-2 rounded-xl font-bold text-[11px] shrink-0 disabled:opacity-50"
-                    >
-                      {googleVerifyStatus?.checking ? 'Checking...' : 'Verify'}
-                    </button>
-                  </div>
-                  {authFieldErrors.email && (
-                    <p className="text-[11px] font-bold text-rose-600 mt-1">{authFieldErrors.email}</p>
-                  )}
-
-                  {googleVerifyStatus?.checked && googleVerifyStatus.validFormat && !authFieldErrors.email && (
-                    <div
-                      className={`mt-2 p-2.5 rounded-xl border text-[11px] font-semibold ${
-                        googleVerifyStatus.exists
-                          ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
-                          : 'bg-indigo-50 border-indigo-200 text-indigo-900'
-                      }`}
-                    >
-                      {googleVerifyStatus.exists && googleVerifyStatus.account ? (
-                        <div>
-                          <strong>✓ Existing Google Account:</strong> {googleVerifyStatus.account.name} (
-                          {googleVerifyStatus.account.owner_uid}). Ready to log in!
-                        </div>
-                      ) : (
-                        <div>
-                          <strong>✨ New Google Account:</strong> Please write your <strong>Store Owner Name</strong> below to complete registration.
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-
-                {(googleSubMode === 'signup' || (googleVerifyStatus?.checked && !googleVerifyStatus.exists)) && (
-                  <div>
-                    <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
-                      Store Owner Name <span className="text-rose-600 font-extrabold">* (Required for New Account)</span>
-                    </label>
-                    <input
-                      type="text"
-                      value={customGoogleName}
-                      onChange={(e) => {
-                        setCustomGoogleName(e.target.value);
-                        if (authFieldErrors.name) {
-                          setAuthFieldErrors((p) => {
-                            const c = { ...p };
-                            delete c.name;
-                            return c;
-                          });
-                        }
-                      }}
-                      placeholder="Your Full Name or Store Brand"
-                      className={`w-full px-3.5 py-2.5 rounded-xl border bg-white dark:bg-slate-950 text-xs ${
-                        authFieldErrors.name ? 'border-rose-400 bg-rose-50/30' : 'border-slate-200 dark:border-slate-700'
-                      }`}
-                    />
-                    {authFieldErrors.name && (
-                      <p className="text-[11px] font-bold text-rose-600 mt-1">{authFieldErrors.name}</p>
-                    )}
-                  </div>
-                )}
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                  <div>
-                    <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
-                      Telegram Handle (Optional)
-                    </label>
-                    <input
-                      type="text"
-                      value={customGoogleTg}
-                      onChange={(e) => {
-                        setCustomGoogleTg(e.target.value);
-                        if (authFieldErrors.telegram_username) {
-                          setAuthFieldErrors((p) => {
-                            const c = { ...p };
-                            delete c.telegram_username;
-                            return c;
-                          });
-                        }
-                      }}
-                      placeholder="@your_telegram"
-                      className={`w-full px-3 py-2 rounded-xl border bg-white dark:bg-slate-950 font-mono text-xs ${
-                        authFieldErrors.telegram_username
-                          ? 'border-rose-400 bg-rose-50/30'
-                          : 'border-slate-200 dark:border-slate-700'
-                      }`}
-                    />
-                  </div>
-                  <div>
-                    <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
-                      Secondary Passcode {googleSubMode === 'signup' ? '(Default: 2026)' : '(Optional)'}
-                    </label>
-                    <input
-                      type="password"
-                      value={customGooglePasscode}
-                      onChange={(e) => {
-                        setCustomGooglePasscode(e.target.value);
-                        if (authFieldErrors.recovery_passcode) {
-                          setAuthFieldErrors((p) => {
-                            const c = { ...p };
-                            delete c.recovery_passcode;
-                            return c;
-                          });
-                        }
-                      }}
-                      placeholder="4+ digit passcode"
-                      className={`w-full px-3 py-2 rounded-xl border bg-white dark:bg-slate-950 font-mono text-xs ${
-                        authFieldErrors.recovery_passcode
-                          ? 'border-rose-400 bg-rose-50/30'
-                          : 'border-slate-200 dark:border-slate-700'
-                      }`}
-                    />
-                  </div>
-                </div>
-
                 <div className="flex items-center justify-between gap-2 pt-1">
                   <button
                     type="button"
@@ -8792,26 +8612,15 @@ export default function App() {
                     }}
                     className="btn-3d-white px-3.5 py-2.5 rounded-xl font-bold text-xs"
                   >
-                    ← Direct Connect List
+                    ← Back to Google accounts
                   </button>
                   <button
                     type="button"
                     disabled={googleAuthLoading}
-                    onClick={() =>
-                      handleGoogleAuth(customGoogleEmail, customGoogleName, {
-                        directConnect: false,
-                        intent: googleSubMode,
-                        passcode: customGooglePasscode,
-                        telegramHandle: customGoogleTg,
-                      })
-                    }
+                    onClick={() => handleGoogleAuth('')}
                     className="btn-3d-primary px-5 py-2.5 rounded-xl font-bold text-white disabled:opacity-50"
                   >
-                    {googleAuthLoading
-                      ? 'Verifying...'
-                      : googleSubMode === 'signup'
-                      ? 'Sign Up with Google →'
-                      : 'Log In with Google →'}
+                    {googleAuthLoading ? 'Opening Google…' : 'Continue with Google →'}
                   </button>
                 </div>
               </div>
@@ -9111,7 +8920,7 @@ export default function App() {
                       maxLength={6}
                       value={passcodeInput}
                       onChange={(e) => setPasscodeInput(e.target.value.replace(/\D/g, ''))}
-                      placeholder="e.g. 2026"
+                      placeholder="Choose a 4–6 digit PIN"
                       className="w-full px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 font-mono tracking-widest text-sm"
                     />
                   </div>

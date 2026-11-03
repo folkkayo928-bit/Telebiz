@@ -3,19 +3,12 @@ import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 
-// Clean up any legacy corrupted WAL files if present
-for (const legacyFile of ['telebiz_platform.db', 'telebiz_platform.db-shm', 'telebiz_platform.db-wal']) {
-  try {
-    const legacyPath = path.resolve(process.cwd(), legacyFile);
-    if (fs.existsSync(legacyPath)) {
-      fs.unlinkSync(legacyPath);
-    }
-  } catch {
-    // ignore cleanup errors
-  }
-}
 
-const dbPath = path.resolve(process.cwd(), 'telebiz_store.db');
+const dbPath = path.resolve(
+  process.env.TELEBIZ_DATABASE_PATH || path.resolve(process.cwd(), 'telebiz_store.db')
+);
+
+fs.mkdirSync(path.dirname(dbPath), { recursive: true });
 
 function openDatabaseWithRecovery(targetPath: string): Database.Database {
   const instance = new Database(targetPath);
@@ -35,7 +28,30 @@ function openDatabaseWithRecovery(targetPath: string): Database.Database {
 export const db = openDatabaseWithRecovery(dbPath);
 
 export function hashPassword(password: string): string {
-  return crypto.createHash('sha256').update(password + '_telebiz_salt_2026').digest('hex');
+  const salt = crypto.randomBytes(16).toString('hex');
+  const derived = crypto.scryptSync(String(password), salt, 64).toString('hex');
+  return 'scrypt$' + salt + '$' + derived;
+}
+
+/** Verify scrypt hashes and legacy static-salt SHA-256 hashes. */
+export function verifyPassword(password: string, storedHash: string): boolean {
+  if (typeof password !== 'string' || !password || typeof storedHash !== 'string' || !storedHash) return false;
+  try {
+    if (storedHash.startsWith('scrypt$')) {
+      const parts = storedHash.split('$');
+      const salt = parts[1];
+      const expectedHex = parts[2];
+      if (!salt || !expectedHex || !/^[a-f0-9]{128}$/i.test(expectedHex)) return false;
+      const actual = crypto.scryptSync(password, salt, 64);
+      const expected = Buffer.from(expectedHex, 'hex');
+      return actual.length === expected.length && crypto.timingSafeEqual(actual, expected);
+    }
+    const legacy = crypto.createHash('sha256').update(password + '_telebiz_salt_2026').digest();
+    const expected = Buffer.from(storedHash, 'hex');
+    return expected.length === legacy.length && crypto.timingSafeEqual(legacy, expected);
+  } catch {
+    return false;
+  }
 }
 
 export function generateOwnerUid(seedName = 'OWNER'): string {
@@ -548,16 +564,53 @@ export function initDatabase() {
     CREATE INDEX IF NOT EXISTS idx_events_business_type ON analytics_events(business_id, event_type);
   `);
 
-  // Check if already seeded
+  // Production must never get seeded demo credentials. A fresh production
+  // database instead requires a one-time, secret-based administrator bootstrap.
   const existingUsers = db.prepare('SELECT COUNT(*) as count FROM users').get() as { count: number };
-  if (existingUsers.count === 0) {
+  const existingAdmins = db.prepare("SELECT COUNT(*) as count FROM users WHERE platform_role = 'super_admin'").get() as { count: number };
+  if (process.env.NODE_ENV === 'production' && existingAdmins.count === 0) {
+    const adminEmail = String(process.env.TELEBIZ_BOOTSTRAP_ADMIN_EMAIL || '').trim().toLowerCase();
+    const adminPassword = String(process.env.TELEBIZ_BOOTSTRAP_ADMIN_PASSWORD || '');
+    const adminName = String(process.env.TELEBIZ_BOOTSTRAP_ADMIN_NAME || 'Telebiz Platform Administrator').trim();
+
+    if (!/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(adminEmail) || adminPassword.length < 16) {
+      throw new Error(
+        'No platform administrator exists. Set TELEBIZ_BOOTSTRAP_ADMIN_EMAIL and a unique TELEBIZ_BOOTSTRAP_ADMIN_PASSWORD of at least 16 characters, then restart.'
+      );
+    }
+
+    const conflictingUser = db.prepare('SELECT id FROM users WHERE LOWER(email) = ?').get(adminEmail);
+    if (conflictingUser) {
+      throw new Error(
+        'The bootstrap administrator email already belongs to a non-admin account. Choose an unused administrator email; existing accounts are never promoted automatically.'
+      );
+    }
+
+    const now = new Date().toISOString();
+    const userId = 'usr_admin_' + crypto.randomBytes(8).toString('hex');
+    const ownerUid = generateOwnerUid(adminName);
+    db.prepare(`
+      INSERT INTO users (
+        id, email, name, password_hash, platform_role, preferred_language,
+        created_at, owner_uid, recovery_passcode_hash, recovery_hint,
+        auth_provider, account_status
+      ) VALUES (?, ?, ?, ?, 'super_admin', 'en', ?, ?, '', 'Set a recovery passcode in account security settings', 'email', 'active')
+    `).run(userId, adminEmail, adminName, hashPassword(adminPassword), now, ownerUid);
+    console.info('Created the first Telebiz platform administrator from deployment secrets.');
+  }
+
+  const allowDemoSeed = process.env.NODE_ENV !== 'production' && process.env.TELEBIZ_ENABLE_DEMO_SEED === 'true';
+  if (existingUsers.count === 0 && allowDemoSeed) {
     seedInitialPlatformData();
   }
 
-  ensureDefaultBusinessPaymentMethods();
+  if (process.env.NODE_ENV !== 'production' && process.env.TELEBIZ_ENABLE_DEMO_SEED === 'true') {
+    ensureDefaultBusinessPaymentMethods();
+  }
 }
 
 export function ensureDefaultBusinessPaymentMethods() {
+  if (process.env.NODE_ENV === 'production' || process.env.TELEBIZ_ENABLE_DEMO_SEED !== 'true') return;
   const now = new Date().toISOString();
 
   // Ensure folkkayo928@gmail.com is seeded with super_admin platform role
