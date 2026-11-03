@@ -171,11 +171,19 @@ function verifyTenantAccess(user: AuthUser | undefined, businessId: string, requ
     return { allowed: false, error: 'Cross-tenant access denied: Store owners can only view and manage their own stores.' };
   }
 
-  if (requiredPermission) {
-    const perms: string[] = JSON.parse(emp.permissions_json || '[]');
-    if (!perms.includes('all') && !perms.includes(requiredPermission)) {
-      return { allowed: false, error: `Insufficient role permissions: requires '${requiredPermission}'` };
-    }
+  let perms: string[] = [];
+  try {
+    const parsed = JSON.parse(emp.permissions_json || '[]');
+    if (Array.isArray(parsed)) perms = parsed.filter((value) => typeof value === 'string');
+  } catch {
+    return { allowed: false, error: 'Employee permissions are invalid. Ask the store owner to review this account.' };
+  }
+
+  if (!requiredPermission) {
+    return { allowed: false, error: 'This action requires an explicit employee permission. Ask the store owner to grant access.' };
+  }
+  if (!perms.includes('all') && !perms.includes(requiredPermission)) {
+    return { allowed: false, error: `Insufficient role permissions: requires '${requiredPermission}'` };
   }
 
   return { allowed: true, business, role: emp.role };
@@ -2219,7 +2227,7 @@ function recordBusinessNotification(params: {
 
 // Get full tenant workspace data
 app.get('/api/businesses/:id/workspace', (req: Request, res: Response) => {
-  const access = verifyTenantAccess(req.user, req.params.id);
+  const access = verifyTenantAccess(req.user, req.params.id, 'workspace.view');
   if (!access.allowed) {
     res.status(403).json({ error: access.error });
     return;
@@ -2295,7 +2303,7 @@ app.get('/api/businesses/:id/workspace', (req: Request, res: Response) => {
 
 // Store Owner / Admin: Delete a review from their store if needed
 app.delete('/api/businesses/:id/reviews/:reviewId', (req: Request, res: Response) => {
-  const access = verifyTenantAccess(req.user, req.params.id);
+  const access = verifyTenantAccess(req.user, req.params.id, 'reviews.manage');
   if (!access.allowed) {
     res.status(403).json({ error: access.error });
     return;
@@ -2384,7 +2392,7 @@ app.patch('/api/businesses/:id/payment-methods/:methodId', (req: Request, res: R
 
 // Update Business Settings & Telegram Integration
 app.patch('/api/businesses/:id/settings', (req: Request, res: Response) => {
-  const access = verifyTenantAccess(req.user, req.params.id);
+  const access = verifyTenantAccess(req.user, req.params.id, 'settings.manage');
   if (!access.allowed) {
     res.status(403).json({ error: access.error });
     return;
@@ -2453,7 +2461,7 @@ app.patch('/api/businesses/:id/settings', (req: Request, res: Response) => {
 
 // Connect Telegram Bot, Optional Channel, Web Domain & Notification Preferences
 app.post('/api/businesses/:id/telegram', (req: Request, res: Response) => {
-  const access = verifyTenantAccess(req.user, req.params.id);
+  const access = verifyTenantAccess(req.user, req.params.id, 'telegram.manage');
   if (!access.allowed) {
     res.status(403).json({ error: access.error });
     return;
@@ -2614,7 +2622,7 @@ app.post('/api/businesses/:id/telegram', (req: Request, res: Response) => {
 
 // Live Connection & Handshake Diagnostic for Telegram Bot, Mini App & Web Domain
 app.post('/api/businesses/:id/telegram/test-connection', (req: Request, res: Response) => {
-  const access = verifyTenantAccess(req.user, req.params.id);
+  const access = verifyTenantAccess(req.user, req.params.id, 'telegram.manage');
   if (!access.allowed) {
     res.status(403).json({ error: access.error });
     return;
@@ -2688,7 +2696,7 @@ app.post('/api/businesses/:id/telegram/test-connection', (req: Request, res: Res
 
 // List, Dispatch & Manage Stylized Business Notifications (Supports With Action Buttons OR Without Buttons)
 app.get('/api/businesses/:id/notifications', (req: Request, res: Response) => {
-  const access = verifyTenantAccess(req.user, req.params.id);
+  const access = verifyTenantAccess(req.user, req.params.id, 'notifications.view');
   if (!access.allowed) {
     res.status(403).json({ error: access.error });
     return;
@@ -2699,7 +2707,7 @@ app.get('/api/businesses/:id/notifications', (req: Request, res: Response) => {
 });
 
 app.post('/api/businesses/:id/notifications/send', (req: Request, res: Response) => {
-  const access = verifyTenantAccess(req.user, req.params.id);
+  const access = verifyTenantAccess(req.user, req.params.id, 'notifications.manage');
   if (!access.allowed) {
     res.status(403).json({ error: access.error });
     return;
@@ -2745,7 +2753,7 @@ app.post('/api/businesses/:id/notifications/send', (req: Request, res: Response)
 });
 
 app.patch('/api/businesses/:id/notifications/read', (req: Request, res: Response) => {
-  const access = verifyTenantAccess(req.user, req.params.id);
+  const access = verifyTenantAccess(req.user, req.params.id, 'notifications.view');
   if (!access.allowed) {
     res.status(403).json({ error: access.error });
     return;
@@ -3528,7 +3536,7 @@ app.patch('/api/businesses/:id/bookings/:bookingId', (req: Request, res: Respons
 // ============================================================================
 
 app.get('/api/businesses/:id/support', (req: Request, res: Response) => {
-  const access = verifyTenantAccess(req.user, req.params.id);
+  const access = verifyTenantAccess(req.user, req.params.id, 'support.view');
   if (!access.allowed) {
     res.status(403).json({ error: access.error });
     return;
@@ -3754,7 +3762,7 @@ app.get('/api/businesses/:id/analytics', (req: Request, res: Response) => {
 // ============================================================================
 
 app.post('/api/businesses/:id/employees', (req: Request, res: Response) => {
-  const access = verifyTenantAccess(req.user, req.params.id);
+  const access = verifyTenantAccess(req.user, req.params.id, 'team.manage');
   if (!access.allowed || (access.role !== 'owner' && access.role !== 'admin' && access.role !== 'super_admin')) {
     res.status(403).json({ error: 'Only Business Owners or Administrators can manage employees.' });
     return;
@@ -3798,7 +3806,7 @@ app.post('/api/businesses/:id/employees', (req: Request, res: Response) => {
 });
 
 app.patch('/api/businesses/:id/employees/:empId', (req: Request, res: Response) => {
-  const access = verifyTenantAccess(req.user, req.params.id);
+  const access = verifyTenantAccess(req.user, req.params.id, 'team.manage');
   if (!access.allowed || (access.role !== 'owner' && access.role !== 'admin' && access.role !== 'super_admin')) {
     res.status(403).json({ error: 'Only Business Owners or Administrators can modify employee permissions.' });
     return;
@@ -3835,7 +3843,7 @@ app.patch('/api/businesses/:id/employees/:empId', (req: Request, res: Response) 
 });
 
 app.post('/api/businesses/:id/promotions', (req: Request, res: Response) => {
-  const access = verifyTenantAccess(req.user, req.params.id);
+  const access = verifyTenantAccess(req.user, req.params.id, 'marketing.manage');
   if (!access.allowed) {
     res.status(403).json({ error: access.error });
     return;
@@ -3862,7 +3870,7 @@ app.post('/api/businesses/:id/promotions', (req: Request, res: Response) => {
 });
 
 app.post('/api/businesses/:id/campaigns', (req: Request, res: Response) => {
-  const access = verifyTenantAccess(req.user, req.params.id);
+  const access = verifyTenantAccess(req.user, req.params.id, 'marketing.manage');
   if (!access.allowed) {
     res.status(403).json({ error: access.error });
     return;
@@ -3894,7 +3902,7 @@ app.post('/api/businesses/:id/campaigns', (req: Request, res: Response) => {
 });
 
 app.post('/api/businesses/:id/expenses', (req: Request, res: Response) => {
-  const access = verifyTenantAccess(req.user, req.params.id);
+  const access = verifyTenantAccess(req.user, req.params.id, 'finance.manage');
   if (!access.allowed) {
     res.status(403).json({ error: access.error });
     return;
@@ -3920,7 +3928,7 @@ app.post('/api/businesses/:id/expenses', (req: Request, res: Response) => {
 });
 
 app.post('/api/businesses/:id/branches', (req: Request, res: Response) => {
-  const access = verifyTenantAccess(req.user, req.params.id);
+  const access = verifyTenantAccess(req.user, req.params.id, 'branches.manage');
   if (!access.allowed) {
     res.status(403).json({ error: access.error });
     return;
@@ -3952,7 +3960,7 @@ app.get('/api/addons', (_req: Request, res: Response) => {
 });
 
 app.post('/api/businesses/:id/subscription', (req: Request, res: Response) => {
-  const access = verifyTenantAccess(req.user, req.params.id);
+  const access = verifyTenantAccess(req.user, req.params.id, 'subscription.manage');
   if (!access.allowed) {
     res.status(403).json({ error: access.error });
     return;
@@ -4000,7 +4008,7 @@ app.post('/api/businesses/:id/subscription', (req: Request, res: Response) => {
 });
 
 app.post('/api/businesses/:id/addons/toggle', (req: Request, res: Response) => {
-  const access = verifyTenantAccess(req.user, req.params.id);
+  const access = verifyTenantAccess(req.user, req.params.id, 'addons.manage');
   if (!access.allowed) {
     res.status(403).json({ error: access.error });
     return;
@@ -4462,6 +4470,18 @@ app.post('/api/superadmin/addons', (req: Request, res: Response) => {
 });
 
 // ============================================================================
+function ensurePublicStorefrontAvailable(business: any, res: Response): boolean {
+  if (business.status === 'suspended' || business.status === 'paused') {
+    res.status(423).json({ error: 'This storefront is not currently accepting customer activity.' });
+    return false;
+  }
+  if (!Number(business.mini_app_published)) {
+    res.status(404).json({ error: 'This storefront has not been published yet.' });
+    return false;
+  }
+  return true;
+}
+
 // 11. PUBLIC CUSTOMER STOREFRONT & TELEGRAM MINI APP RUNTIME API
 // ============================================================================
 
@@ -4551,6 +4571,8 @@ app.post('/api/storefront/:slug/reviews', (req: Request, res: Response) => {
     return;
   }
 
+  if (!ensurePublicStorefrontAvailable(business, res)) return;
+
   const { customer_name, rating, comment, product_name, order_number } = req.body;
   const cleanName = String(customer_name || '').trim();
   const cleanComment = String(comment || '').trim();
@@ -4570,11 +4592,21 @@ app.post('/api/storefront/:slug/reviews', (req: Request, res: Response) => {
   const cleanProduct = String(product_name || '').trim().slice(0, 120);
   const cleanOrder = String(order_number || '').trim().slice(0, 60);
 
+  const matchedPaidOrder = cleanOrder
+    ? db.prepare(`
+        SELECT id FROM orders
+        WHERE business_id = ? AND UPPER(order_number) = UPPER(?)
+          AND LOWER(customer_name) = LOWER(?) AND status = 'completed' AND payment_status = 'paid'
+        LIMIT 1
+      `).get(business.id, cleanOrder, cleanName)
+    : null;
+  const verifiedPurchase = matchedPaidOrder ? 1 : 0;
+
   db.prepare(`
     INSERT INTO store_reviews (
       id, business_id, customer_name, rating, comment, product_name, order_number, verified_purchase, created_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)
-  `).run(revId, business.id, cleanName, numericRating, cleanComment, cleanProduct, cleanOrder, now);
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(revId, business.id, cleanName, numericRating, cleanComment, cleanProduct, cleanOrder, verifiedPurchase, now);
 
   const starsStr = '★'.repeat(numericRating) + '☆'.repeat(5 - numericRating);
   recordBusinessNotification({
@@ -4612,6 +4644,8 @@ app.post('/api/storefront/:slug/identify', (req: Request, res: Response) => {
     res.status(404).json({ error: 'Business not found' });
     return;
   }
+
+  if (!ensurePublicStorefrontAvailable(business, res)) return;
 
   const ownerRow = db.prepare('SELECT owner_uid FROM users WHERE id = ?').get(business.owner_id) as any;
   const ownerUid = business.owner_uid || ownerRow?.owner_uid || 'OWN-HAN-204881';
@@ -4687,6 +4721,8 @@ app.post('/api/storefront/:slug/event', (req: Request, res: Response) => {
     return;
   }
 
+  if (!ensurePublicStorefrontAvailable(business, res)) return;
+
   const { event_type, page_name, product_id, source, device_type, session_id } = req.body;
   db.prepare(`
     INSERT INTO analytics_events (id, business_id, customer_id, session_id, event_type, page_name, product_id, source, device_type, duration_secs, created_at)
@@ -4720,6 +4756,8 @@ app.post('/api/storefront/:slug/checkout', (req: Request, res: Response) => {
     res.status(404).json({ error: 'Business not found' });
     return;
   }
+
+  if (!ensurePublicStorefrontAvailable(business, res)) return;
 
   const {
     customer_name,
@@ -4971,6 +5009,8 @@ app.post('/api/storefront/:slug/book', (req: Request, res: Response) => {
     return;
   }
 
+  if (!ensurePublicStorefrontAvailable(business, res)) return;
+
   const { service_id, customer_name, customer_phone, booking_date, booking_time, guests, notes } = req.body;
   const service = db.prepare('SELECT * FROM services_listings WHERE id = ? AND business_id = ?').get(service_id, business.id) as any;
   if (!service) {
@@ -5033,6 +5073,8 @@ app.post('/api/storefront/:slug/support', (req: Request, res: Response) => {
     res.status(404).json({ error: 'Business not found' });
     return;
   }
+
+  if (!ensurePublicStorefrontAvailable(business, res)) return;
 
   const { customer_name, subject, message, channel } = req.body;
   if (!customer_name || !message) {
