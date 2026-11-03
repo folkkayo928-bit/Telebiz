@@ -667,8 +667,11 @@ app.post('/api/auth/register', (req: Request, res: Response) => {
   if (!cleanEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
     fieldErrors.email = 'A valid Email Address is required (e.g. owner@yourbrand.com).';
   }
-  if (!cleanPass || cleanPass.length < 4) {
-    fieldErrors.password = 'Primary Password must be at least 4 characters.';
+  if (!cleanPass || cleanPass.length < 8) {
+    fieldErrors.password = 'Primary Password must be at least 8 characters.';
+  }
+  if (rawPasscodeInput.length < 8) {
+    fieldErrors.recovery_passcode = 'Recovery Passcode must be at least 8 characters. Do not reuse your account password.';
   }
 
   let cleanTg = '';
@@ -688,9 +691,8 @@ app.post('/api/auth/register', (req: Request, res: Response) => {
     return;
   }
 
-  const effectivePasscode = rawPasscodeInput.length >= 4 ? rawPasscodeInput : '2026';
+  const effectivePasscode = rawPasscodeInput;
   const now = new Date().toISOString();
-  const isSuperAdminEmail = cleanEmail === 'folkkayo928@gmail.com';
 
   // If the account already exists by email or Telegram handle, update credentials and sign them in seamlessly
   // so their existing stores and account are preserved and remembered!
@@ -700,60 +702,17 @@ app.post('/api/auth/register', (req: Request, res: Response) => {
   }
 
   if (existingUser) {
-    const updatedName = cleanName || existingUser.name;
-    const updatedTg = cleanTg || existingUser.telegram_username || '';
-    const updatedUid = existingUser.owner_uid || generateOwnerUid(updatedName);
-    const updatedRole = isSuperAdminEmail ? 'super_admin' : existingUser.platform_role || 'user';
-
-    db.prepare(`
-      UPDATE users
-      SET name = ?,
-          password_hash = ?,
-          recovery_passcode_hash = ?,
-          telegram_username = ?,
-          owner_uid = ?,
-          platform_role = ?
-      WHERE id = ?
-    `).run(
-      updatedName,
-      hashPassword(cleanPass),
-      hashPassword(effectivePasscode),
-      updatedTg,
-      updatedUid,
-      updatedRole,
-      existingUser.id
-    );
-
-    const updatedUser = db.prepare('SELECT * FROM users WHERE id = ?').get(existingUser.id) as any;
-    ensureUserHasOwnStore(updatedUser);
-    const refreshed = db.prepare('SELECT * FROM users WHERE id = ?').get(existingUser.id) as any;
-
-    const token = 'sess_' + crypto.randomBytes(16).toString('hex');
-    db.prepare(`
-      INSERT INTO sessions (token, user_id, expires_at, ip_address, user_agent, revoked, created_at)
-      VALUES (?, ?, ?, ?, ?, 0, ?)
-    `).run(token, updatedUser.id, new Date(Date.now() + 30 * 86400000).toISOString(), req.ip || '', req.headers['user-agent'] || '', now);
-
-    res.json({
-      token,
-      isNewAccount: false,
-      user: {
-        id: updatedUser.id,
-        email: updatedUser.email,
-        name: updatedUser.name,
-        owner_uid: updatedUser.owner_uid,
-        telegram_username: updatedUser.telegram_username || '',
-        platform_role: updatedUser.platform_role,
-        preferred_language: updatedUser.preferred_language || language || 'en',
-        last_selected_business_id: refreshed?.last_selected_business_id || '',
-      },
+    res.status(409).json({
+      error: 'An account already uses this email or Telegram handle. Sign in or use account recovery instead.',
+      fieldErrors: { email: 'This account already exists. Your existing password has not been changed.' },
+      requiresLogin: true,
     });
     return;
   }
 
   const userId = 'usr_' + crypto.randomBytes(5).toString('hex');
   const ownerUid = generateOwnerUid(cleanName);
-  const role = isSuperAdminEmail ? 'super_admin' : 'user';
+  const role = 'user';
 
   db.prepare(`
     INSERT INTO users (
