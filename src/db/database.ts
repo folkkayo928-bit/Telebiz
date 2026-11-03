@@ -573,7 +573,7 @@ export function initDatabase() {
     const adminPassword = String(process.env.TELEBIZ_BOOTSTRAP_ADMIN_PASSWORD || '');
     const adminName = String(process.env.TELEBIZ_BOOTSTRAP_ADMIN_NAME || 'Telebiz Platform Administrator').trim();
 
-    if (!/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(adminEmail) || adminPassword.length < 16) {
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(adminEmail) || adminPassword.length < 16) {
       throw new Error(
         'No platform administrator exists. Set TELEBIZ_BOOTSTRAP_ADMIN_EMAIL and a unique TELEBIZ_BOOTSTRAP_ADMIN_PASSWORD of at least 16 characters, then restart.'
       );
