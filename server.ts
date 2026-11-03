@@ -767,429 +767,213 @@ app.post('/api/auth/register', (req: Request, res: Response) => {
 });
 
 // Unified Google Authentication Handler (Seamless Direct Connect, Log In, and Sign Up)
-app.post('/api/auth/google', (req: Request, res: Response) => {
-  const {
-    credential,
-    email,
-    name,
-    telegram_username,
-    recovery_passcode,
-  } = req.body;
-
-  let userEmail = email ? String(email).trim().toLowerCase() : '';
-  let userName = name ? String(name).trim() : '';
-
-  if (credential && typeof credential === 'string') {
-    try {
-      const parts = credential.split('.');
-      if (parts.length === 3) {
-        const payload = JSON.parse(Buffer.from(parts[1], 'base64').toString('utf8'));
-        if (payload.email) userEmail = String(payload.email).trim().toLowerCase();
-        if (payload.name) userName = String(payload.name).trim();
-      }
-    } catch (e) {
-      console.warn('Failed to parse Google credential token:', e);
-    }
-  }
-
-  if (!userEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(userEmail)) {
-    res.status(400).json({
-      error: 'Please enter a valid Google email address (e.g. yourname@gmail.com).',
-      fieldErrors: { email: 'Please enter a valid Google email address (e.g. yourname@gmail.com).' },
+app.post('/api/auth/google', async (req: Request, res: Response) => {
+  const credential = typeof req.body?.credential === 'string' ? req.body.credential : '';
+  const identity = await verifyGoogleIdToken(credential);
+  if (!identity) {
+    res.status(401).json({
+      error: 'Google could not verify this sign-in. Use the official Google sign-in button and try again.',
     });
     return;
   }
 
   const now = new Date().toISOString();
-  const rawTg = String(telegram_username || '').trim().replace(/^@+/, '');
-  const normalizedTg = rawTg.length >= 3 ? `@${rawTg}` : '';
-  const rawPasscode = String(recovery_passcode || '').trim();
-  const effectivePasscode = rawPasscode.length >= 4 ? rawPasscode : '2026';
+  let user = db.prepare('SELECT * FROM users WHERE LOWER(email) = ?').get(identity.email) as any;
+  if (user?.account_status === 'blocked') {
+    res.status(403).json({ error: 'This account is blocked. Contact Telebiz support.' });
+    return;
+  }
 
-  let user = db.prepare('SELECT * FROM users WHERE LOWER(email) = ?').get(userEmail) as any;
-
-  if (user) {
-    if (userName && (!user.name || user.name === userEmail.split('@')[0])) {
-      db.prepare('UPDATE users SET name = ? WHERE id = ?').run(userName, user.id);
-      user.name = userName;
-    }
-    if (normalizedTg && !user.telegram_username) {
-      const existingTgUser = findUserByTelegramHandle(normalizedTg);
-      if (!existingTgUser || existingTgUser.id === user.id) {
-        db.prepare('UPDATE users SET telegram_username = ? WHERE id = ?').run(normalizedTg, user.id);
-        user.telegram_username = normalizedTg;
-      }
-    }
-    if (userEmail === 'folkkayo928@gmail.com' && user.platform_role !== 'super_admin') {
-      db.prepare("UPDATE users SET platform_role = 'super_admin' WHERE id = ?").run(user.id);
-      user.platform_role = 'super_admin';
-    }
-    if (!user.owner_uid) {
-      const newUid = generateOwnerUid(user.name);
-      db.prepare('UPDATE users SET owner_uid = ? WHERE id = ?').run(newUid, user.id);
-      user.owner_uid = newUid;
-    }
-  } else {
+  if (!user) {
     const userId = 'usr_g_' + crypto.randomBytes(5).toString('hex');
-    const finalName = userName || userEmail.split('@')[0] || 'Store Owner';
+    const finalName = identity.name || identity.email.split('@')[0] || 'Store Owner';
     const ownerUid = generateOwnerUid(finalName);
-    const isSuperAdminEmail = userEmail === 'folkkayo928@gmail.com';
-    const role = isSuperAdminEmail ? 'super_admin' : 'user';
-
     db.prepare(`
       INSERT INTO users (
         id, email, name, password_hash, platform_role, telegram_username,
         preferred_language, owner_uid, recovery_passcode_hash, recovery_hint, auth_provider, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, 'en', ?, ?, 'Google Account Link', 'google', ?)
+      ) VALUES (?, ?, ?, ?, 'user', '', 'en', ?, '', 'Set a recovery passcode in account security settings', 'google', ?)
     `).run(
       userId,
-      userEmail,
+      identity.email,
       finalName,
-      hashPassword(effectivePasscode),
-      role,
-      normalizedTg,
+      hashPassword(crypto.randomBytes(32).toString('hex')),
       ownerUid,
-      hashPassword(effectivePasscode),
       now
     );
-
     user = db.prepare('SELECT * FROM users WHERE id = ?').get(userId);
+  } else {
+    if (identity.name && (!user.name || user.name === identity.email.split('@')[0])) {
+      db.prepare('UPDATE users SET name = ? WHERE id = ?').run(identity.name, user.id);
+      user.name = identity.name;
+    }
+    if (!user.owner_uid) {
+      const ownerUid = generateOwnerUid(user.name || identity.email.split('@')[0]);
+      db.prepare('UPDATE users SET owner_uid = ? WHERE id = ?').run(ownerUid, user.id);
+      user.owner_uid = ownerUid;
+    }
   }
 
-  ensureUserHasOwnStore(user);
-  const refreshedUser = db.prepare('SELECT * FROM users WHERE id = ?').get(user.id) as any;
-
-  const token = 'sess_' + crypto.randomBytes(16).toString('hex');
+  const token = 'sess_' + crypto.randomBytes(32).toString('hex');
   db.prepare(`
     INSERT INTO sessions (token, user_id, expires_at, ip_address, user_agent, revoked, created_at)
     VALUES (?, ?, ?, ?, ?, 0, ?)
   `).run(token, user.id, new Date(Date.now() + 30 * 86400000).toISOString(), req.ip || '', req.headers['user-agent'] || '', now);
 
+  const refreshedUser = db.prepare('SELECT * FROM users WHERE id = ?').get(user.id) as any;
   res.json({
     token,
     user: {
-      id: user.id,
-      email: user.email,
-      name: user.name,
-      owner_uid: user.owner_uid,
-      telegram_username: user.telegram_username || '',
-      platform_role: user.platform_role,
-      preferred_language: user.preferred_language || 'en',
-      last_selected_business_id: refreshedUser?.last_selected_business_id || '',
+      id: refreshedUser.id,
+      email: refreshedUser.email,
+      name: refreshedUser.name,
+      owner_uid: refreshedUser.owner_uid,
+      telegram_username: refreshedUser.telegram_username || '',
+      platform_role: refreshedUser.platform_role,
+      preferred_language: refreshedUser.preferred_language || 'en',
+      last_selected_business_id: refreshedUser.last_selected_business_id || '',
     },
   });
 });
 
 // Google OAuth Authorization URL endpoint (prompts user to choose an account)
+const pendingGoogleOAuthStates = new Map<string, number>();
+
 app.get('/api/auth/google/url', (req: Request, res: Response) => {
-  const protocol = req.headers['x-forwarded-proto'] || req.protocol || 'https';
-  const host = req.get('host') || 'localhost:3000';
-  const redirectUri = `${protocol}://${host}/auth/callback/google`;
-
-  const clientId = process.env.GOOGLE_CLIENT_ID || process.env.CLIENT_ID;
-  if (clientId) {
-    const params = new URLSearchParams({
-      client_id: clientId,
-      redirect_uri: redirectUri,
-      response_type: 'code',
-      scope: 'openid email profile',
-      prompt: 'select_account',
-      access_type: 'online',
-    });
-    res.json({
-      configured: true,
-      url: `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`,
-    });
-  } else {
-    res.json({
-      configured: false,
-      url: redirectUri,
-    });
-  }
-});
-
-// Google OAuth Popup Callback Handler
-app.get(['/auth/callback/google', '/auth/callback/google/'], async (req: Request, res: Response) => {
-  const code = req.query.code;
-  let userEmail = '';
-  let userName = '';
-
   const clientId = process.env.GOOGLE_CLIENT_ID || process.env.CLIENT_ID;
   const clientSecret = process.env.GOOGLE_CLIENT_SECRET || process.env.CLIENT_SECRET;
-
-  if (code && clientId && clientSecret) {
-    try {
-      const protocol = req.headers['x-forwarded-proto'] || req.protocol || 'https';
-      const host = req.get('host') || 'localhost:3000';
-      const redirectUri = `${protocol}://${host}/auth/callback/google`;
-
-      const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: new URLSearchParams({
-          code: String(code),
-          client_id: clientId,
-          client_secret: clientSecret,
-          redirect_uri: redirectUri,
-          grant_type: 'authorization_code',
-        }),
-      });
-      const tokenData = await tokenRes.json();
-      if (tokenData.id_token) {
-        const parts = tokenData.id_token.split('.');
-        if (parts.length === 3) {
-          const payload = JSON.parse(Buffer.from(parts[1], 'base64').toString('utf8'));
-          if (payload.email) userEmail = String(payload.email).trim().toLowerCase();
-          if (payload.name) userName = String(payload.name).trim();
-        }
-      }
-      if (!userEmail && tokenData.access_token) {
-        const userInfoRes = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
-          headers: { Authorization: `Bearer ${tokenData.access_token}` },
-        });
-        const userInfo = await userInfoRes.json();
-        if (userInfo.email) userEmail = String(userInfo.email).trim().toLowerCase();
-        if (userInfo.name) userName = String(userInfo.name).trim();
-      }
-    } catch (err) {
-      console.warn('Google OAuth token exchange warning:', err);
-    }
+  if (!clientId || !clientSecret) {
+    res.json({ configured: false, error: 'Google sign-in is not configured on this server.' });
+    return;
   }
 
-  const now = new Date().toISOString();
+  const protocol = req.headers['x-forwarded-proto'] || req.protocol || 'https';
+  const host = req.get('host') || 'localhost:3000';
+  const appUrl = String(process.env.APP_URL || (protocol + '://' + host)).replace(/\\/+$/, '');
+  const redirectUri = appUrl + '/auth/callback/google';
+  const state = crypto.randomBytes(24).toString('hex');
+  const now = Date.now();
+  for (const [key, expiry] of pendingGoogleOAuthStaapp.get(['/auth/callback/google', '/auth/callback/google/'], async (req: Request, res: Response) => {
+  const state = String(req.query.state || '');
+  const stateExpiresAt = pendingGoogleOAuthStates.get(state);
+  if (!stateExpiresAt || stateExpiresAt <= Date.now()) {
+    res.status(401).send('Google sign-in session expired. Close this window and try again.');
+    return;
+  }
+  pendingGoogleOAuthStates.delete(state);
 
-  if (userEmail) {
+  const code = String(req.query.code || '');
+  const clientId = process.env.GOOGLE_CLIENT_ID || process.env.CLIENT_ID;
+  const clientSecret = process.env.GOOGLE_CLIENT_SECRET || process.env.CLIENT_SECRET;
+  if (!code || !clientId || !clientSecret) {
+    res.status(503).send('Google sign-in is not configured correctly on this server.');
+    return;
+  }
+
+  try {
+    const protocol = req.headers['x-forwarded-proto'] || req.protocol || 'https';
+    const host = req.get('host') || 'localhost:3000';
+    const appUrl = String(process.env.APP_URL || (protocol + '://' + host)).replace(/\\/+$/, '');
+    const redirectUri = appUrl + '/auth/callback/google';
+    const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        code,
+        client_id: clientId,
+        client_secret: clientSecret,
+        redirect_uri: redirectUri,
+        grant_type: 'authorization_code',
+      }),
+    });
+    if (!tokenRes.ok) throw new Error('Google token exchange failed');
+    const tokenData = await tokenRes.json();
+    if (!tokenData.id_token) throw new Error('Google did not return an identity token');
+
+    const claimsRes = await fetch(
+      'https://oauth2.googleapis.com/tokeninfo?id_token=' + encodeURIComponent(tokenData.id_token)
+    );
+    if (!claimsRes.ok) throw new Error('Google identity token could not be verified');
+    const claims = await claimsRes.json();
+    const issuerOk = claims.iss === 'accounts.google.com' || claims.iss === 'https://accounts.google.com';
+    const exp = Number(claims.exp || 0);
+    const userEmail = String(claims.email || '').trim().toLowerCase();
+    if (!issuerOk || claims.aud !== clientId || claims.email_verified !== 'true' ||
+        !Number.isFinite(exp) || exp <= Math.floor(Date.now() / 1000) ||
+        !/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(userEmail)) {
+      throw new Error('Google identity token claims are invalid');
+    }
+
+    const userName = String(claims.name || '').trim();
+    const now = new Date().toISOString();
     let user = db.prepare('SELECT * FROM users WHERE LOWER(email) = ?').get(userEmail) as any;
-    const isSuperAdminEmail = userEmail === 'folkkayo928@gmail.com';
-    const role = isSuperAdminEmail ? 'super_admin' : 'user';
+    if (user?.account_status === 'blocked') {
+      res.status(403).send('This Telebiz account is blocked. Contact support.');
+      return;
+    }
 
     if (!user) {
       const userId = 'usr_g_' + crypto.randomBytes(5).toString('hex');
       const finalName = userName || userEmail.split('@')[0] || 'Store Owner';
       const ownerUid = generateOwnerUid(finalName);
-
       db.prepare(`
         INSERT INTO users (
           id, email, name, password_hash, platform_role, telegram_username,
           preferred_language, owner_uid, recovery_passcode_hash, recovery_hint, auth_provider, created_at
-        ) VALUES (?, ?, ?, ?, ?, '', 'en', ?, ?, 'Google Account Link', 'google', ?)
-      `).run(
-        userId,
-        userEmail,
-        finalName,
-        hashPassword(crypto.randomBytes(16).toString('hex')),
-        role,
-        ownerUid,
-        hashPassword('2026'),
-        now
-      );
+        ) VALUES (?, ?, ?, ?, 'user', '', 'en', ?, '', 'Set a recovery passcode in account security settings', 'google', ?)
+      `).run(userId, userEmail, finalName, hashPassword(crypto.randomBytes(32).toString('hex')), ownerUid, now);
       user = db.prepare('SELECT * FROM users WHERE id = ?').get(userId);
-    } else {
-      if (isSuperAdminEmail && user.platform_role !== 'super_admin') {
-        db.prepare("UPDATE users SET platform_role = 'super_admin' WHERE id = ?").run(user.id);
-        user.platform_role = 'super_admin';
-      }
-      if (!user.owner_uid) {
-        const newUid = generateOwnerUid(user.name);
-        db.prepare('UPDATE users SET owner_uid = ? WHERE id = ?').run(newUid, user.id);
-        user.owner_uid = newUid;
-      }
+    } else if (userName && (!user.name || user.name === userEmail.split('@')[0])) {
+      db.prepare('UPDATE users SET name = ? WHERE id = ?').run(userName, user.id);
+      user.name = userName;
     }
 
-    ensureUserHasOwnStore(user);
+    if (!user.owner_uid) {
+      const ownerUid = generateOwnerUid(user.name || userEmail.split('@')[0]);
+      db.prepare('UPDATE users SET owner_uid = ? WHERE id = ?').run(ownerUid, user.id);
+      user.owner_uid = ownerUid;
+    }
 
-    const token = 'sess_' + crypto.randomBytes(16).toString('hex');
+    const token = 'sess_' + crypto.randomBytes(32).toString('hex');
     db.prepare(`
       INSERT INTO sessions (token, user_id, expires_at, ip_address, user_agent, revoked, created_at)
       VALUES (?, ?, ?, ?, ?, 0, ?)
-    `).run(token, user.id, new Date(Date.now() + 7 * 86400000).toISOString(), req.ip || '', req.headers['user-agent'] || '', now);
+    `).run(token, user.id, new Date(Date.now() + 30 * 86400000).toISOString(), req.ip || '', req.headers['user-agent'] || '', now);
+    const refreshed = db.prepare('SELECT * FROM users WHERE id = ?').get(user.id) as any;
 
     res.send(`
-      <!DOCTYPE html>
-      <html>
-        <head><title>Google Sign In Complete</title></head>
-        <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; background: #f8fafc;">
-          <div style="background: white; border-radius: 20px; padding: 32px; box-shadow: 0 10px 25px rgba(0,0,0,0.06); text-align: center;">
-            <p style="font-weight: 700; color: #0f172a; margin: 0 0 8px 0; font-size: 16px;">Authentication Successful</p>
-            <p style="color: #64748b; font-size: 13px; margin: 0;">Logging in to your store workspace...</p>
-          </div>
-          <script>
-            if (window.opener) {
-              window.opener.postMessage({
-                type: 'GOOGLE_AUTH_SUCCESS',
-                token: ${JSON.stringify(token)},
-                user: ${JSON.stringify({
-                  id: user.id,
-                  email: user.email,
-                  name: user.name,
-                  owner_uid: user.owner_uid,
-                  telegram_username: user.telegram_username || '',
-                  platform_role: user.platform_role,
-                  preferred_language: user.preferred_language || 'en',
-                })}
-              }, '*');
-              window.close();
-            } else {
-              window.location.href = '/';
-            }
-          </script>
-        </body>
-      </html>
+      <!doctype html>
+      <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+      <title>Telebiz sign-in complete</title></head>
+      <body style="font-family:system-ui;display:grid;place-items:center;min-height:100vh;margin:0;background:#f8fafc;color:#0f172a">
+      <main style="background:white;padding:28px;border-radius:18px;text-align:center;box-shadow:0 12px 30px #0001">
+      <h2>Google sign-in verified</h2><p>You can close this window.</p></main>
+      <script>
+        if (window.opener) {
+          window.opener.postMessage({
+            type: 'GOOGLE_AUTH_SUCCESS',
+            token: ${JSON.stringify(token)},
+            user: ${JSON.stringify({
+              id: refreshed.id,
+              email: refreshed.email,
+              name: refreshed.name,
+              owner_uid: refreshed.owner_uid,
+              telegram_username: refreshed.telegram_username || '',
+              platform_role: refreshed.platform_role,
+              preferred_language: refreshed.preferred_language || 'en',
+              last_selected_business_id: refreshed.last_selected_business_id || '',
+            })}
+          }, window.location.origin);
+          window.close();
+        } else {
+          window.location.href = '/';
+        }
+      </script></body></html>
     `);
-    return;
+  } catch (error) {
+    console.warn('Google OAuth callback failed:', error);
+    res.status(401).send('Google sign-in could not be verified. Close this window and try again.');
   }
-
-  // Fallback: render interactive Google Account Chooser & Log In / Sign Up bridge in popup
-  res.send(`
-    <!DOCTYPE html>
-    <html>
-      <head>
-        <meta charset="utf-8"/>
-        <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-        <title>Continue with Google — TeleBiz OS</title>
-        <script src="https://accounts.google.com/gsi/client" async defer></script>
-        <style>
-          body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            min-height: 100vh;
-            margin: 0;
-            background: #f8fafc;
-            color: #0f172a;
-          }
-          .box {
-            background: white;
-            border-radius: 24px;
-            padding: 28px 24px;
-            box-shadow: 0 12px 30px rgba(0,0,0,0.08);
-            max-width: 400px;
-            width: 92%;
-            border: 1px solid #e2e8f0;
-          }
-          h2 { margin: 10px 0 4px 0; font-size: 18px; font-weight: 800; text-align: center; }
-          p.sub { margin: 0 0 16px 0; font-size: 12px; color: #64748b; text-align: center; }
-          .tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; background: #f1f5f9; padding: 4px; border-radius: 12px; margin-bottom: 14px; }
-          .tab { border: none; background: transparent; padding: 8px; border-radius: 9px; font-size: 12px; font-weight: 700; cursor: pointer; color: #475569; }
-          .tab.active { background: #0f172a; color: white; }
-          .field { margin-bottom: 10px; }
-          .field label { display: block; font-size: 11px; font-weight: 700; margin-bottom: 4px; color: #334155; }
-          .field input { width: 100%; box-sizing: border-box; padding: 9px 12px; border-radius: 10px; border: 1px solid #cbd5e1; font-size: 12px; }
-          .btn { width: 100%; padding: 11px; border-radius: 12px; border: none; background: #4f46e5; color: white; font-weight: 800; font-size: 12px; cursor: pointer; margin-top: 6px; }
-          .err { background: #fff1f2; border: 1px solid #fecdd3; color: #be123c; padding: 8px 10px; border-radius: 10px; font-size: 11px; font-weight: 600; margin-bottom: 10px; display: none; }
-          .btn-slot { display: flex; justify-content: center; margin-bottom: 12px; }
-        </style>
-      </head>
-      <body>
-        <div class="box">
-          <div style="text-align:center;">
-            <svg width="36" height="36" viewBox="0 0 24 24">
-              <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
-              <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
-              <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"/>
-              <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"/>
-            </svg>
-          </div>
-          <h2>Continue with Google</h2>
-          <p class="sub">Log in to an existing Google account or sign up a new Store Owner account</p>
-          <div id="googleBtn" class="btn-slot"></div>
-          <div class="tabs">
-            <button type="button" id="tabLogin" class="tab active" onclick="setMode('login')">Log In</button>
-            <button type="button" id="tabSignup" class="tab" onclick="setMode('signup')">Sign Up (New)</button>
-          </div>
-          <div id="errBox" class="err"></div>
-          <div class="field">
-            <label>Google Email Address *</label>
-            <input type="email" id="gEmail" placeholder="yourname@gmail.com" />
-          </div>
-          <div class="field" id="nameWrap" style="display:none;">
-            <label>Store Owner Name * (Required for new account)</label>
-            <input type="text" id="gName" placeholder="Your Full Name or Store Brand" />
-          </div>
-          <div class="field">
-            <label id="passLabel">Secondary Passcode (Optional on Google login)</label>
-            <input type="password" id="gPass" placeholder="4+ digit passcode" />
-          </div>
-          <button type="button" class="btn" onclick="submitGoogleForm()">Continue with Google →</button>
-        </div>
-        <script>
-          var currentMode = 'login';
-          function setMode(m) {
-            currentMode = m;
-            document.getElementById('tabLogin').className = 'tab' + (m === 'login' ? ' active' : '');
-            document.getElementById('tabSignup').className = 'tab' + (m === 'signup' ? ' active' : '');
-            document.getElementById('nameWrap').style.display = m === 'signup' ? 'block' : 'none';
-            document.getElementById('passLabel').textContent = m === 'signup' ? 'Secondary Passcode (4+ chars, defaults to 2026)' : 'Secondary Passcode (Optional)';
-            document.getElementById('errBox').style.display = 'none';
-          }
-          async function submitGoogleForm() {
-            var errBox = document.getElementById('errBox');
-            errBox.style.display = 'none';
-            var email = document.getElementById('gEmail').value.trim();
-            var name = document.getElementById('gName').value.trim();
-            var passcode = document.getElementById('gPass').value.trim();
-            try {
-              var res = await fetch('/api/auth/google', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ email: email, name: name, recovery_passcode: passcode, intent: currentMode })
-              });
-              var data = await res.json();
-              if (!res.ok) {
-                errBox.textContent = data.error || 'Authentication failed';
-                errBox.style.display = 'block';
-                if (data.requiresRegistration) setMode('signup');
-                return;
-              }
-              if (window.opener) {
-                window.opener.postMessage({ type: 'GOOGLE_AUTH_SUCCESS', token: data.token, user: data.user }, '*');
-                window.close();
-              } else {
-                window.location.href = '/';
-              }
-            } catch (e) {
-              errBox.textContent = e.message || 'Network error';
-              errBox.style.display = 'block';
-            }
-          }
-          window.handleCredentialResponse = async function(response) {
-            try {
-              var res = await fetch('/api/auth/google', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ credential: response.credential, direct_connect: true })
-              });
-              var data = await res.json();
-              if (res.ok && data.token) {
-                if (window.opener) {
-                  window.opener.postMessage({ type: 'GOOGLE_AUTH_SUCCESS', token: data.token, user: data.user }, '*');
-                  window.close();
-                } else {
-                  window.location.href = '/';
-                }
-              }
-            } catch (e) {
-              console.error(e);
-            }
-          };
-          window.onload = function() {
-            if (window.google && window.google.accounts) {
-              google.accounts.id.initialize({
-                client_id: ${JSON.stringify(process.env.GOOGLE_CLIENT_ID || '1088497941073-preview.apps.googleusercontent.com')},
-                callback: window.handleCredentialResponse,
-                auto_select: false
-              });
-              google.accounts.id.renderButton(
-                document.getElementById('googleBtn'),
-                { theme: 'outline', size: 'large', shape: 'pill', width: 280, text: 'continue_with' }
-              );
-            }
-          };
-        </script>
-      </body>
-    </html>
-  `);
 });
 
 // Better Auth Standard Endpoint Aliases for Express Compatibility
