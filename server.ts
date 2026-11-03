@@ -5012,14 +5012,67 @@ app.post('/api/storefront/:slug/book', (req: Request, res: Response) => {
   if (!ensurePublicStorefrontAvailable(business, res)) return;
 
   const { service_id, customer_name, customer_phone, booking_date, booking_time, guests, notes } = req.body;
+  const cleanName = String(customer_name || '').trim();
+  const cleanPhone = String(customer_phone || '').trim();
+  const cleanDate = String(booking_date || '').trim();
+  const cleanTime = String(booking_time || '').trim();
+  const guestCount = Number(guests || 1);
+  const cleanNotes = String(notes || '').trim().slice(0, 1000);
+
+  if (cleanName.length < 2 || cleanName.length > 100 || cleanPhone.length < 5 || cleanPhone.length > 32) {
+    res.status(400).json({ error: 'Enter a valid customer name and phone number.' });
+    return;
+  }
+  if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(cleanDate) || !/^([01]\\d|2[0-3]):[0-5]\\d$/.test(cleanTime)) {
+    res.status(400).json({ error: 'Choose a valid booking date and time.' });
+    return;
+  }
+  const parsedDate = new Date(cleanDate + 'T00:00:00Z');
+  if (!Number.isFinite(parsedDate.getTime()) || parsedDate.toISOString().slice(0, 10) !== cleanDate) {
+    res.status(400).json({ error: 'Choose a valid booking date.' });
+    return;
+  }
+  const requestedDateTime = new Date(cleanDate + 'T' + cleanTime + ':00+03:00');
+  if (!Number.isFinite(requestedDateTime.getTime()) || requestedDateTime.getTime() <= Date.now()) {
+    res.status(400).json({ error: 'Choose a future booking time.' });
+    return;
+  }
+  if (!Number.isInteger(guestCount) || guestCount < 1 || guestCount > 100) {
+    res.status(400).json({ error: 'Guest count must be between 1 and 100.' });
+    return;
+  }
+
   const service = db.prepare('SELECT * FROM services_listings WHERE id = ? AND business_id = ?').get(service_id, business.id) as any;
-  if (!service) {
-    res.status(404).json({ error: 'Service not found' });
+  if (!service || !Number(service.available)) {
+    res.status(404).json({ error: 'This service is not currently available.' });
+    return;
+  }
+  let availableSlots: string[] = [];
+  try {
+    const parsedSlots = JSON.parse(service.available_slots_json || '[]');
+    if (Array.isArray(parsedSlots)) availableSlots = parsedSlots.map((slot) => String(slot));
+  } catch {
+    availableSlots = [];
+  }
+  if (availableSlots.length > 0 && !availableSlots.includes(cleanTime)) {
+    res.status(409).json({ error: 'That time is not offered for this service. Choose an available time slot.' });
+    return;
+  }
+
+  const booked = db.prepare(`
+    SELECT COALESCE(SUM(guests), 0) as total
+    FROM bookings
+    WHERE business_id = ? AND service_id = ? AND booking_date = ? AND booking_time = ?
+      AND status NOT IN ('cancelled', 'rejected')
+  `).get(business.id, service.id, cleanDate, cleanTime) as { total: number };
+  const capacity = Math.max(1, Number(service.capacity || 1));
+  if (Number(booked.total || 0) + guestCount > capacity) {
+    res.status(409).json({ error: 'This time slot is full. Please choose another available time.' });
     return;
   }
 
   const bookingId = 'bkg_' + crypto.randomBytes(4).toString('hex');
-  const bookingNumber = 'BKG-2026-' + Math.floor(100 + Math.random() * 900);
+  const bookingNumber = 'BKG-' + new Date().getFullYear() + '-' + crypto.randomInt(100, 1000);
   const now = new Date().toISOString();
 
   db.prepare(`
@@ -5034,13 +5087,13 @@ app.post('/api/storefront/:slug/book', (req: Request, res: Response) => {
     bookingNumber,
     service.id,
     service.name,
-    customer_name,
-    customer_phone,
-    booking_date,
-    booking_time,
-    Number(guests || 1),
-    service.price * Number(guests || 1),
-    notes || '',
+    cleanName,
+    cleanPhone,
+    cleanDate,
+    cleanTime,
+    guestCount,
+    Number(service.price) * guestCount,
+    cleanNotes,
     now
   );
 
@@ -5049,7 +5102,7 @@ app.post('/api/storefront/:slug/book', (req: Request, res: Response) => {
     type: 'booking',
     tone: 'info',
     title: `New Booking Request ${bookingNumber} — ${service.name}`,
-    message: `${customer_name} requested ${service.name} on ${booking_date} at ${booking_time}.`,
+    message: `${cleanName} requested ${service.name} on ${cleanDate} at ${cleanTime}.`,
     channel: 'telegram_and_web',
     buttons: [
       { label: 'Manage Bookings', action: 'open_orders', variant: 'primary' },
@@ -5060,8 +5113,8 @@ app.post('/api/storefront/:slug/book', (req: Request, res: Response) => {
     bookingId,
     bookingNumber,
     serviceName: service.name,
-    bookingDate: booking_date,
-    bookingTime: booking_time,
+    bookingDate: cleanDate,
+    bookingTime: cleanTime,
     status: 'requested',
   });
 });
