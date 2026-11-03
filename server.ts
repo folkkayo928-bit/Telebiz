@@ -3168,7 +3168,12 @@ app.post('/api/businesses/:id/products', (req: Request, res: Response) => {
     return;
   }
   let resolvedCompareAt: number | null = parsedCompareAt;
-  let resolvedDiscountPct = discount_percent ? Math.min(95, Math.max(0, Math.round(Number(discount_percent)))) : 0;
+  const rawDiscountPercent = discount_percent === undefined || discount_percent === null || discount_percent === '' ? 0 : Number(discount_percent);
+  if (!Number.isFinite(rawDiscountPercent) || rawDiscountPercent < 0 || rawDiscountPercent > 95) {
+    res.status(400).json({ error: 'Discount percentage must be between 0 and 95.' });
+    return;
+  }
+  let resolvedDiscountPct = Math.round(rawDiscountPercent);
 
   if (resolvedDiscountPct > 0 && (!resolvedCompareAt || resolvedCompareAt <= numericPrice)) {
     resolvedCompareAt = Math.round(numericPrice / (1 - resolvedDiscountPct / 100));
@@ -3262,7 +3267,10 @@ app.patch('/api/businesses/:id/products/:productId', (req: Request, res: Respons
 
   const finalPrice = price !== undefined ? Number(price) : Number(existing.price);
   const finalStock = stock !== undefined ? Number(stock) : Number(existing.stock);
-  if (!Number.isFinite(finalPrice) || finalPrice < 0 || !Number.isInteger(finalStock) || finalStock < 0 ||
+  const finalName = name !== undefined ? String(name).trim() : String(existing.name);
+  const rawDiscountPercent = discount_percent === undefined || discount_percent === null || discount_percent === '' ? Number(existing.discount_percent || 0) : Number(discount_percent);
+  if (!finalName || finalName.length > 160 || !Number.isFinite(rawDiscountPercent) || rawDiscountPercent < 0 || rawDiscountPercent > 95 ||
+      !Number.isFinite(finalPrice) || finalPrice < 0 || !Number.isInteger(finalStock) || finalStock < 0 ||
       (compare_at_price !== undefined && compare_at_price !== null && compare_at_price !== '' &&
        (!Number.isFinite(Number(compare_at_price)) || Number(compare_at_price) < 0))) {
     res.status(400).json({ error: 'Product price, stock, or comparison price is invalid.' });
@@ -3271,9 +3279,7 @@ app.patch('/api/businesses/:id/products/:productId', (req: Request, res: Respons
   let finalCompareAt = compare_at_price !== undefined
     ? (compare_at_price ? Number(compare_at_price) : null)
     : existing.compare_at_price;
-  let finalDiscountPct = discount_percent !== undefined
-    ? Math.min(95, Math.max(0, Math.round(Number(discount_percent))))
-    : Number(existing.discount_percent || 0);
+  let finalDiscountPct = Math.round(rawDiscountPercent);
 
   if (discount_percent !== undefined && finalDiscountPct > 0 && (!finalCompareAt || finalCompareAt <= finalPrice)) {
     finalCompareAt = Math.round(finalPrice / (1 - finalDiscountPct / 100));
@@ -3294,7 +3300,7 @@ app.patch('/api/businesses/:id/products/:productId', (req: Request, res: Respons
         stock = ?, available = ?, featured = ?, variations_json = ?, image_type = ?, image_url = ?, gallery_json = ?
     WHERE id = ? AND business_id = ?
   `).run(
-    name ?? existing.name,
+    finalName,
     category_name !== undefined && String(category_name).trim() ? String(category_name).trim() : existing.category_name,
     description !== undefined ? String(description) : existing.description,
     finalPrice,
