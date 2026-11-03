@@ -7817,7 +7817,7 @@ export default function App() {
                           setAuthPassword(e.target.value);
                           if (authFieldErrors.password) setAuthFieldErrors((p) => ({ ...p, password: '' }));
                         }}
-                        placeholder="Min 6 characters"
+                        placeholder="Minimum 8 characters"
                         className={`w-full px-3.5 py-2.5 rounded-xl border bg-white dark:bg-slate-950 ${
                           authFieldErrors.password
                             ? 'border-2 border-rose-500 ring-2 ring-rose-500/20 bg-rose-50/30'
@@ -7836,14 +7836,14 @@ export default function App() {
                     <div className="flex items-center justify-between">
                       <span className="font-extrabold text-indigo-950 dark:text-indigo-200 flex items-center gap-1.5">
                         <KeyRound className="w-3.5 h-3.5 text-indigo-600" />
-                        Secondary Recovery Passcode (Optional)
+                        Secondary Recovery Passcode *
                       </span>
                       <span className="px-2 py-0.5 rounded-full bg-indigo-600/10 text-indigo-700 dark:text-indigo-300 text-[9px] font-bold">
-                        Default: 2026
+                        Required · 8+ characters
                       </span>
                     </div>
                     <p className="text-[10px] text-slate-600 dark:text-slate-300">
-                      Used to log in with your Telegram handle or recover your store account if you forget your password.
+                      Use a unique 8+ character recovery code. Keep it private and do not reuse your account password.
                     </p>
                     <input
                       type="password"
@@ -7854,12 +7854,13 @@ export default function App() {
                           setAuthFieldErrors((p) => ({ ...p, recovery_passcode: '' }));
                         }
                       }}
-                      placeholder="e.g. 2026 or secret PIN (defaults to 2026)"
+                      placeholder="Choose a unique recovery code (8+ characters)"
                       className={`w-full px-3 py-2 rounded-xl border bg-white dark:bg-slate-950 font-mono tracking-widest text-xs ${
                         authFieldErrors.recovery_passcode
                           ? 'border-2 border-rose-500 ring-2 ring-rose-500/20 bg-rose-50/30'
                           : 'border-indigo-200 dark:border-indigo-800'
                       }`}
+                      required
                     />
                     {authFieldErrors.recovery_passcode && (
                       <p className="text-[10px] font-bold text-rose-600 mt-1">{authFieldErrors.recovery_passcode}</p>
@@ -8276,7 +8277,7 @@ export default function App() {
                             ✓ Valid
                           </span>
                         ) : (
-                          <span className="text-slate-400 text-[10px] font-semibold shrink-0">4+ chars/digits</span>
+                          <span className="text-slate-400 text-[10px] font-semibold shrink-0">8+ characters for new accounts</span>
                         )}
                       </div>
                       <input
@@ -8296,7 +8297,7 @@ export default function App() {
                         placeholder={
                           tgVerifyStatus?.checked && tgVerifyStatus.exists
                             ? 'Enter your account passcode'
-                            : '4+ digit passcode (e.g. 2026)'
+                            : 'Choose an 8+ character recovery passcode'
                         }
                         className={`w-full px-3.5 py-2.5 rounded-xl border bg-white dark:bg-slate-950 font-mono text-xs ${
                           authFieldErrors.recovery_passcode
@@ -8426,7 +8427,7 @@ export default function App() {
                         type="password"
                         value={authRecoverNewPassword}
                         onChange={(e) => setAuthRecoverNewPassword(e.target.value)}
-                        placeholder="New password (min 6 chars)"
+                        placeholder="New password (min 8 characters)"
                         className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950"
                       />
                     </div>
@@ -8595,187 +8596,12 @@ export default function App() {
             {/* Google Log In vs. Sign Up Form */}
             {showAddGoogleAccount && (
               <div className="space-y-3">
-                {/* Mode Tabs: Log In vs. Sign Up */}
-                <div className="grid grid-cols-2 gap-1.5 bg-slate-100 dark:bg-slate-950 p-1 rounded-2xl">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setGoogleSubMode('login');
-                      setAuthError('');
-                      setAuthFieldErrors({});
-                    }}
-                    className={`py-2 px-3 rounded-xl font-bold text-xs transition ${
-                      googleSubMode === 'login'
-                        ? 'bg-slate-950 text-white dark:bg-indigo-600 shadow-xs'
-                        : 'text-slate-600 dark:text-slate-400'
-                    }`}
-                  >
-                    Log In (Existing)
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setGoogleSubMode('signup');
-                      setAuthError('');
-                      setAuthFieldErrors({});
-                    }}
-                    className={`py-2 px-3 rounded-xl font-bold text-xs transition ${
-                      googleSubMode === 'signup'
-                        ? 'bg-emerald-600 text-white shadow-xs'
-                        : 'text-slate-600 dark:text-slate-400'
-                    }`}
-                  >
-                    Sign Up (New Store Owner)
-                  </button>
+                <div className="rounded-2xl border border-indigo-200 dark:border-indigo-900 bg-indigo-50/70 dark:bg-indigo-950/30 p-4 space-y-2">
+                  <h4 className="font-extrabold text-slate-900 dark:text-white">Secure Google sign-in</h4>
+                  <p className="text-xs leading-relaxed text-slate-600 dark:text-slate-300">
+                    Continue in Google's sign-in window. Google verifies the account's identity and email; Telebiz does not accept a typed email address as proof of ownership. New accounts are created automatically after Google verifies them.
+                  </p>
                 </div>
-
-                <div>
-                  <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
-                    Google Email Address *
-                  </label>
-                  <div className="flex gap-2">
-                    <input
-                      type="email"
-                      value={customGoogleEmail}
-                      onChange={(e) => {
-                        setCustomGoogleEmail(e.target.value);
-                        setGoogleVerifyStatus(null);
-                        if (authFieldErrors.email) {
-                          setAuthFieldErrors((p) => {
-                            const c = { ...p };
-                            delete c.email;
-                            return c;
-                          });
-                        }
-                      }}
-                      onBlur={() => {
-                        if (customGoogleEmail.trim()) {
-                          checkGoogleEmail(customGoogleEmail);
-                        }
-                      }}
-                      placeholder="yourname@gmail.com"
-                      className={`flex-1 px-3.5 py-2.5 rounded-xl border bg-white dark:bg-slate-950 text-xs font-medium ${
-                        authFieldErrors.email ? 'border-rose-400 bg-rose-50/30' : 'border-slate-200 dark:border-slate-700'
-                      }`}
-                      autoFocus
-                    />
-                    <button
-                      type="button"
-                      onClick={() => checkGoogleEmail(customGoogleEmail)}
-                      disabled={!customGoogleEmail.trim() || Boolean(googleVerifyStatus?.checking)}
-                      className="btn-3d-white px-3 py-2 rounded-xl font-bold text-[11px] shrink-0 disabled:opacity-50"
-                    >
-                      {googleVerifyStatus?.checking ? 'Checking...' : 'Verify'}
-                    </button>
-                  </div>
-                  {authFieldErrors.email && (
-                    <p className="text-[11px] font-bold text-rose-600 mt-1">{authFieldErrors.email}</p>
-                  )}
-
-                  {googleVerifyStatus?.checked && googleVerifyStatus.validFormat && !authFieldErrors.email && (
-                    <div
-                      className={`mt-2 p-2.5 rounded-xl border text-[11px] font-semibold ${
-                        googleVerifyStatus.exists
-                          ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
-                          : 'bg-indigo-50 border-indigo-200 text-indigo-900'
-                      }`}
-                    >
-                      {googleVerifyStatus.exists && googleVerifyStatus.account ? (
-                        <div>
-                          <strong>✓ Existing Google Account:</strong> {googleVerifyStatus.account.name} (
-                          {googleVerifyStatus.account.owner_uid}). Ready to log in!
-                        </div>
-                      ) : (
-                        <div>
-                          <strong>✨ New Google Account:</strong> Please write your <strong>Store Owner Name</strong> below to complete registration.
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-
-                {(googleSubMode === 'signup' || (googleVerifyStatus?.checked && !googleVerifyStatus.exists)) && (
-                  <div>
-                    <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
-                      Store Owner Name <span className="text-rose-600 font-extrabold">* (Required for New Account)</span>
-                    </label>
-                    <input
-                      type="text"
-                      value={customGoogleName}
-                      onChange={(e) => {
-                        setCustomGoogleName(e.target.value);
-                        if (authFieldErrors.name) {
-                          setAuthFieldErrors((p) => {
-                            const c = { ...p };
-                            delete c.name;
-                            return c;
-                          });
-                        }
-                      }}
-                      placeholder="Your Full Name or Store Brand"
-                      className={`w-full px-3.5 py-2.5 rounded-xl border bg-white dark:bg-slate-950 text-xs ${
-                        authFieldErrors.name ? 'border-rose-400 bg-rose-50/30' : 'border-slate-200 dark:border-slate-700'
-                      }`}
-                    />
-                    {authFieldErrors.name && (
-                      <p className="text-[11px] font-bold text-rose-600 mt-1">{authFieldErrors.name}</p>
-                    )}
-                  </div>
-                )}
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                  <div>
-                    <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
-                      Telegram Handle (Optional)
-                    </label>
-                    <input
-                      type="text"
-                      value={customGoogleTg}
-                      onChange={(e) => {
-                        setCustomGoogleTg(e.target.value);
-                        if (authFieldErrors.telegram_username) {
-                          setAuthFieldErrors((p) => {
-                            const c = { ...p };
-                            delete c.telegram_username;
-                            return c;
-                          });
-                        }
-                      }}
-                      placeholder="@your_telegram"
-                      className={`w-full px-3 py-2 rounded-xl border bg-white dark:bg-slate-950 font-mono text-xs ${
-                        authFieldErrors.telegram_username
-                          ? 'border-rose-400 bg-rose-50/30'
-                          : 'border-slate-200 dark:border-slate-700'
-                      }`}
-                    />
-                  </div>
-                  <div>
-                    <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
-                      Secondary Passcode {googleSubMode === 'signup' ? '(Default: 2026)' : '(Optional)'}
-                    </label>
-                    <input
-                      type="password"
-                      value={customGooglePasscode}
-                      onChange={(e) => {
-                        setCustomGooglePasscode(e.target.value);
-                        if (authFieldErrors.recovery_passcode) {
-                          setAuthFieldErrors((p) => {
-                            const c = { ...p };
-                            delete c.recovery_passcode;
-                            return c;
-                          });
-                        }
-                      }}
-                      placeholder="4+ digit passcode"
-                      className={`w-full px-3 py-2 rounded-xl border bg-white dark:bg-slate-950 font-mono text-xs ${
-                        authFieldErrors.recovery_passcode
-                          ? 'border-rose-400 bg-rose-50/30'
-                          : 'border-slate-200 dark:border-slate-700'
-                      }`}
-                    />
-                  </div>
-                </div>
-
                 <div className="flex items-center justify-between gap-2 pt-1">
                   <button
                     type="button"
@@ -8786,29 +8612,19 @@ export default function App() {
                     }}
                     className="btn-3d-white px-3.5 py-2.5 rounded-xl font-bold text-xs"
                   >
-                    ← Direct Connect List
+                    ← Back to Google accounts
                   </button>
                   <button
                     type="button"
                     disabled={googleAuthLoading}
-                    onClick={() =>
-                      handleGoogleAuth(customGoogleEmail, customGoogleName, {
-                        directConnect: false,
-                        intent: googleSubMode,
-                        passcode: customGooglePasscode,
-                        telegramHandle: customGoogleTg,
-                      })
-                    }
+                    onClick={() => handleGoogleAuth('')}
                     className="btn-3d-primary px-5 py-2.5 rounded-xl font-bold text-white disabled:opacity-50"
                   >
-                    {googleAuthLoading
-                      ? 'Verifying...'
-                      : googleSubMode === 'signup'
-                      ? 'Sign Up with Google →'
-                      : 'Log In with Google →'}
+                    {googleAuthLoading ? 'Opening Google…' : 'Continue with Google →'}
                   </button>
                 </div>
               </div>
+            )}
             )}
           </div>
         </div>
@@ -9105,7 +8921,7 @@ export default function App() {
                       maxLength={6}
                       value={passcodeInput}
                       onChange={(e) => setPasscodeInput(e.target.value.replace(/\D/g, ''))}
-                      placeholder="e.g. 2026"
+                      placeholder="Choose a 4–6 digit PIN"
                       className="w-full px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 font-mono tracking-widest text-sm"
                     />
                   </div>
