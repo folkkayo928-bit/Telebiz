@@ -2590,7 +2590,11 @@ app.post('/api/businesses/:id/telegram', (req: Request, res: Response) => {
 
   const now = new Date().toISOString();
   const isWebhookActive = 0;
-  const isPublished = 0;
+  // Keep the user's explicit storefront publication choice independent from
+  // the unconfigured Telegram bot/webhook integration.
+  const isPublished = mini_app_published !== undefined
+    ? (mini_app_published ? 1 : 0)
+    : Number(b.mini_app_published || 0);
 
   db.prepare(`
     UPDATE businesses SET
@@ -2632,7 +2636,7 @@ app.post('/api/businesses/:id/telegram', (req: Request, res: Response) => {
     type: 'telegram',
     tone: 'telegram',
     title: 'Telegram integration setup pending',
-    message: `Store Telegram details were saved, but no bot webhook or Telegram Mini App connection has been verified. Web storefront preview: ${resolvedCustomDomain || `telebiz.os/s/${updated.slug}`}.`,
+    message: `Store Telegram details were saved, but no bot webhook or Telegram Mini App connection has been verified. Storefront URL: ${resolvedCustomDomain || `telebiz.os/s/${updated.slug}`}.`,
     channel: 'telegram_and_web',
     forceWithoutButtons: !include_buttons_in_notification,
     buttons: [
