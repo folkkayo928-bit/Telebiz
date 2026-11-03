@@ -480,6 +480,8 @@ export function initDatabase() {
   safeAlter(`ALTER TABLE businesses ADD COLUMN owner_uid TEXT DEFAULT ''`);
   safeAlter(`ALTER TABLE businesses ADD COLUMN notification_settings_json TEXT DEFAULT '{"new_orders":true,"payment_requests":true,"bookings":true,"support":true,"telegram_sync":true,"button_mode":"auto"}'`);
   safeAlter(`ALTER TABLE businesses ADD COLUMN telegram_last_synced_at TEXT DEFAULT ''`);
+  safeAlter(`ALTER TABLE businesses ADD COLUMN telegram_bot_token_encrypted TEXT DEFAULT ''`);
+  safeAlter(`ALTER TABLE businesses ADD COLUMN telegram_webhook_secret_hash TEXT DEFAULT ''`);
   safeAlter(`ALTER TABLE businesses ADD COLUMN background_color TEXT DEFAULT '#F8FAFC'`);
   safeAlter(`ALTER TABLE businesses ADD COLUMN page_darkness TEXT DEFAULT 'light'`);
   safeAlter(`ALTER TABLE businesses ADD COLUMN background_pattern TEXT DEFAULT 'subtle_grid'`);
