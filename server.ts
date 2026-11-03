@@ -160,10 +160,9 @@ function verifyTenantAccess(user: AuthUser | undefined, businessId: string, requ
     return { allowed: true, business, role: 'owner' };
   }
 
-  const emp = db.prepare('SELECT * FROM employees WHERE business_id = ? AND (user_id = ? OR email = ?) AND status = ?').get(
+  const emp = db.prepare('SELECT * FROM employees WHERE business_id = ? AND user_id = ? AND status = ?').get(
     businessId,
     user.id,
-    user.email,
     'active'
   ) as any;
 
@@ -230,10 +229,10 @@ app.get('/api/auth/me', (req: Request, res: Response) => {
   } else {
     businesses = db.prepare(`
       SELECT DISTINCT b.* FROM businesses b
-      LEFT JOIN employees e ON e.business_id = b.id
-      WHERE b.owner_id = ? OR LOWER(b.contact_email) = LOWER(?) OR (LOWER(e.email) = LOWER(?) AND e.status = 'active')
+      LEFT JOIN employees e ON e.business_id = b.id AND e.user_id = ? AND e.status = 'active'
+      WHERE b.owner_id = ? OR e.user_id = ?
       ORDER BY CASE WHEN b.id = ? THEN 0 ELSE 1 END, b.created_at DESC, b.rowid DESC
-    `).all(req.user.id, req.user.email, req.user.email, preferredBizId);
+    `).all(req.user.id, req.user.id, req.user.id, preferredBizId);
   }
 
   // Enrich each business with owner identity, product catalog preview, and order status counts (Finished, Rejected, Payment Requests)
@@ -242,8 +241,9 @@ app.get('/api/auth/me', (req: Request, res: Response) => {
     const orders = db.prepare('SELECT status, total, payment_status, created_at FROM orders WHERE business_id = ?').all(b.id) as any[];
     const paidOrders = orders.filter((o) => o.payment_status === 'paid');
     const verifiedRevenue = paidOrders.reduce((sum, o) => sum + Number(o.total || 0), 0);
+    const todayDate = new Date().toISOString().slice(0, 10);
     const todayRevenue = paidOrders
-      .filter((o) => String(o.created_at || '').startsWith('2026-11-01'))
+      .filter((o) => String(o.created_at || '').startsWith(todayDate))
       .reduce((sum, o) => sum + Number(o.total || 0), 0);
     const pendingOrdersCount = orders.filter((o) => o.payment_status === 'pending_verification' || o.payment_status === 'unpaid').length;
     const pendingPaymentRequestsCount = orders.filter((o) => o.payment_status === 'pending_verification').length;
@@ -3786,7 +3786,7 @@ app.post('/api/businesses/:id/employees', (req: Request, res: Response) => {
   const empId = 'emp_' + crypto.randomBytes(4).toString('hex');
   db.prepare(`
     INSERT INTO employees (id, business_id, user_id, name, email, role, permissions_json, branch_id, schedule_json, status, created_at)
-    VALUES (?, ?, null, ?, ?, ?, ?, ?, ?, 'active', ?)
+    VALUES (?, ?, null, ?, ?, ?, ?, ?, ?, 'invited', ?)
   `).run(
     empId,
     req.params.id,
