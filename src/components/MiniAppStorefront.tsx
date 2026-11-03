@@ -566,7 +566,12 @@ export const MiniAppStorefront: React.FC<StorefrontProps> = ({
     setLoading(true);
     setError('');
     try {
-      const res = await fetch('/api/storefront/' + slug);
+      const requestHeaders: Record<string, string> = {};
+      if (authToken) requestHeaders.Authorization = `Bearer ${authToken}`;
+      const res = await fetch('/api/storefront/' + slug, {
+        headers: requestHeaders,
+        credentials: 'same-origin',
+      });
       const json = await res.json();
       if (!res.ok) {
         setError(json.error || 'Unable to load this storefront.');
@@ -686,7 +691,7 @@ export const MiniAppStorefront: React.FC<StorefrontProps> = ({
     } catch {
       // ignore
     }
-  }, [slug, mode]);
+  }, [slug, mode, authToken]);
 
   if (loading) {
     return (
