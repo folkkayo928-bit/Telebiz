@@ -1226,14 +1226,15 @@ app.get('/api/auth/telegram/check-status', (req: Request, res: Response) => {
     return;
   }
 
+  if (session.status === 'pending' && new Date(session.expires_at).getTime() <= Date.now()) {
+    db.prepare("UPDATE telegram_auth_sessions SET status = 'expired', session_token = NULL WHERE auth_key = ? AND status = 'pending'").run(authKey);
+    res.status(410).json({ completed: false, status: 'expired', error: 'Telegram sign-in session expired. Start again.' });
+    return;
+  }
+
   if ((session.status === 'completed' || session.status === 'confirmed') && session.session_token) {
     const user = db.prepare('SELECT id, email, name, owner_uid, telegram_username, platform_role, preferred_language FROM users WHERE id = ?').get(session.user_id) as any;
-    res.json({
-      completed: true,
-      status: 'confirmed',
-      token: session.session_token,
-      user,
-    });
+    res.json({ completed: true, status: 'confirmed', token: session.session_token, user });
     return;
   }
 
@@ -1245,46 +1246,54 @@ function handleStoreOwnerTelegramAuth(req: Request, res: Response) {
   const {
     auth_key,
     telegram_username,
-    telegram_id,
     name,
     recovery_passcode,
     language,
-  } = req.body;
+    initData,
+  } = req.body || {};
 
-  const rawHandleInput = String(telegram_username || '').trim();
-  const rawHandle = rawHandleInput.replace(/^@+/, '').replace(/\s+/g, '');
-  const rawName = String(name || '').trim();
+  const verifiedTelegramUser = verifyTelegramWebAppInitData(String(initData || ''));
   const rawPasscode = String(recovery_passcode || '').trim();
+  let rawHandle = String(telegram_username || '').trim().replace(/^@+/, '').replace(/\s+/g, '');
+  let displayName = String(name || '').trim();
+  const verifiedTelegramId = verifiedTelegramUser?.id ? String(verifiedTelegramUser.id) : '';
+
+  if (auth_key) {
+    const pending = db.prepare('SELECT status, expires_at FROM telegram_auth_sessions WHERE auth_key = ?').get(String(auth_key)) as any;
+    if (!pending || pending.status !== 'pending' || new Date(pending.expires_at).getTime() <= Date.now()) {
+      res.status(401).json({ error: 'Telegram sign-in session is invalid or expired. Start again.' });
+      return;
+    }
+  }
+
+  if (verifiedTelegramUser) {
+    rawHandle = String(verifiedTelegramUser.username || ('tg_' + verifiedTelegramId)).replace(/^@+/, '');
+    displayName = [verifiedTelegramUser.first_name, verifiedTelegramUser.last_name].filter(Boolean).join(' ') || displayName;
+  }
 
   if (!rawHandle || rawHandle.length < 3) {
     res.status(400).json({
-      error: 'Please enter a valid Telegram Handle (@username, at least 3 characters).',
-      fieldErrors: {
-        telegram_username: 'Telegram Handle (@username) is required (at least 3 characters).',
-      },
+      error: 'A valid Telegram account is required.',
+      fieldErrors: { telegram_username: 'A valid Telegram username is required.' },
     });
     return;
   }
 
-  const normalizedHandle = `@${rawHandle}`;
-  const effectivePasscode = rawPasscode.length >= 4 ? rawPasscode : '2026';
+  const normalizedHandle = '@' + rawHandle;
   const now = new Date().toISOString();
-
   let user = findUserByTelegramHandle(normalizedHandle);
-  if (!user && telegram_id) {
-    user = db.prepare('SELECT * FROM users WHERE telegram_id IS NOT NULL AND telegram_id != "" AND telegram_id = ?').get(String(telegram_id)) as any;
+  if (!user && verifiedTelegramId) {
+    user = db.prepare('SELECT * FROM users WHERE telegram_id IS NOT NULL AND telegram_id != "" AND telegram_id = ?').get(verifiedTelegramId) as any;
   }
 
   let isNewAccount = false;
-
   if (user) {
-    // Existing Telegram account: verify passcode if provided, or update details seamlessly
-    if (rawPasscode && !verifyUserSecondaryPasscode(user, rawPasscode)) {
+    // Signed Telegram WebApp data proves ownership. Outside the WebApp, require
+    // the existing account's recovery passcode before issuing a session.
+    if (!verifiedTelegramUser && !verifyUserSecondaryPasscode(user, rawPasscode)) {
       res.status(401).json({
-        error: `Incorrect Secondary Passcode for ${normalizedHandle}. Please enter your passcode (or 2026).`,
-        fieldErrors: {
-          recovery_passcode: `Incorrect Secondary Passcode for ${normalizedHandle}.`,
-        },
+        error: 'Incorrect Secondary Passcode. Enter the recovery passcode for this account.',
+        fieldErrors: { recovery_passcode: 'The account recovery passcode is required.' },
         accountStatus: 'existing',
         existingOwnerName: user.name,
         existingOwnerUid: user.owner_uid,
@@ -1292,72 +1301,95 @@ function handleStoreOwnerTelegramAuth(req: Request, res: Response) {
       return;
     }
 
-    if (rawName && rawName.length >= 2 && (!user.name || user.name === rawHandle)) {
-      db.prepare('UPDATE users SET name = ? WHERE id = ?').run(rawName, user.id);
-      user.name = rawName;
-    }
-    if (!user.telegram_username) {
-      db.prepare('UPDATE users SET telegram_username = ? WHERE id = ?').run(normalizedHandle, user.id);
+    if (verifiedTelegramId) {
+      const conflicting = findUserByTelegramHandle(normalizedHandle);
+      if (conflicting && conflicting.id !== user.id) {
+        res.status(409).json({ error: 'This Telegram username is already linked to another Telebiz account.' });
+        return;
+      }
+      db.prepare('UPDATE users SET telegram_id = ?, telegram_username = ? WHERE id = ?')
+        .run(verifiedTelegramId, normalizedHandle, user.id);
+      user.telegram_id = verifiedTelegramId;
       user.telegram_username = normalizedHandle;
     }
+    if (displayName && displayName.length >= 2 && (!user.name || user.name === rawHandle)) {
+      db.prepare('UPDATE users SET name = ? WHERE id = ?').run(displayName, user.id);
+      user.name = displayName;
+    }
     if (!user.owner_uid) {
-      const newUid = generateOwnerUid(user.name);
-      db.prepare('UPDATE users SET owner_uid = ? WHERE id = ?').run(newUid, user.id);
-      user.owner_uid = newUid;
+      const ownerUid = generateOwnerUid(user.name);
+      db.prepare('UPDATE users SET owner_uid = ? WHERE id = ?').run(ownerUid, user.id);
+      user.owner_uid = ownerUid;
     }
   } else {
-    // New Telegram Store Owner account: create immediately
-    isNewAccount = true;
-    const userId = 'usr_tg_' + crypto.randomBytes(4).toString('hex');
-    const displayName = rawName.length >= 2 ? rawName : rawHandle;
-    const ownerUid = generateOwnerUid(displayName);
-    const syntheticEmail = `${rawHandle.toLowerCase()}@telegram.telebiz.os`;
-    const tgId = String(telegram_id || crypto.randomInt(100000000, 999999999));
+    // A typed username is not identity verification. New accounts must use
+    // Telegram's signed initData and set their own recovery secret.
+    if (!verifiedTelegramUser || !verifiedTelegramId) {
+      res.status(401).json({
+        error: 'New Telegram accounts must be created from the official Telebiz Telegram Mini App.',
+      });
+      return;
+    }
+    if (rawPasscode.length < 8) {
+      res.status(400).json({
+        error: 'Create a Recovery Passcode with at least 8 characters.',
+        fieldErrors: { recovery_passcode: 'At least 8 characters are required.' },
+      });
+      return;
+    }
 
+    isNewAccount = true;
+    const userId = 'usr_tg_' + crypto.randomBytes(5).toString('hex');
+    const finalName = displayName.length >= 2 ? displayName : normalizedHandle;
+    const ownerUid = generateOwnerUid(finalName);
+    const syntheticEmail = 'tg_' + verifiedTelegramId + '@telegram.telebiz.os';
     db.prepare(`
       INSERT INTO users (
         id, email, name, password_hash, platform_role, telegram_id, telegram_username,
         preferred_language, owner_uid, recovery_passcode_hash, recovery_hint, auth_provider, created_at
-      ) VALUES (?, ?, ?, ?, 'user', ?, ?, ?, ?, ?, 'Telegram Account Recovery Passcode', 'telegram', ?)
+      ) VALUES (?, ?, ?, ?, 'user', ?, ?, ?, ?, ?, 'Telegram recovery passcode', 'telegram', ?)
     `).run(
       userId,
       syntheticEmail,
-      displayName,
-      hashPassword(effectivePasscode),
-      tgId,
+      finalName,
+      hashPassword(crypto.randomBytes(32).toString('hex')),
+      verifiedTelegramId,
       normalizedHandle,
       language || 'en',
       ownerUid,
-      hashPassword(effectivePasscode),
+      hashPassword(rawPasscode),
       now
     );
-
     user = db.prepare('SELECT * FROM users WHERE id = ?').get(userId);
   }
 
   ensureUserHasOwnStore(user);
   const refreshedUser = db.prepare('SELECT * FROM users WHERE id = ?').get(user.id) as any;
-
-  const token = 'sess_' + crypto.randomBytes(16).toString('hex');
+  const token = 'sess_' + crypto.randomBytes(32).toString('hex');
   db.prepare(`
     INSERT INTO sessions (token, user_id, expires_at, ip_address, user_agent, revoked, created_at)
     VALUES (?, ?, ?, ?, ?, 0, ?)
   `).run(token, user.id, new Date(Date.now() + 30 * 86400000).toISOString(), req.ip || '', req.headers['user-agent'] || '', now);
 
   if (auth_key) {
-    db.prepare(`
-      UPDATE telegram_auth_sessions 
+    const consumed = db.prepare(`
+      UPDATE telegram_auth_sessions
       SET status = 'completed', session_token = ?, user_id = ?, telegram_username = ?
-      WHERE auth_key = ?
-    `).run(token, user.id, normalizedHandle, auth_key);
+      WHERE auth_key = ? AND status = 'pending' AND expires_at > ?
+    `).run(token, user.id, normalizedHandle, String(auth_key), now);
+    if (consumed.changes !== 1) {
+      db.prepare('UPDATE sessions SET revoked = 1 WHERE token = ?').run(token);
+      res.status(401).json({ error: 'Telegram sign-in session expired or was already used. Start again.' });
+      return;
+    }
   }
 
   res.json({
     token,
     isNewAccount,
     message: isNewAccount
-      ? `Store Owner account created via Telegram (${normalizedHandle}) for ${user.name} · ID: ${user.owner_uid}`
-      : `Signed in via Telegram (${normalizedHandle}) — Welcome back, ${user.name} (${user.owner_uid})!`,
+      ? 'Telebiz account created through verified Telegram identity.'
+      : 'Signed in with a verified Telegram account.',
     user: {
       id: user.id,
       email: user.email,
