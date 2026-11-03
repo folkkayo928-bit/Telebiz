@@ -346,6 +346,8 @@ export default function App() {
   const [profileTgInput, setProfileTgInput] = useState('');
   const [currentPasswordInput, setCurrentPasswordInput] = useState('');
   const [newPasswordInput, setNewPasswordInput] = useState('');
+  const [recoveryPasscodeInput, setRecoveryPasscodeInput] = useState('');
+  const [recoveryHintInput, setRecoveryHintInput] = useState('');
   const [passcodeInput, setPasscodeInput] = useState('');
   const [isPasscodeLocked, setIsPasscodeLocked] = useState(false);
   const [unlockPinInput, setUnlockPinInput] = useState('');
@@ -492,6 +494,7 @@ export default function App() {
             body: JSON.stringify({
               telegram_username: handle,
               telegram_id: String(tgWebAppUser.id),
+              telegram_init_data: (window as any).Telegram?.WebApp?.initData || '',
               name: fullName,
               intent: 'auto',
               role: 'store_owner',
@@ -846,7 +849,7 @@ export default function App() {
         fieldErrors.name = 'Store Owner Name is required (at least 2 characters).';
       }
       if (requirePasscode && cleanPasscode.length < 4) {
-        fieldErrors.recovery_passcode = 'Recovery Passcode must be at least 4 characters.';
+        fieldErrors.recovery_passcode = 'Recovery Passcode must be at least 8 characters.';
       }
 
       const failedFields = Object.entries(fieldErrors).map(([key, message], idx) => ({
@@ -914,12 +917,19 @@ export default function App() {
           body: JSON.stringify({
             telegram_username: handle,
             telegram_id: String(tgWebAppUser.id),
+            telegram_init_data: (window as any).Telegram?.WebApp?.initData || '',
             name: fullName,
             intent: 'auto',
             role: 'store_owner',
           }),
         });
         const confirmData = await confirmRes.json().catch(() => ({}));
+        if (!confirmRes.ok) {
+          setAuthModalOpen(true);
+          setAuthMode('telegram');
+          setAuthError(confirmData.error || 'Complete Telegram account setup to continue.');
+          return;
+        }
         if (confirmRes.ok && confirmData.token) {
           await completeAuthenticatedSession(
             confirmData.token,
@@ -1001,6 +1011,7 @@ export default function App() {
 
   useEffect(() => {
     const handleOAuthMessage = (event: MessageEvent) => {
+      if (event.origin !== window.location.origin) return;
       if (event.data?.type === 'GOOGLE_AUTH_SUCCESS' && event.data?.token && event.data?.user) {
         const { token, user } = event.data;
         localStorage.setItem('telebiz_remember_me', 'true');
@@ -1043,67 +1054,30 @@ export default function App() {
   };
 
   const handleGoogleAuth = async (
-    emailToUse: string,
-    nameToUse?: string,
-    options?: {
-      directConnect?: boolean;
-      intent?: 'login' | 'signup' | 'auto';
-      passcode?: string;
-      telegramHandle?: string;
-    }
+    _emailToUse: string,
+    _nameToUse?: string,
+    _options?: { directConnect?: boolean; intent?: 'login' | 'signup' | 'auto'; passcode?: string; telegramHandle?: string }
   ) => {
-    const cleanEmail = emailToUse.trim().toLowerCase();
-    const isDirect = Boolean(options?.directConnect);
-    const resolvedName = (nameToUse ?? customGoogleName).trim() || cleanEmail.split('@')[0];
-    const resolvedPasscode = (options?.passcode ?? customGooglePasscode).trim();
-    const resolvedTg = (options?.telegramHandle ?? customGoogleTg).trim();
-
-    if (!cleanEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
-      setAuthFieldErrors({ email: 'Please enter a valid Google email address (e.g. yourname@gmail.com).' });
-      setAuthError('Please enter a valid Google email address.');
-      return;
-    }
-
     setGoogleAuthLoading(true);
     setAuthError('');
     setAuthFieldErrors({});
+    const popup = window.open('about:blank', 'telebiz-google-sign-in', 'popup,width=520,height=720');
+    if (!popup) {
+      setGoogleAuthLoading(false);
+      setAuthError('Allow pop-ups for Telebiz so Google can open its secure sign-in window.');
+      return;
+    }
     try {
-      const res = await fetch('/api/auth/google', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          email: cleanEmail,
-          name: resolvedName,
-          telegram_username: resolvedTg || undefined,
-          recovery_passcode: resolvedPasscode || undefined,
-          intent: 'auto',
-          direct_connect: isDirect,
-        }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        if (data.fieldErrors) {
-          setAuthFieldErrors(data.fieldErrors);
-        }
-        setAuthError(data.error || 'Google authentication failed.');
-        return;
+      const response = await fetch('/api/auth/google/url', { method: 'GET', credentials: 'same-origin' });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data.configured || !data.url) {
+        popup.close();
+        throw new Error(data.error || 'Google sign-in is not configured on this server.');
       }
-      saveDeviceGoogleAccount(data.user.email, data.user.name || resolvedName);
-      localStorage.setItem('telebiz_remember_me', 'true');
-      localStorage.setItem('telebiz_remembered_identifier', data.user.email);
-      setCustomGoogleEmail('');
-      setCustomGoogleName('');
-      setCustomGoogleTg('');
-      setCustomGooglePasscode('');
-      setShowAddGoogleAccount(false);
-      await completeAuthenticatedSession(
-        data.token,
-        data.user,
-        `Signed in with Google as ${data.user.name} (${data.user.email}) · ID: ${data.user.owner_uid}`,
-        'overview'
-      );
-    } catch (err: any) {
-      setAuthError(err.message || 'Network error during Google sign in.');
+      popup.location.href = data.url;
+    } catch (error: any) {
+      try { popup.close(); } catch { /* ignore popup close errors */ }
+      setAuthError(error?.message || 'Could not start Google sign-in.');
     } finally {
       setGoogleAuthLoading(false);
     }
@@ -1148,8 +1122,10 @@ export default function App() {
         body: JSON.stringify({
           auth_key: tgWaitingForSession && tgAuthKey ? tgAuthKey : undefined,
           telegram_username: cleanTg,
+          telegram_id: String((window as any).Telegram?.WebApp?.initDataUnsafe?.user?.id || ''),
+          telegram_init_data: (window as any).Telegram?.WebApp?.initData || '',
           name: rawName || cleanTgNoAt,
-          recovery_passcode: rawPass || '2026',
+          recovery_passcode: rawPass,
           intent: 'auto',
           role: 'store_owner',
           language: lang,
@@ -1183,7 +1159,7 @@ export default function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           identifier: authEmail.trim(),
-          recovery_passcode: authRecoveryPasscode.trim() || '2026',
+          recovery_passcode: authRecoveryPasscode.trim(),
           new_password: authRecoverNewPassword.trim() || undefined,
         }),
       });
@@ -1213,8 +1189,11 @@ export default function App() {
       if (!cleanEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
         regErrors.email = 'A valid Email Address is required (e.g. owner@yourbrand.com).';
       }
-      if (!authPassword.trim() || authPassword.trim().length < 4) {
-        regErrors.password = 'Password must be at least 4 characters.';
+      if (!authPassword.trim() || authPassword.trim().length < 8) {
+        regErrors.password = 'Password must be at least 8 characters.';
+      }
+      if (authRecoveryPasscode.trim().length < 8) {
+        regErrors.recovery_passcode = 'Recovery passcode must be at least 8 characters.';
       }
       if (Object.keys(regErrors).length > 0) {
         setAuthFieldErrors(regErrors);
@@ -1245,7 +1224,7 @@ export default function App() {
         email: authEmail.trim(),
         password: authPassword.trim(),
         telegram_username: authTgUsername.trim(),
-        recovery_passcode: authRecoveryPasscode.trim() || '2026',
+        recovery_passcode: authRecoveryPasscode.trim(),
         recovery_hint: authRecoveryHint,
         language: lang,
       }),
@@ -1366,6 +1345,7 @@ export default function App() {
 
   const handleCreateBusiness = async (e: React.FormEvent) => {
     e.preventDefault();
+    setCommerceError('');
     const templatePresetMap: Record<string, { primary: string; accent: string; font: string; bg: string; darkness: string; pattern: string }> = {
       clean_modern: { primary: '#0F172A', accent: '#6366F1', font: 'Plus Jakarta Sans', bg: '#F8FAFC', darkness: 'light', pattern: 'subtle_grid' },
       luxury_chains_jewelry: { primary: '#121214', accent: '#D4AF37', font: 'Cinzel', bg: '#0B0C10', darkness: 'dark', pattern: 'gold_dust' },
@@ -1376,31 +1356,40 @@ export default function App() {
     };
     const chosenPreset = templatePresetMap[newBizTemplate] || templatePresetMap.clean_modern;
 
-    const res = await fetch('/api/businesses', {
-      method: 'POST',
-      headers: headersWithAuth(),
-      body: JSON.stringify({
-        name: newBizName,
-        store_id: newBizSlug.trim() || undefined,
-        categories: newBizCustomCats.trim() ? newBizCustomCats.split(',').map((c) => c.trim()).filter(Boolean) : undefined,
-        category: newBizCategory,
-        template_id: newBizTemplate,
-        primary_color: chosenPreset.primary,
-        accent_color: chosenPreset.accent,
-        font_family: chosenPreset.font,
-        background_color: chosenPreset.bg,
-        page_darkness: chosenPreset.darkness,
-        background_pattern: chosenPreset.pattern,
-        creation_method: newBizMethod,
-        description: newBizDesc,
-        contact_phone: newBizPhone,
-        address: newBizAddress,
-        telegram_bot_username: newBizBot,
-        dfy_notes: newBizDfyNotes,
-      }),
-    });
-    const created = await res.json();
-    if (res.ok && created?.id) {
+    try {
+      const res = await fetch('/api/businesses', {
+        method: 'POST',
+        headers: headersWithAuth(),
+        body: JSON.stringify({
+          name: newBizName.trim(),
+          store_id: newBizSlug.trim() || undefined,
+          categories: newBizCustomCats.trim() ? newBizCustomCats.split(',').map((c) => c.trim()).filter(Boolean) : undefined,
+          category: newBizCategory,
+          template_id: newBizTemplate,
+          primary_color: chosenPreset.primary,
+          accent_color: chosenPreset.accent,
+          font_family: chosenPreset.font,
+          background_color: chosenPreset.bg,
+          page_darkness: chosenPreset.darkness,
+          background_pattern: chosenPreset.pattern,
+          creation_method: newBizMethod,
+          description: newBizDesc,
+          contact_phone: newBizPhone,
+          address: newBizAddress,
+          telegram_bot_username: newBizBot,
+          dfy_notes: newBizDfyNotes,
+        }),
+      });
+      const created = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setCommerceError(created.error || 'Store could not be created. Please try again.');
+        return;
+      }
+      if (!created?.id) {
+        setCommerceError('The server did not confirm that the store was created.');
+        return;
+      }
+
       setNewBizModalOpen(false);
       setNewBizName('');
       setNewBizSlug('');
@@ -1411,8 +1400,10 @@ export default function App() {
       await loadAccountAndBusinesses(undefined, created.id);
       setFullStorefrontOpen(true);
       setStatusBanner(
-        `Store "${created.name}" created and saved! Your catalog starts with a clean slate so you can add your products, prices, and categories.`
+        `Store "${created.name}" created as a private draft. Add products and connect payment and Telegram details before publishing.`
       );
+    } catch (error: any) {
+      setCommerceError(error?.message || 'Network error. The store was not created.');
     }
   };
 
@@ -1672,6 +1663,37 @@ export default function App() {
     setCurrentPasswordInput('');
     setNewPasswordInput('');
     setSettingsMessage('Password updated.');
+  };
+
+  const handleSaveRecoveryPasscode = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSettingsError('');
+    setSettingsMessage('');
+    if (recoveryPasscodeInput.length < 8) {
+      setSettingsError('Recovery passcode must be at least 8 characters.');
+      return;
+    }
+    try {
+      const res = await fetch('/api/auth/recovery-passcode', {
+        method: 'POST',
+        headers: headersWithAuth(),
+        body: JSON.stringify({
+          recovery_passcode: recoveryPasscodeInput,
+          recovery_hint: recoveryHintInput,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setSettingsError(data.error || 'Could not update recovery passcode.');
+        return;
+      }
+      setRecoveryPasscodeInput('');
+      setRecoveryHintInput('');
+      await loadAccountAndBusinesses();
+      setSettingsMessage('Recovery passcode updated securely.');
+    } catch (error: any) {
+      setSettingsError(error?.message || 'Could not update recovery passcode.');
+    }
   };
 
   const handleSavePasscode = async (action: 'set' | 'clear') => {
@@ -6879,7 +6901,7 @@ export default function App() {
                   Create Your Business Storefront & Telegram Mini App
                 </h3>
                 <p className="text-slate-500 mt-0.5">
-                  Pick a visual template below — we automatically build your store with sample categories, products, and checkout so you can preview and edit immediately.
+                  Pick a visual template to create a private draft. Add your real products and payment details, connect Telegram, then publish when ready.
                 </p>
               </div>
               <button
@@ -6894,6 +6916,11 @@ export default function App() {
             </div>
 
             <form onSubmit={handleCreateBusiness} className="space-y-4">
+              {commerceError && (
+                <div role="alert" className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700">
+                  {commerceError}
+                </div>
+              )}
               {/* STEP 1: STORE IDENTITY & CUSTOM STORE ID */}
               <div className="card-3d rounded-2xl p-4 bg-slate-50/70 dark:bg-slate-950/40 border border-slate-200 dark:border-slate-800 space-y-3">
                 <div className="font-extrabold text-sm text-slate-900 dark:text-white flex items-center justify-between">
@@ -7845,7 +7872,7 @@ export default function App() {
                         Secondary Recovery Passcode (Optional)
                       </span>
                       <span className="px-2 py-0.5 rounded-full bg-indigo-600/10 text-indigo-700 dark:text-indigo-300 text-[9px] font-bold">
-                        Default: 2026
+                        Required · 8+ characters
                       </span>
                     </div>
                     <p className="text-[10px] text-slate-600 dark:text-slate-300">
@@ -7853,6 +7880,8 @@ export default function App() {
                     </p>
                     <input
                       type="password"
+                      minLength={8}
+                      required
                       value={authRecoveryPasscode}
                       onChange={(e) => {
                         setAuthRecoveryPasscode(e.target.value);
@@ -7860,7 +7889,7 @@ export default function App() {
                           setAuthFieldErrors((p) => ({ ...p, recovery_passcode: '' }));
                         }
                       }}
-                      placeholder="e.g. 2026 or secret PIN (defaults to 2026)"
+                      placeholder="Create a separate recovery passcode (8+ characters)"
                       className={`w-full px-3 py-2 rounded-xl border bg-white dark:bg-slate-950 font-mono tracking-widest text-xs ${
                         authFieldErrors.recovery_passcode
                           ? 'border-2 border-rose-500 ring-2 ring-rose-500/20 bg-rose-50/30'
@@ -8282,7 +8311,7 @@ export default function App() {
                             ✓ Valid
                           </span>
                         ) : (
-                          <span className="text-slate-400 text-[10px] font-semibold shrink-0">4+ chars/digits</span>
+                          <span className="text-slate-400 text-[10px] font-semibold shrink-0">8+ characters for new accounts</span>
                         )}
                       </div>
                       <input
@@ -8302,7 +8331,7 @@ export default function App() {
                         placeholder={
                           tgVerifyStatus?.checked && tgVerifyStatus.exists
                             ? 'Enter your account passcode'
-                            : '4+ digit passcode (e.g. 2026)'
+                            : 'Enter 8+ characters for a new account'
                         }
                         className={`w-full px-3.5 py-2.5 rounded-xl border bg-white dark:bg-slate-950 font-mono text-xs ${
                           authFieldErrors.recovery_passcode
@@ -8430,9 +8459,10 @@ export default function App() {
                       </label>
                       <input
                         type="password"
+                        minLength={8}
                         value={authRecoverNewPassword}
                         onChange={(e) => setAuthRecoverNewPassword(e.target.value)}
-                        placeholder="New password (min 6 chars)"
+                        placeholder="New password (minimum 8 characters)"
                         className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950"
                       />
                     </div>
@@ -8489,7 +8519,7 @@ export default function App() {
                 </div>
                 <div>
                   <h4 className="font-extrabold text-sm text-slate-900 dark:text-white">Continue with Google</h4>
-                  <p className="text-[11px] text-slate-500">Direct Connect, Log In, or Sign Up a New Store Owner</p>
+                  <p className="text-[11px] text-slate-500">Use Google's secure account chooser to sign in or create an account</p>
                 </div>
               </div>
               <button
@@ -8565,7 +8595,7 @@ export default function App() {
                 </div>
 
                 <div className="text-[10px] font-extrabold uppercase tracking-wider text-slate-400 pt-1">
-                  Option 2 · Log In or Sign Up with Another Google Account
+                  Option 2 · Choose a Google Account
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                   <button
@@ -8579,7 +8609,7 @@ export default function App() {
                     className="btn-3d-white py-2.5 px-3 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5"
                   >
                     <CheckCircle2 className="w-3.5 h-3.5 text-indigo-600" />
-                    <span>Log In with Google Email</span>
+                    <span>Continue with Google</span>
                   </button>
                   <button
                     type="button"
@@ -8592,7 +8622,7 @@ export default function App() {
                     className="btn-3d-primary py-2.5 px-3 rounded-xl font-bold text-xs text-white flex items-center justify-center gap-1.5"
                   >
                     <UserPlus className="w-3.5 h-3.5" />
-                    <span>Sign Up New Google Account</span>
+                    <span>Choose Google Account</span>
                   </button>
                 </div>
               </div>
@@ -8637,7 +8667,7 @@ export default function App() {
 
                 <div>
                   <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
-                    Google Email Address *
+                    Google account email (display hint only)
                   </label>
                   <div className="flex gap-2">
                     <input
@@ -8757,7 +8787,7 @@ export default function App() {
                   </div>
                   <div>
                     <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
-                      Secondary Passcode {googleSubMode === 'signup' ? '(Default: 2026)' : '(Optional)'}
+                      Recovery passcode can be set after Google sign-in
                     </label>
                     <input
                       type="password"
@@ -8772,7 +8802,7 @@ export default function App() {
                           });
                         }
                       }}
-                      placeholder="4+ digit passcode"
+                      placeholder="Set a recovery passcode after sign-in"
                       className={`w-full px-3 py-2 rounded-xl border bg-white dark:bg-slate-950 font-mono text-xs ${
                         authFieldErrors.recovery_passcode
                           ? 'border-rose-400 bg-rose-50/30'
@@ -9050,6 +9080,40 @@ export default function App() {
             {/* TAB 3: PASSWORD & PASSCODE LOCK */}
             {menuTab === 'security' && (
               <div className="space-y-5">
+                <form onSubmit={handleSaveRecoveryPasscode} className="card-3d rounded-2xl p-5 bg-slate-50/70 dark:bg-slate-950/50 space-y-3">
+                  <div>
+                    <h4 className="text-sm font-display font-extrabold text-slate-950 dark:text-white">Account Recovery Passcode</h4>
+                    <p className="text-slate-500">Set a separate 8+ character code to recover access if you lose your sign-in method.</p>
+                  </div>
+                  <div>
+                    <label className="block font-bold mb-1">New Recovery Passcode</label>
+                    <input
+                      type="password"
+                      required
+                      minLength={8}
+                      value={recoveryPasscodeInput}
+                      onChange={(e) => setRecoveryPasscodeInput(e.target.value)}
+                      autoComplete="new-password"
+                      placeholder="Enter a separate recovery code"
+                      className="w-full px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900"
+                    />
+                  </div>
+                  <div>
+                    <label className="block font-bold mb-1">Recovery Hint (optional)</label>
+                    <input
+                      type="text"
+                      maxLength={120}
+                      value={recoveryHintInput}
+                      onChange={(e) => setRecoveryHintInput(e.target.value)}
+                      placeholder="A hint only you understand"
+                      className="w-full px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900"
+                    />
+                  </div>
+                  <button type="submit" className="btn-3d-primary w-full py-2.5 rounded-xl font-bold text-white">
+                    Save Recovery Passcode
+                  </button>
+                </form>
+
                 <form onSubmit={handleChangePassword} className="card-3d rounded-2xl p-5 bg-slate-50/70 dark:bg-slate-950/50 space-y-3">
                   <div>
                     <h4 className="text-sm font-display font-extrabold text-slate-950 dark:text-white">
@@ -9058,9 +9122,10 @@ export default function App() {
                     <p className="text-slate-500">Update your login password at any time.</p>
                   </div>
                   <div>
-                    <label className="block font-bold mb-1">Current Password (optional in demo)</label>
+                    <label className="block font-bold mb-1">Current Password (required for password accounts)</label>
                     <input
                       type="password"
+                      required={currentUser?.auth_provider === 'email'}
                       value={currentPasswordInput}
                       onChange={(e) => setCurrentPasswordInput(e.target.value)}
                       placeholder="Current password"
@@ -9068,11 +9133,11 @@ export default function App() {
                     />
                   </div>
                   <div>
-                    <label className="block font-bold mb-1">New Password (minimum 6 characters)</label>
+                    <label className="block font-bold mb-1">New Password (minimum 8 characters)</label>
                     <input
                       type="password"
                       required
-                      minLength={6}
+                      minLength={8}
                       value={newPasswordInput}
                       onChange={(e) => setNewPasswordInput(e.target.value)}
                       placeholder="Enter new password"
