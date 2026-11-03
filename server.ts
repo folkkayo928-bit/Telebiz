@@ -9,6 +9,7 @@ import {
   db,
   initDatabase,
   hashPassword,
+  verifyPassword,
   ensureDefaultBusinessPaymentMethods,
   generateOwnerUid,
   generateCustomerUid,
@@ -117,13 +118,13 @@ function authMiddleware(req: Request, _res: Response, next: NextFunction) {
   if (authHeader && authHeader.startsWith('Bearer ')) {
     const token = authHeader.slice(7);
     const session = db.prepare(`
-      SELECT s.token, u.id, u.email, u.name, u.platform_role, u.preferred_language, u.account_status
+      SELECT s.token, s.expires_at, u.id, u.email, u.name, u.platform_role, u.preferred_language, u.account_status
       FROM sessions s
       JOIN users u ON u.id = s.user_id
-      WHERE s.token = ? AND s.revoked = 0
-    `).get(token) as (AuthUser & { token: string; account_status?: string }) | undefined;
+      WHERE s.token = ? AND s.revoked = 0 AND s.expires_at > ?
+    `).get(token, new Date().toISOString()) as (AuthUser & { token: string; expires_at: string; account_status?: string }) | undefined;
 
-    if (session && session.account_status !== 'blocked') {
+    if (session && session.account_status === 'active') {
       req.user = {
         id: session.id,
         email: session.email,
@@ -519,31 +520,71 @@ function findUserByIdentifier(rawInput: string): any {
 }
 
 function verifyUserSecondaryPasscode(user: any, enteredPasscode: string): boolean {
-  if (!user) return false;
-  const cleanSecret = String(enteredPasscode || '').trim();
-  if (!cleanSecret) return true;
-  const hashed = hashPassword(cleanSecret);
-
-  if (user.recovery_passcode_hash && user.recovery_passcode_hash === hashed) return true;
-  if (user.passcode && String(user.passcode).trim() === cleanSecret) return true;
-  if (user.password_hash && user.password_hash === hashed) return true;
-  if (cleanSecret === '2026') return true;
-
+  if (!user || typeof enteredPasscode !== 'string' || !enteredPasscode.trim()) return false;
+  const cleanSecret = enteredPasscode.trim();
+  if (user.recovery_passcode_hash && verifyPassword(cleanSecret, String(user.recovery_passcode_hash))) return true;
+  if (user.passcode) {
+    const stored = String(user.passcode);
+    if (stored.startsWith('scrypt$') && verifyPassword(cleanSecret, stored)) return true;
+    const supplied = Buffer.from(cleanSecret);
+    const previous = Buffer.from(stored);
+    if (supplied.length === previous.length && crypto.timingSafeEqual(supplied, previous)) return true;
+  }
   return false;
 }
 
 function isUserPasswordValid(user: any, enteredPassword: string): boolean {
-  if (!user || !enteredPassword) return false;
-  const cleanSecret = String(enteredPassword).trim();
-  if (!cleanSecret) return false;
-  const hashed = hashPassword(cleanSecret);
+  if (!user || typeof enteredPassword !== 'string' || !enteredPassword.trim()) return false;
+  const cleanSecret = enteredPassword.trim();
+  return verifyPassword(cleanSecret, String(user.password_hash || '')) ||
+    verifyUserSecondaryPasscode(user, cleanSecret);
+}
 
-  if (user.password_hash && user.password_hash === hashed) return true;
-  if (user.recovery_passcode_hash && user.recovery_passcode_hash === hashed) return true;
-  if (user.passcode && String(user.passcode).trim() === cleanSecret) return true;
-  if (cleanSecret === '2026') return true;
+function verifyTelegramWebAppInitData(initData: string): any | null {
+  const botToken = process.env.TELEGRAM_BOT_TOKEN;
+  if (!botToken || !initData || typeof initData !== 'string') return null;
+  try {
+    const params = new URLSearchParams(initData);
+    const receivedHash = params.get('hash') || '';
+    if (!/^[a-f0-9]{64}$/i.test(receivedHash)) return null;
+    params.delete('hash');
+    const checkString = Array.from(params.entries())
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, value]) => key + '=' + value)
+      .join('\n');
+    const secretKey = crypto.createHmac('sha256', 'WebAppData').update(botToken).digest();
+    const calculated = crypto.createHmac('sha256', secretKey).update(checkString).digest();
+    const supplied = Buffer.from(receivedHash, 'hex');
+    if (supplied.length !== calculated.length || !crypto.timingSafeEqual(supplied, calculated)) return null;
+    const authDate = Number(params.get('auth_date') || 0);
+    const now = Math.floor(Date.now() / 1000);
+    if (!Number.isFinite(authDate) || authDate <= 0 || authDate > now + 60 || now - authDate > 86400) return null;
+    const rawUser = params.get('user');
+    if (!rawUser) return null;
+    const user = JSON.parse(rawUser);
+    return user && user.id ? user : null;
+  } catch {
+    return null;
+  }
+}
 
-  return false;
+async function verifyGoogleIdToken(credential: string): Promise<any | null> {
+  const clientId = process.env.GOOGLE_CLIENT_ID || process.env.CLIENT_ID;
+  if (!clientId || !credential) return null;
+  try {
+    const response = await fetch('https://oauth2.googleapis.com/tokeninfo?id_token=' + encodeURIComponent(credential));
+    if (!response.ok) return null;
+    const claims = await response.json();
+    const issuerOk = claims.iss === 'accounts.google.com' || claims.iss === 'https://accounts.google.com';
+    const email = String(claims.email || '').trim().toLowerCase();
+    const expiry = Number(claims.exp || 0);
+    if (!issuerOk || claims.aud !== clientId || claims.email_verified !== 'true' ||
+        !Number.isFinite(expiry) || expiry <= Math.floor(Date.now() / 1000) ||
+        !/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email)) return null;
+    return { email, name: String(claims.name || '').trim() };
+  } catch {
+    return null;
+  }
 }
 
 // Real-Time Account & Username Checker (Verifies Telegram @handle, Google email, or Owner ID)
@@ -681,14 +722,54 @@ app.post('/api/auth/login', (req: Request, res: Response) => {
     return;
   }
 
+  if (user.account_status !== 'active') {
+    res.status(403).json({ error: 'This account is not active. Contact Telebiz support.' });
+    return;
+  }
+
   if (!isUserPasswordValid(user, cleanPass)) {
     res.status(401).json({
-      error: `Incorrect password or secondary passcode for ${user.name} (${user.email}). Please enter the right password or use "Forgot password?" (default recovery passcode: 2026).`,
-      fieldErrors: {
-        password: 'Incorrect password or passcode for this account.',
-      },
+      error: 'Incorrect password or recovery passcode.',
+      fieldErrors: { password: 'Incorrect password or passcode for this account.' },
     });
     return;
+  }
+
+  if (user.password_hash && !String(user.password_hash).startsWith('scrypt
+
+  if (!user.owner_uid) {
+    const newUid = generateOwnerUid(user.name);
+    db.prepare('UPDATE users SET owner_uid = ? WHERE id = ?').run(newUid, user.id);
+    user.owner_uid = newUid;
+  }
+
+  ensureUserHasOwnStore(user);
+  const refreshedUser = db.prepare('SELECT * FROM users WHERE id = ?').get(user.id) as any;
+
+  const token = 'sess_' + crypto.randomBytes(16).toString('hex');
+  db.prepare(`
+    INSERT INTO sessions (token, user_id, expires_at, ip_address, user_agent, revoked, created_at)
+    VALUES (?, ?, ?, ?, ?, 0, ?)
+  `).run(token, user.id, new Date(Date.now() + 30 * 86400000).toISOString(), req.ip || '', req.headers['user-agent'] || '', new Date().toISOString());
+
+  res.json({
+    token,
+    user: {
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      owner_uid: user.owner_uid,
+      telegram_username: user.telegram_username || '',
+      platform_role: user.platform_role,
+      preferred_language: user.preferred_language,
+      last_selected_business_id: refreshedUser?.last_selected_business_id || '',
+    },
+  });
+});
+
+) &&
+      verifyPassword(cleanPass, String(user.password_hash))) {
+    db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(hashPassword(cleanPass), user.id);
   }
 
   if (!user.owner_uid) {
@@ -728,584 +809,241 @@ app.post('/api/auth/login', (req: Request, res: Response) => {
 
 app.post('/api/auth/register', (req: Request, res: Response) => {
   const { name, email, password, recovery_passcode, recovery_hint, telegram_username, language } = req.body;
-  const fieldErrors: Record<string, string> = {};
-
   const cleanEmail = String(email || '').trim().toLowerCase();
-  const cleanName = String(name || '').trim() || (cleanEmail ? cleanEmail.split('@')[0] : '');
-  const cleanPass = String(password || '').trim();
-  const rawTgInput = String(telegram_username || '').trim();
-  const rawPasscodeInput = String(recovery_passcode || '').trim();
+  const cleanName = String(name || '').trim();
+  const cleanPassword = String(password || '');
+  const cleanRecovery = String(recovery_passcode || '');
+  const rawTg = String(telegram_username || '').trim().replace(/^@+/, '');
+  const normalizedTg = rawTg ? '@' + rawTg : '';
+  const errors: Record<string, string> = {};
 
-  if (!cleanName || cleanName.length < 2) {
-    fieldErrors.name = 'Store Owner Full Name is required (at least 2 characters).';
-  }
-  if (!cleanEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
-    fieldErrors.email = 'A valid Email Address is required (e.g. owner@yourbrand.com).';
-  }
-  if (!cleanPass || cleanPass.length < 4) {
-    fieldErrors.password = 'Primary Password must be at least 4 characters.';
-  }
+  if (cleanName.length < 2 || cleanName.length > 100) errors.name = 'Enter your full name (2–100 characters).';
+  if (!/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(cleanEmail)) errors.email = 'Enter a valid email address.';
+  if (cleanPassword.length < 8 || cleanPassword.length > 200) errors.password = 'Password must be at least 8 characters.';
+  if (cleanRecovery.length < 8 || cleanRecovery.length > 200) errors.recovery_passcode = 'Choose a separate recovery passcode of at least 8 characters.';
+  if (normalizedTg && !/^[a-zA-Z0-9_]{3,32}$/.test(rawTg)) errors.telegram_username = 'Enter a valid Telegram username.';
 
-  let cleanTg = '';
-  if (rawTgInput) {
-    const tgNoAt = rawTgInput.replace(/^@+/, '').replace(/\s+/g, '');
-    if (tgNoAt.length >= 3) {
-      cleanTg = `@${tgNoAt}`;
-    }
+  if (Object.keys(errors).length) {
+    res.status(400).json({ error: Object.values(errors).join(' '), fieldErrors: errors });
+    return;
   }
 
-  if (Object.keys(fieldErrors).length > 0) {
-    const issuesList = Object.values(fieldErrors);
-    res.status(400).json({
-      error: issuesList.join(' '),
-      fieldErrors,
+  const duplicate = db.prepare(
+    "SELECT id FROM users WHERE LOWER(email) = ? OR (? != '' AND LOWER(telegram_username) = LOWER(?)) LIMIT 1"
+  ).get(cleanEmail, normalizedTg, normalizedTg);
+  if (duplicate) {
+    res.status(409).json({
+      error: 'An account already uses this email or Telegram username. Sign in or use account recovery instead.',
+      fieldErrors: { email: 'Account already exists. Your existing credentials were not changed.' },
+      requiresLogin: true,
     });
     return;
   }
 
-  const effectivePasscode = rawPasscodeInput.length >= 4 ? rawPasscodeInput : '2026';
   const now = new Date().toISOString();
-  const isSuperAdminEmail = cleanEmail === 'folkkayo928@gmail.com';
+  const userId = 'usr_' + crypto.randomBytes(10).toString('hex');
+  const ownerUid = generateOwnerUid(cleanName);
+  const preferredLanguage = ['en', 'am', 'om'].includes(language) ? language : 'en';
+  const token = 'sess_' + crypto.randomBytes(32).toString('hex');
 
-  // If the account already exists by email or Telegram handle, update credentials and sign them in seamlessly
-  // so their existing stores and account are preserved and remembered!
-  let existingUser = db.prepare('SELECT * FROM users WHERE LOWER(email) = ?').get(cleanEmail) as any;
-  if (!existingUser && cleanTg) {
-    existingUser = findUserByTelegramHandle(cleanTg);
-  }
-
-  if (existingUser) {
-    const updatedName = cleanName || existingUser.name;
-    const updatedTg = cleanTg || existingUser.telegram_username || '';
-    const updatedUid = existingUser.owner_uid || generateOwnerUid(updatedName);
-    const updatedRole = isSuperAdminEmail ? 'super_admin' : existingUser.platform_role || 'user';
-
+  const createAccount = db.transaction(() => {
     db.prepare(`
-      UPDATE users
-      SET name = ?,
-          password_hash = ?,
-          recovery_passcode_hash = ?,
-          telegram_username = ?,
-          owner_uid = ?,
-          platform_role = ?
-      WHERE id = ?
+      INSERT INTO users (
+        id, email, name, password_hash, platform_role, telegram_username,
+        preferred_language, owner_uid, recovery_passcode_hash, recovery_hint, auth_provider, account_status, created_at
+      ) VALUES (?, ?, ?, ?, 'user', ?, ?, ?, ?, ?, 'email', 'active', ?)
     `).run(
-      updatedName,
-      hashPassword(cleanPass),
-      hashPassword(effectivePasscode),
-      updatedTg,
-      updatedUid,
-      updatedRole,
-      existingUser.id
+      userId, cleanEmail, cleanName, hashPassword(cleanPassword), normalizedTg,
+      preferredLanguage, ownerUid, hashPassword(cleanRecovery),
+      String(recovery_hint || 'Personal recovery passcode').trim().slice(0, 120), now
     );
-
-    const updatedUser = db.prepare('SELECT * FROM users WHERE id = ?').get(existingUser.id) as any;
-    ensureUserHasOwnStore(updatedUser);
-    const refreshed = db.prepare('SELECT * FROM users WHERE id = ?').get(existingUser.id) as any;
-
-    const token = 'sess_' + crypto.randomBytes(16).toString('hex');
+    ensureUserHasOwnStore({
+      id: userId, name: cleanName, email: cleanEmail, telegram_username: normalizedTg,
+      owner_uid: ownerUid, platform_role: 'user',
+    });
     db.prepare(`
       INSERT INTO sessions (token, user_id, expires_at, ip_address, user_agent, revoked, created_at)
       VALUES (?, ?, ?, ?, ?, 0, ?)
-    `).run(token, updatedUser.id, new Date(Date.now() + 30 * 86400000).toISOString(), req.ip || '', req.headers['user-agent'] || '', now);
+    `).run(token, userId, new Date(Date.now() + 30 * 86400000).toISOString(), req.ip || '', req.headers['user-agent'] || '', now);
+  });
 
-    res.json({
-      token,
-      isNewAccount: false,
-      user: {
-        id: updatedUser.id,
-        email: updatedUser.email,
-        name: updatedUser.name,
-        owner_uid: updatedUser.owner_uid,
-        telegram_username: updatedUser.telegram_username || '',
-        platform_role: updatedUser.platform_role,
-        preferred_language: updatedUser.preferred_language || language || 'en',
-        last_selected_business_id: refreshed?.last_selected_business_id || '',
-      },
-    });
+  try {
+    createAccount();
+  } catch (error) {
+    console.error('Account registration failed:', error);
+    res.status(500).json({ error: 'Account could not be created. Please try again.' });
     return;
   }
 
-  const userId = 'usr_' + crypto.randomBytes(5).toString('hex');
-  const ownerUid = generateOwnerUid(cleanName);
-  const role = isSuperAdminEmail ? 'super_admin' : 'user';
-
-  db.prepare(`
-    INSERT INTO users (
-      id, email, name, password_hash, platform_role, telegram_username,
-      preferred_language, owner_uid, recovery_passcode_hash, recovery_hint, auth_provider, created_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'email', ?)
-  `).run(
-    userId,
-    cleanEmail,
-    cleanName,
-    hashPassword(cleanPass),
-    role,
-    cleanTg,
-    language || 'en',
-    ownerUid,
-    hashPassword(effectivePasscode),
-    String(recovery_hint || 'Store Owner Recovery Passcode').trim(),
-    now
-  );
-
-  ensureUserHasOwnStore({
-    id: userId,
-    name: cleanName,
-    email: cleanEmail,
-    telegram_username: cleanTg,
-    owner_uid: ownerUid,
-    platform_role: role,
-  });
-
-  const refreshedUser = db.prepare('SELECT * FROM users WHERE id = ?').get(userId) as any;
-
-  const token = 'sess_' + crypto.randomBytes(16).toString('hex');
-  db.prepare(`
-    INSERT INTO sessions (token, user_id, expires_at, ip_address, user_agent, revoked, created_at)
-    VALUES (?, ?, ?, ?, ?, 0, ?)
-  `).run(token, userId, new Date(Date.now() + 30 * 86400000).toISOString(), req.ip || '', req.headers['user-agent'] || '', now);
-
-  res.json({
+  const refreshed = db.prepare('SELECT last_selected_business_id FROM users WHERE id = ?').get(userId) as any;
+  res.status(201).json({
     token,
     isNewAccount: true,
     user: {
-      id: userId,
-      email: cleanEmail,
-      name: cleanName,
-      owner_uid: ownerUid,
-      telegram_username: cleanTg,
-      platform_role: role,
-      preferred_language: language || 'en',
-      last_selected_business_id: refreshedUser?.last_selected_business_id || '',
+      id: userId, email: cleanEmail, name: cleanName, owner_uid: ownerUid,
+      telegram_username: normalizedTg, platform_role: 'user',
+      preferred_language: preferredLanguage,
+      last_selected_business_id: refreshed?.last_selected_business_id || '',
     },
   });
 });
 
-// Unified Google Authentication Handler (Seamless Direct Connect, Log In, and Sign Up)
-app.post('/api/auth/google', (req: Request, res: Response) => {
-  const {
-    credential,
-    email,
-    name,
-    telegram_username,
-    recovery_passcode,
-  } = req.body;
-
-  let userEmail = email ? String(email).trim().toLowerCase() : '';
-  let userName = name ? String(name).trim() : '';
-
-  if (credential && typeof credential === 'string') {
-    try {
-      const parts = credential.split('.');
-      if (parts.length === 3) {
-        const payload = JSON.parse(Buffer.from(parts[1], 'base64').toString('utf8'));
-        if (payload.email) userEmail = String(payload.email).trim().toLowerCase();
-        if (payload.name) userName = String(payload.name).trim();
-      }
-    } catch (e) {
-      console.warn('Failed to parse Google credential token:', e);
-    }
-  }
-
-  if (!userEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(userEmail)) {
-    res.status(400).json({
-      error: 'Please enter a valid Google email address (e.g. yourname@gmail.com).',
-      fieldErrors: { email: 'Please enter a valid Google email address (e.g. yourname@gmail.com).' },
-    });
+app.post('/api/auth/google', async (req: Request, res: Response) => {
+  const credential = typeof req.body?.credential === 'string' ? req.body.credential : '';
+  const claims = await verifyGoogleIdToken(credential);
+  if (!claims) {
+    res.status(401).json({ error: 'Google did not verify this sign-in. Use the official Google account chooser.' });
     return;
   }
-
   const now = new Date().toISOString();
-  const rawTg = String(telegram_username || '').trim().replace(/^@+/, '');
-  const normalizedTg = rawTg.length >= 3 ? `@${rawTg}` : '';
-  const rawPasscode = String(recovery_passcode || '').trim();
-  const effectivePasscode = rawPasscode.length >= 4 ? rawPasscode : '2026';
-
-  let user = db.prepare('SELECT * FROM users WHERE LOWER(email) = ?').get(userEmail) as any;
-
-  if (user) {
-    if (userName && (!user.name || user.name === userEmail.split('@')[0])) {
-      db.prepare('UPDATE users SET name = ? WHERE id = ?').run(userName, user.id);
-      user.name = userName;
-    }
-    if (normalizedTg && !user.telegram_username) {
-      const existingTgUser = findUserByTelegramHandle(normalizedTg);
-      if (!existingTgUser || existingTgUser.id === user.id) {
-        db.prepare('UPDATE users SET telegram_username = ? WHERE id = ?').run(normalizedTg, user.id);
-        user.telegram_username = normalizedTg;
-      }
-    }
-    if (userEmail === 'folkkayo928@gmail.com' && user.platform_role !== 'super_admin') {
-      db.prepare("UPDATE users SET platform_role = 'super_admin' WHERE id = ?").run(user.id);
-      user.platform_role = 'super_admin';
-    }
-    if (!user.owner_uid) {
-      const newUid = generateOwnerUid(user.name);
-      db.prepare('UPDATE users SET owner_uid = ? WHERE id = ?').run(newUid, user.id);
-      user.owner_uid = newUid;
-    }
-  } else {
-    const userId = 'usr_g_' + crypto.randomBytes(5).toString('hex');
-    const finalName = userName || userEmail.split('@')[0] || 'Store Owner';
-    const ownerUid = generateOwnerUid(finalName);
-    const isSuperAdminEmail = userEmail === 'folkkayo928@gmail.com';
-    const role = isSuperAdminEmail ? 'super_admin' : 'user';
-
+  let user = db.prepare('SELECT * FROM users WHERE LOWER(email) = ?').get(claims.email) as any;
+  if (user && user.account_status !== 'active') {
+    res.status(403).json({ error: 'This account is not active. Contact Telebiz support.' });
+    return;
+  }
+  if (!user) {
+    const userId = 'usr_g_' + crypto.randomBytes(10).toString('hex');
+    const displayName = claims.name || claims.email.split('@')[0];
+    const ownerUid = generateOwnerUid(displayName);
     db.prepare(`
       INSERT INTO users (
-        id, email, name, password_hash, platform_role, telegram_username,
-        preferred_language, owner_uid, recovery_passcode_hash, recovery_hint, auth_provider, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, 'en', ?, ?, 'Google Account Link', 'google', ?)
-    `).run(
-      userId,
-      userEmail,
-      finalName,
-      hashPassword(effectivePasscode),
-      role,
-      normalizedTg,
-      ownerUid,
-      hashPassword(effectivePasscode),
-      now
-    );
-
-    user = db.prepare('SELECT * FROM users WHERE id = ?').get(userId);
+        id, email, name, password_hash, platform_role, preferred_language,
+        owner_uid, recovery_passcode_hash, recovery_hint, auth_provider, account_status, created_at
+      ) VALUES (?, ?, ?, ?, 'user', 'en', ?, '', 'Set a recovery passcode in account security', 'google', 'active', ?)
+    `).run(userId, claims.email, displayName, hashPassword(crypto.randomBytes(32).toString('hex')), ownerUid, now);
+    user = db.prepare('SELECT * FROM users WHERE id = ?').get(userId) as any;
+  } else if (claims.name && (!user.name || user.name === claims.email.split('@')[0])) {
+    db.prepare('UPDATE users SET name = ? WHERE id = ?').run(claims.name, user.id);
+    user.name = claims.name;
   }
-
   ensureUserHasOwnStore(user);
-  const refreshedUser = db.prepare('SELECT * FROM users WHERE id = ?').get(user.id) as any;
-
-  const token = 'sess_' + crypto.randomBytes(16).toString('hex');
+  const refreshed = db.prepare('SELECT * FROM users WHERE id = ?').get(user.id) as any;
+  const token = 'sess_' + crypto.randomBytes(32).toString('hex');
   db.prepare(`
     INSERT INTO sessions (token, user_id, expires_at, ip_address, user_agent, revoked, created_at)
     VALUES (?, ?, ?, ?, ?, 0, ?)
   `).run(token, user.id, new Date(Date.now() + 30 * 86400000).toISOString(), req.ip || '', req.headers['user-agent'] || '', now);
-
   res.json({
     token,
     user: {
-      id: user.id,
-      email: user.email,
-      name: user.name,
-      owner_uid: user.owner_uid,
-      telegram_username: user.telegram_username || '',
-      platform_role: user.platform_role,
+      id: user.id, email: user.email, name: user.name, owner_uid: user.owner_uid,
+      telegram_username: user.telegram_username || '', platform_role: user.platform_role,
       preferred_language: user.preferred_language || 'en',
-      last_selected_business_id: refreshedUser?.last_selected_business_id || '',
+      last_selected_business_id: refreshed?.last_selected_business_id || '',
     },
   });
 });
 
 // Google OAuth Authorization URL endpoint (prompts user to choose an account)
+const pendingGoogleOAuthStates = new Map<string, number>();
+
 app.get('/api/auth/google/url', (req: Request, res: Response) => {
-  const protocol = req.headers['x-forwarded-proto'] || req.protocol || 'https';
-  const host = req.get('host') || 'localhost:3000';
-  const redirectUri = `${protocol}://${host}/auth/callback/google`;
-
-  const clientId = process.env.GOOGLE_CLIENT_ID || process.env.CLIENT_ID;
-  if (clientId) {
-    const params = new URLSearchParams({
-      client_id: clientId,
-      redirect_uri: redirectUri,
-      response_type: 'code',
-      scope: 'openid email profile',
-      prompt: 'select_account',
-      access_type: 'online',
-    });
-    res.json({
-      configured: true,
-      url: `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`,
-    });
-  } else {
-    res.json({
-      configured: false,
-      url: redirectUri,
-    });
-  }
-});
-
-// Google OAuth Popup Callback Handler
-app.get(['/auth/callback/google', '/auth/callback/google/'], async (req: Request, res: Response) => {
-  const code = req.query.code;
-  let userEmail = '';
-  let userName = '';
-
   const clientId = process.env.GOOGLE_CLIENT_ID || process.env.CLIENT_ID;
   const clientSecret = process.env.GOOGLE_CLIENT_SECRET || process.env.CLIENT_SECRET;
-
-  if (code && clientId && clientSecret) {
-    try {
-      const protocol = req.headers['x-forwarded-proto'] || req.protocol || 'https';
-      const host = req.get('host') || 'localhost:3000';
-      const redirectUri = `${protocol}://${host}/auth/callback/google`;
-
-      const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: new URLSearchParams({
-          code: String(code),
-          client_id: clientId,
-          client_secret: clientSecret,
-          redirect_uri: redirectUri,
-          grant_type: 'authorization_code',
-        }),
-      });
-      const tokenData = await tokenRes.json();
-      if (tokenData.id_token) {
-        const parts = tokenData.id_token.split('.');
-        if (parts.length === 3) {
-          const payload = JSON.parse(Buffer.from(parts[1], 'base64').toString('utf8'));
-          if (payload.email) userEmail = String(payload.email).trim().toLowerCase();
-          if (payload.name) userName = String(payload.name).trim();
-        }
-      }
-      if (!userEmail && tokenData.access_token) {
-        const userInfoRes = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
-          headers: { Authorization: `Bearer ${tokenData.access_token}` },
-        });
-        const userInfo = await userInfoRes.json();
-        if (userInfo.email) userEmail = String(userInfo.email).trim().toLowerCase();
-        if (userInfo.name) userName = String(userInfo.name).trim();
-      }
-    } catch (err) {
-      console.warn('Google OAuth token exchange warning:', err);
-    }
+  if (!clientId || !clientSecret) {
+    res.status(503).json({ configured: false, error: 'Google OAuth is not configured on the server.' });
+    return;
   }
+  const protocol = req.headers['x-forwarded-proto'] || req.protocol || 'https';
+  const host = req.get('host') || 'localhost:3000';
+  const appUrl = String(process.env.APP_URL || (protocol + '://' + host)).replace(/\\/+$/, '');
+  const redirectUri = appUrl + '/auth/callback/google';
+  const state = crypto.randomBytes(32).toString('hex');
+  const now = Date.now();
+  for (const [key, expiry] of pendingGoogleOAuthStates.entries()) {
+    if (expiry <= now) pendingGoogleOAuthStates.delete(key);
+  }
+  pendingGoogleOAuthStates.set(state, now + 10 * 60 * 1000);
+  const params = new URLSearchParams({
+    client_id: clientId, redirect_uri: redirectUri, response_type: 'code',
+    scope: 'openid email profile', prompt: 'select_account', access_type: 'online', state,
+  });
+  res.json({ configured: true, url: 'https://accounts.google.com/o/oauth2/v2/auth?' + params.toString() });
+});
 
-  const now = new Date().toISOString();
-
-  if (userEmail) {
-    let user = db.prepare('SELECT * FROM users WHERE LOWER(email) = ?').get(userEmail) as any;
-    const isSuperAdminEmail = userEmail === 'folkkayo928@gmail.com';
-    const role = isSuperAdminEmail ? 'super_admin' : 'user';
-
+app.get(['/auth/callback/google', '/auth/callback/google/'], async (req: Request, res: Response) => {
+  const state = String(req.query.state || '');
+  const expiry = pendingGoogleOAuthStates.get(state);
+  if (!state || !expiry || expiry <= Date.now()) {
+    res.status(401).send('Google sign-in expired or could not be verified. Start again.');
+    return;
+  }
+  pendingGoogleOAuthStates.delete(state);
+  const code = String(req.query.code || '');
+  const clientId = process.env.GOOGLE_CLIENT_ID || process.env.CLIENT_ID;
+  const clientSecret = process.env.GOOGLE_CLIENT_SECRET || process.env.CLIENT_SECRET;
+  if (!code || !clientId || !clientSecret) {
+    res.status(503).send('Google OAuth is not configured on the server.');
+    return;
+  }
+  try {
+    const protocol = req.headers['x-forwarded-proto'] || req.protocol || 'https';
+    const host = req.get('host') || 'localhost:3000';
+    const appUrl = String(process.env.APP_URL || (protocol + '://' + host)).replace(/\\/+$/, '');
+    const redirectUri = appUrl + '/auth/callback/google';
+    const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ code, client_id: clientId, client_secret: clientSecret, redirect_uri: redirectUri, grant_type: 'authorization_code' }),
+    });
+    if (!tokenResponse.ok) throw new Error('Google token exchange failed.');
+    const tokenData = await tokenResponse.json();
+    const claims = await verifyGoogleIdToken(String(tokenData.id_token || ''));
+    if (!claims) throw new Error('Google identity token verification failed.');
+    const now = new Date().toISOString();
+    let user = db.prepare('SELECT * FROM users WHERE LOWER(email) = ?').get(claims.email) as any;
+    if (user && user.account_status !== 'active') {
+      res.status(403).send('This account is not active. Contact Telebiz support.');
+      return;
+    }
     if (!user) {
-      const userId = 'usr_g_' + crypto.randomBytes(5).toString('hex');
-      const finalName = userName || userEmail.split('@')[0] || 'Store Owner';
-      const ownerUid = generateOwnerUid(finalName);
-
+      const userId = 'usr_g_' + crypto.randomBytes(10).toString('hex');
+      const displayName = claims.name || claims.email.split('@')[0];
+      const ownerUid = generateOwnerUid(displayName);
       db.prepare(`
         INSERT INTO users (
-          id, email, name, password_hash, platform_role, telegram_username,
-          preferred_language, owner_uid, recovery_passcode_hash, recovery_hint, auth_provider, created_at
-        ) VALUES (?, ?, ?, ?, ?, '', 'en', ?, ?, 'Google Account Link', 'google', ?)
-      `).run(
-        userId,
-        userEmail,
-        finalName,
-        hashPassword(crypto.randomBytes(16).toString('hex')),
-        role,
-        ownerUid,
-        hashPassword('2026'),
-        now
-      );
+          id, email, name, password_hash, platform_role, preferred_language,
+          owner_uid, recovery_passcode_hash, recovery_hint, auth_provider, account_status, created_at
+        ) VALUES (?, ?, ?, ?, 'user', 'en', ?, '', 'Set a recovery passcode in account security', 'google', 'active', ?)
+      `).run(userId, claims.email, displayName, hashPassword(crypto.randomBytes(32).toString('hex')), ownerUid, now);
       user = db.prepare('SELECT * FROM users WHERE id = ?').get(userId);
-    } else {
-      if (isSuperAdminEmail && user.platform_role !== 'super_admin') {
-        db.prepare("UPDATE users SET platform_role = 'super_admin' WHERE id = ?").run(user.id);
-        user.platform_role = 'super_admin';
-      }
-      if (!user.owner_uid) {
-        const newUid = generateOwnerUid(user.name);
-        db.prepare('UPDATE users SET owner_uid = ? WHERE id = ?').run(newUid, user.id);
-        user.owner_uid = newUid;
-      }
+    } else if (claims.name && (!user.name || user.name === claims.email.split('@')[0])) {
+      db.prepare('UPDATE users SET name = ? WHERE id = ?').run(claims.name, user.id);
+      user.name = claims.name;
     }
-
     ensureUserHasOwnStore(user);
-
-    const token = 'sess_' + crypto.randomBytes(16).toString('hex');
+    const refreshed = db.prepare('SELECT * FROM users WHERE id = ?').get(user.id) as any;
+    const token = 'sess_' + crypto.randomBytes(32).toString('hex');
     db.prepare(`
       INSERT INTO sessions (token, user_id, expires_at, ip_address, user_agent, revoked, created_at)
       VALUES (?, ?, ?, ?, ?, 0, ?)
-    `).run(token, user.id, new Date(Date.now() + 7 * 86400000).toISOString(), req.ip || '', req.headers['user-agent'] || '', now);
-
+    `).run(token, user.id, new Date(Date.now() + 30 * 86400000).toISOString(), req.ip || '', req.headers['user-agent'] || '', now);
     res.send(`
-      <!DOCTYPE html>
-      <html>
-        <head><title>Google Sign In Complete</title></head>
-        <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; background: #f8fafc;">
-          <div style="background: white; border-radius: 20px; padding: 32px; box-shadow: 0 10px 25px rgba(0,0,0,0.06); text-align: center;">
-            <p style="font-weight: 700; color: #0f172a; margin: 0 0 8px 0; font-size: 16px;">Authentication Successful</p>
-            <p style="color: #64748b; font-size: 13px; margin: 0;">Logging in to your store workspace...</p>
-          </div>
-          <script>
-            if (window.opener) {
-              window.opener.postMessage({
-                type: 'GOOGLE_AUTH_SUCCESS',
-                token: ${JSON.stringify(token)},
-                user: ${JSON.stringify({
-                  id: user.id,
-                  email: user.email,
-                  name: user.name,
-                  owner_uid: user.owner_uid,
-                  telegram_username: user.telegram_username || '',
-                  platform_role: user.platform_role,
-                  preferred_language: user.preferred_language || 'en',
-                })}
-              }, '*');
-              window.close();
-            } else {
-              window.location.href = '/';
-            }
-          </script>
-        </body>
-      </html>
-    `);
-    return;
-  }
-
-  // Fallback: render interactive Google Account Chooser & Log In / Sign Up bridge in popup
-  res.send(`
-    <!DOCTYPE html>
-    <html>
-      <head>
-        <meta charset="utf-8"/>
-        <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-        <title>Continue with Google — TeleBiz OS</title>
-        <script src="https://accounts.google.com/gsi/client" async defer></script>
-        <style>
-          body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            min-height: 100vh;
-            margin: 0;
-            background: #f8fafc;
-            color: #0f172a;
-          }
-          .box {
-            background: white;
-            border-radius: 24px;
-            padding: 28px 24px;
-            box-shadow: 0 12px 30px rgba(0,0,0,0.08);
-            max-width: 400px;
-            width: 92%;
-            border: 1px solid #e2e8f0;
-          }
-          h2 { margin: 10px 0 4px 0; font-size: 18px; font-weight: 800; text-align: center; }
-          p.sub { margin: 0 0 16px 0; font-size: 12px; color: #64748b; text-align: center; }
-          .tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; background: #f1f5f9; padding: 4px; border-radius: 12px; margin-bottom: 14px; }
-          .tab { border: none; background: transparent; padding: 8px; border-radius: 9px; font-size: 12px; font-weight: 700; cursor: pointer; color: #475569; }
-          .tab.active { background: #0f172a; color: white; }
-          .field { margin-bottom: 10px; }
-          .field label { display: block; font-size: 11px; font-weight: 700; margin-bottom: 4px; color: #334155; }
-          .field input { width: 100%; box-sizing: border-box; padding: 9px 12px; border-radius: 10px; border: 1px solid #cbd5e1; font-size: 12px; }
-          .btn { width: 100%; padding: 11px; border-radius: 12px; border: none; background: #4f46e5; color: white; font-weight: 800; font-size: 12px; cursor: pointer; margin-top: 6px; }
-          .err { background: #fff1f2; border: 1px solid #fecdd3; color: #be123c; padding: 8px 10px; border-radius: 10px; font-size: 11px; font-weight: 600; margin-bottom: 10px; display: none; }
-          .btn-slot { display: flex; justify-content: center; margin-bottom: 12px; }
-        </style>
-      </head>
-      <body>
-        <div class="box">
-          <div style="text-align:center;">
-            <svg width="36" height="36" viewBox="0 0 24 24">
-              <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
-              <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
-              <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"/>
-              <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"/>
-            </svg>
-          </div>
-          <h2>Continue with Google</h2>
-          <p class="sub">Log in to an existing Google account or sign up a new Store Owner account</p>
-          <div id="googleBtn" class="btn-slot"></div>
-          <div class="tabs">
-            <button type="button" id="tabLogin" class="tab active" onclick="setMode('login')">Log In</button>
-            <button type="button" id="tabSignup" class="tab" onclick="setMode('signup')">Sign Up (New)</button>
-          </div>
-          <div id="errBox" class="err"></div>
-          <div class="field">
-            <label>Google Email Address *</label>
-            <input type="email" id="gEmail" placeholder="yourname@gmail.com" />
-          </div>
-          <div class="field" id="nameWrap" style="display:none;">
-            <label>Store Owner Name * (Required for new account)</label>
-            <input type="text" id="gName" placeholder="Your Full Name or Store Brand" />
-          </div>
-          <div class="field">
-            <label id="passLabel">Secondary Passcode (Optional on Google login)</label>
-            <input type="password" id="gPass" placeholder="4+ digit passcode" />
-          </div>
-          <button type="button" class="btn" onclick="submitGoogleForm()">Continue with Google →</button>
-        </div>
+      <!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+      <title>Telebiz Google sign-in</title></head>
+      <body style="font-family:system-ui;display:grid;place-items:center;min-height:100vh;margin:0;background:#f8fafc;color:#0f172a">
+        <main style="background:white;padding:28px;border-radius:18px;text-align:center;box-shadow:0 12px 30px #0001"><h2>Google sign-in verified</h2><p>You can close this window.</p></main>
         <script>
-          var currentMode = 'login';
-          function setMode(m) {
-            currentMode = m;
-            document.getElementById('tabLogin').className = 'tab' + (m === 'login' ? ' active' : '');
-            document.getElementById('tabSignup').className = 'tab' + (m === 'signup' ? ' active' : '');
-            document.getElementById('nameWrap').style.display = m === 'signup' ? 'block' : 'none';
-            document.getElementById('passLabel').textContent = m === 'signup' ? 'Secondary Passcode (4+ chars, defaults to 2026)' : 'Secondary Passcode (Optional)';
-            document.getElementById('errBox').style.display = 'none';
-          }
-          async function submitGoogleForm() {
-            var errBox = document.getElementById('errBox');
-            errBox.style.display = 'none';
-            var email = document.getElementById('gEmail').value.trim();
-            var name = document.getElementById('gName').value.trim();
-            var passcode = document.getElementById('gPass').value.trim();
-            try {
-              var res = await fetch('/api/auth/google', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ email: email, name: name, recovery_passcode: passcode, intent: currentMode })
-              });
-              var data = await res.json();
-              if (!res.ok) {
-                errBox.textContent = data.error || 'Authentication failed';
-                errBox.style.display = 'block';
-                if (data.requiresRegistration) setMode('signup');
-                return;
-              }
-              if (window.opener) {
-                window.opener.postMessage({ type: 'GOOGLE_AUTH_SUCCESS', token: data.token, user: data.user }, '*');
-                window.close();
-              } else {
-                window.location.href = '/';
-              }
-            } catch (e) {
-              errBox.textContent = e.message || 'Network error';
-              errBox.style.display = 'block';
-            }
-          }
-          window.handleCredentialResponse = async function(response) {
-            try {
-              var res = await fetch('/api/auth/google', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ credential: response.credential, direct_connect: true })
-              });
-              var data = await res.json();
-              if (res.ok && data.token) {
-                if (window.opener) {
-                  window.opener.postMessage({ type: 'GOOGLE_AUTH_SUCCESS', token: data.token, user: data.user }, '*');
-                  window.close();
-                } else {
-                  window.location.href = '/';
-                }
-              }
-            } catch (e) {
-              console.error(e);
-            }
-          };
-          window.onload = function() {
-            if (window.google && window.google.accounts) {
-              google.accounts.id.initialize({
-                client_id: ${JSON.stringify(process.env.GOOGLE_CLIENT_ID || '1088497941073-preview.apps.googleusercontent.com')},
-                callback: window.handleCredentialResponse,
-                auto_select: false
-              });
-              google.accounts.id.renderButton(
-                document.getElementById('googleBtn'),
-                { theme: 'outline', size: 'large', shape: 'pill', width: 280, text: 'continue_with' }
-              );
-            }
-          };
+          if (window.opener) {
+            window.opener.postMessage({
+              type: 'GOOGLE_AUTH_SUCCESS',
+              token: ${JSON.stringify(token)},
+              user: ${JSON.stringify({
+                id: refreshed.id, email: refreshed.email, name: refreshed.name,
+                owner_uid: refreshed.owner_uid, telegram_username: refreshed.telegram_username || '',
+                platform_role: refreshed.platform_role, preferred_language: refreshed.preferred_language || 'en',
+                last_selected_business_id: refreshed.last_selected_business_id || '',
+              })}
+            }, window.location.origin);
+            window.close();
+          } else { window.location.href = '/'; }
         </script>
-      </body>
-    </html>
-  `);
+      </body></html>
+    `);
+  } catch (error) {
+    console.warn('Google OAuth callback failed:', error);
+    res.status(401).send('Google sign-in could not be verified. Start again.');
+  }
 });
 
 // Better Auth Standard Endpoint Aliases for Express Compatibility
@@ -1552,153 +1290,146 @@ app.get('/api/auth/telegram/check-status', (req: Request, res: Response) => {
     res.status(400).json({ error: 'Auth key required' });
     return;
   }
-  const session = db.prepare('SELECT * FROM telegram_auth_sessions WHERE auth_key = ?').get(authKey) as any;
+  const now = new Date().toISOString();
+  const session = db.prepare(
+    'SELECT * FROM telegram_auth_sessions WHERE auth_key = ? AND expires_at > ?'
+  ).get(authKey, now) as any;
   if (!session) {
-    res.status(404).json({ error: 'Session not found or expired' });
+    res.status(404).json({ error: 'Telegram sign-in session expired.' });
     return;
   }
-
-  if ((session.status === 'completed' || session.status === 'confirmed') && session.session_token) {
-    const user = db.prepare('SELECT id, email, name, owner_uid, telegram_username, platform_role, preferred_language FROM users WHERE id = ?').get(session.user_id) as any;
-    res.json({
-      completed: true,
-      status: 'confirmed',
-      token: session.session_token,
-      user,
-    });
+  if (session.status === 'completed' && session.session_token) {
+    const user = db.prepare(
+      'SELECT id, email, name, owner_uid, telegram_username, platform_role, preferred_language, last_selected_business_id FROM users WHERE id = ? AND account_status = ?'
+    ).get(session.user_id, 'active') as any;
+    if (!user) {
+      res.status(401).json({ error: 'Account is not active.' });
+      return;
+    }
+    db.prepare("UPDATE telegram_auth_sessions SET status = 'consumed', session_token = '' WHERE auth_key = ? AND status = 'completed'").run(authKey);
+    res.json({ completed: true, status: 'confirmed', token: session.session_token, user });
     return;
   }
-
   res.json({ completed: false, status: session.status });
 });
 
 // Unified Store Owner Telegram Authentication (Seamless Sign In & Sign Up)
 function handleStoreOwnerTelegramAuth(req: Request, res: Response) {
-  const {
-    auth_key,
-    telegram_username,
-    telegram_id,
-    name,
-    recovery_passcode,
-    language,
-  } = req.body;
-
-  const rawHandleInput = String(telegram_username || '').trim();
-  const rawHandle = rawHandleInput.replace(/^@+/, '').replace(/\s+/g, '');
+  const { auth_key, telegram_username, name, recovery_passcode, language, telegram_init_data } = req.body;
+  const rawHandle = String(telegram_username || '').trim().replace(/^@+/, '').replace(/\\s+/g, '');
   const rawName = String(name || '').trim();
   const rawPasscode = String(recovery_passcode || '').trim();
+  const verifiedTelegramUser = verifyTelegramWebAppInitData(String(telegram_init_data || ''));
 
-  if (!rawHandle || rawHandle.length < 3) {
-    res.status(400).json({
-      error: 'Please enter a valid Telegram Handle (@username, at least 3 characters).',
-      fieldErrors: {
-        telegram_username: 'Telegram Handle (@username) is required (at least 3 characters).',
-      },
-    });
+  if (!rawHandle || !/^[a-zA-Z0-9_]{3,32}$/.test(rawHandle)) {
+    res.status(400).json({ error: 'Enter a valid Telegram username (3–32 letters, numbers, or underscores).' });
     return;
   }
 
-  const normalizedHandle = `@${rawHandle}`;
-  const effectivePasscode = rawPasscode.length >= 4 ? rawPasscode : '2026';
-  const now = new Date().toISOString();
-
-  let user = findUserByTelegramHandle(normalizedHandle);
-  if (!user && telegram_id) {
-    user = db.prepare('SELECT * FROM users WHERE telegram_id IS NOT NULL AND telegram_id != "" AND telegram_id = ?').get(String(telegram_id)) as any;
+  if (auth_key) {
+    const pending = db.prepare(
+      "SELECT auth_key FROM telegram_auth_sessions WHERE auth_key = ? AND status = 'pending' AND expires_at > ?"
+    ).get(String(auth_key), new Date().toISOString());
+    if (!pending) {
+      res.status(401).json({ error: 'Telegram sign-in session expired. Start again.' });
+      return;
+    }
+  } else if (!verifiedTelegramUser) {
+    res.status(401).json({ error: 'Telegram identity could not be verified. Open Telebiz inside Telegram and try again.' });
+    return;
   }
 
+  if (verifiedTelegramUser) {
+    const verifiedHandle = String(verifiedTelegramUser.username || '').trim().toLowerCase();
+    if (verifiedHandle && verifiedHandle !== rawHandle.toLowerCase()) {
+      res.status(401).json({ error: 'The Telegram username does not match the verified Telegram account.' });
+      return;
+    }
+  }
+
+  const normalizedHandle = '@' + rawHandle;
+  const verifiedTelegramId = verifiedTelegramUser?.id ? String(verifiedTelegramUser.id) : '';
+  let user = verifiedTelegramId ? db.prepare('SELECT * FROM users WHERE telegram_id = ?').get(verifiedTelegramId) as any : null;
+  if (!user) user = findUserByTelegramHandle(normalizedHandle);
   let isNewAccount = false;
 
   if (user) {
-    // Existing Telegram account: verify passcode if provided, or update details seamlessly
-    if (rawPasscode && !verifyUserSecondaryPasscode(user, rawPasscode)) {
-      res.status(401).json({
-        error: `Incorrect Secondary Passcode for ${normalizedHandle}. Please enter your passcode (or 2026).`,
-        fieldErrors: {
-          recovery_passcode: `Incorrect Secondary Passcode for ${normalizedHandle}.`,
-        },
-        accountStatus: 'existing',
-        existingOwnerName: user.name,
-        existingOwnerUid: user.owner_uid,
-      });
+    if (user.account_status !== 'active') {
+      res.status(403).json({ error: 'This account is not active. Contact Telebiz support.' });
       return;
     }
-
-    if (rawName && rawName.length >= 2 && (!user.name || user.name === rawHandle)) {
-      db.prepare('UPDATE users SET name = ? WHERE id = ?').run(rawName, user.id);
-      user.name = rawName;
+    if (verifiedTelegramId && user.telegram_id && String(user.telegram_id) !== verifiedTelegramId) {
+      res.status(409).json({ error: 'This Telegram account is already linked to a different Telebiz identity.' });
+      return;
     }
-    if (!user.telegram_username) {
-      db.prepare('UPDATE users SET telegram_username = ? WHERE id = ?').run(normalizedHandle, user.id);
+    if (!verifiedTelegramUser && (!rawPasscode || !verifyUserSecondaryPasscode(user, rawPasscode))) {
+      res.status(401).json({ error: 'Enter the correct recovery passcode to sign in.' });
+      return;
+    }
+    if (verifiedTelegramId && !user.telegram_id) {
+      db.prepare('UPDATE users SET telegram_id = ?, telegram_username = ? WHERE id = ?').run(verifiedTelegramId, normalizedHandle, user.id);
+      user.telegram_id = verifiedTelegramId;
       user.telegram_username = normalizedHandle;
     }
     if (!user.owner_uid) {
-      const newUid = generateOwnerUid(user.name);
-      db.prepare('UPDATE users SET owner_uid = ? WHERE id = ?').run(newUid, user.id);
-      user.owner_uid = newUid;
+      user.owner_uid = generateOwnerUid(user.name);
+      db.prepare('UPDATE users SET owner_uid = ? WHERE id = ?').run(user.owner_uid, user.id);
     }
   } else {
-    // New Telegram Store Owner account: create immediately
+    if (!verifiedTelegramUser || !verifiedTelegramId) {
+      res.status(401).json({ error: 'New Telegram accounts must be verified from the official Telegram Mini App.' });
+      return;
+    }
+    if (rawPasscode.length < 8) {
+      res.status(400).json({ error: 'Choose a recovery passcode of at least 8 characters before creating your account.' });
+      return;
+    }
     isNewAccount = true;
-    const userId = 'usr_tg_' + crypto.randomBytes(4).toString('hex');
-    const displayName = rawName.length >= 2 ? rawName : rawHandle;
+    const displayName = rawName.length >= 2 ? rawName : String(verifiedTelegramUser.first_name || rawHandle);
+    const telegramIdentity = String(verifiedTelegramUser.username || ('tg_' + verifiedTelegramId)).toLowerCase();
+    const syntheticEmail = 'tg_' + verifiedTelegramId + '@telegram.telebiz.os';
+    const userId = 'usr_tg_' + crypto.randomBytes(10).toString('hex');
     const ownerUid = generateOwnerUid(displayName);
-    const syntheticEmail = `${rawHandle.toLowerCase()}@telegram.telebiz.os`;
-    const tgId = String(telegram_id || crypto.randomInt(100000000, 999999999));
-
     db.prepare(`
       INSERT INTO users (
         id, email, name, password_hash, platform_role, telegram_id, telegram_username,
-        preferred_language, owner_uid, recovery_passcode_hash, recovery_hint, auth_provider, created_at
-      ) VALUES (?, ?, ?, ?, 'user', ?, ?, ?, ?, ?, 'Telegram Account Recovery Passcode', 'telegram', ?)
-    `).run(
-      userId,
-      syntheticEmail,
-      displayName,
-      hashPassword(effectivePasscode),
-      tgId,
-      normalizedHandle,
-      language || 'en',
-      ownerUid,
-      hashPassword(effectivePasscode),
-      now
-    );
-
+        preferred_language, owner_uid, recovery_passcode_hash, recovery_hint, auth_provider, account_status, created_at
+      ) VALUES (?, ?, ?, ?, 'user', ?, ?, ?, ?, ?, 'Telegram recovery passcode', 'telegram', 'active', ?)
+    `).run(userId, syntheticEmail, displayName, hashPassword(crypto.randomBytes(32).toString('hex')),
+      verifiedTelegramId, '@' + telegramIdentity, ['en', 'am', 'om'].includes(language) ? language : 'en',
+      ownerUid, hashPassword(rawPasscode), new Date().toISOString());
     user = db.prepare('SELECT * FROM users WHERE id = ?').get(userId);
   }
 
   ensureUserHasOwnStore(user);
-  const refreshedUser = db.prepare('SELECT * FROM users WHERE id = ?').get(user.id) as any;
-
-  const token = 'sess_' + crypto.randomBytes(16).toString('hex');
+  const refreshed = db.prepare('SELECT * FROM users WHERE id = ?').get(user.id) as any;
+  const now = new Date().toISOString();
+  const token = 'sess_' + crypto.randomBytes(32).toString('hex');
   db.prepare(`
     INSERT INTO sessions (token, user_id, expires_at, ip_address, user_agent, revoked, created_at)
     VALUES (?, ?, ?, ?, ?, 0, ?)
   `).run(token, user.id, new Date(Date.now() + 30 * 86400000).toISOString(), req.ip || '', req.headers['user-agent'] || '', now);
 
   if (auth_key) {
-    db.prepare(`
-      UPDATE telegram_auth_sessions 
-      SET status = 'completed', session_token = ?, user_id = ?, telegram_username = ?
-      WHERE auth_key = ?
-    `).run(token, user.id, normalizedHandle, auth_key);
+    const updated = db.prepare(`
+      UPDATE telegram_auth_sessions SET status = 'completed', session_token = ?, user_id = ?, telegram_username = ?
+      WHERE auth_key = ? AND status = 'pending' AND expires_at > ?
+    `).run(token, user.id, normalizedHandle, String(auth_key), now);
+    if (updated.changes !== 1) {
+      db.prepare('UPDATE sessions SET revoked = 1 WHERE token = ?').run(token);
+      res.status(401).json({ error: 'Telegram sign-in session expired. Start again.' });
+      return;
+    }
   }
 
   res.json({
-    token,
-    isNewAccount,
-    message: isNewAccount
-      ? `Store Owner account created via Telegram (${normalizedHandle}) for ${user.name} · ID: ${user.owner_uid}`
-      : `Signed in via Telegram (${normalizedHandle}) — Welcome back, ${user.name} (${user.owner_uid})!`,
+    token, isNewAccount,
+    message: 'Telegram identity verified. Welcome, ' + user.name + '.',
     user: {
-      id: user.id,
-      email: user.email,
-      name: user.name,
-      owner_uid: user.owner_uid,
-      telegram_username: user.telegram_username || normalizedHandle,
-      platform_role: user.platform_role,
+      id: user.id, email: user.email, name: user.name, owner_uid: user.owner_uid,
+      telegram_username: user.telegram_username || normalizedHandle, platform_role: user.platform_role,
       preferred_language: user.preferred_language || 'en',
-      last_selected_business_id: refreshedUser?.last_selected_business_id || '',
+      last_selected_business_id: refreshed?.last_selected_business_id || '',
     },
   });
 }
@@ -1981,8 +1712,8 @@ app.post('/api/auth/passcode', (req: Request, res: Response) => {
 
 // List & add Platform Co-Admins (Super Admin management)
 app.get('/api/superadmin/admins', (req: Request, res: Response) => {
-  if (!req.user) {
-    res.status(401).json({ error: 'Authentication required' });
+  if (!req.user || req.user.platform_role !== 'super_admin') {
+    res.status(403).json({ error: 'Platform Super Admin authorization required.' });
     return;
   }
   const admins = db.prepare("SELECT id, email, name, platform_role, telegram_username, created_at FROM users WHERE platform_role = 'super_admin' ORDER BY created_at ASC").all();
