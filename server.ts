@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import express, { Request, Response, NextFunction } from 'express';
 import { createServer as createViteServer } from 'vite';
 import dotenv from 'dotenv';
@@ -417,6 +418,33 @@ function isUserPasswordValid(user: any, enteredPassword: string): boolean {
     verifyPassword(cleanSecret, user.recovery_passcode_hash || '');
 }
 
+const authAttemptWindows = new Map<string, { count: number; resetAt: number }>();
+function authRateLimit(req: Request, res: Response, next: NextFunction) {
+  const now = Date.now();
+  const key = String(req.ip || req.socket.remoteAddress || 'unknown') + ':' + req.path;
+  const current = authAttemptWindows.get(key);
+  if (!current || current.resetAt <= now) {
+    authAttemptWindows.set(key, { count: 1, resetAt: now + 15 * 60 * 1000 });
+    next();
+    return;
+  }
+  if (current.count >= 12) {
+    res.setHeader('Retry-After', String(Math.max(1, Math.ceil((current.resetAt - now) / 1000))));
+    res.status(429).json({ error: 'Too many authentication attempts. Please wait before trying again.' });
+    return;
+  }
+  current.count += 1;
+  next();
+}
+
+// Bound memory usage for IP-based auth throttling.
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, bucket] of authAttemptWindows.entries()) {
+    if (bucket.resetAt <= now) authAttemptWindows.delete(key);
+  }
+}, 60 * 1000).unref();
+
 function verifyTelegramWebAppInitData(initData: string): any | null {
   const botToken = process.env.TELEGRAM_BOT_TOKEN;
   if (!botToken || !initData || typeof initData !== 'string') return null;
@@ -566,7 +594,7 @@ app.get('/api/auth/check-account', (req: Request, res: Response) => {
   });
 });
 
-app.post('/api/auth/login', (req: Request, res: Response) => {
+app.post('/api/auth/login', authRateLimit, (req: Request, res: Response) => {
   const email = req.body.email || req.body.identifier || req.body.username;
   const password = req.body.password;
   const fieldErrors: Record<string, string> = {};
@@ -651,7 +679,7 @@ app.post('/api/auth/login', (req: Request, res: Response) => {
   });
 });
 
-app.post('/api/auth/register', (req: Request, res: Response) => {
+app.post('/api/auth/register', authRateLimit, (req: Request, res: Response) => {
   const { name, email, password, recovery_passcode, recovery_hint, telegram_username, language } = req.body;
   const fieldErrors: Record<string, string> = {};
 
@@ -985,7 +1013,7 @@ app.get('/api/auth/session', (req, res, next) => (app._router.handle as any)({ .
 // Telegram Redirect & Direct Connect Auth Initiation
 app.post('/api/auth/telegram/redirect', (req: Request, res: Response) => {
   const { role = 'store_owner', business_id } = req.body;
-  const authKey = 'tgauth_' + crypto.randomBytes(8).toString('hex');
+  const authKey = 'tgauth_' + crypto.randomBytes(32).toString('hex');
   const now = new Date().toISOString();
   const expiresAt = new Date(Date.now() + 15 * 60000).toISOString();
 
@@ -1416,12 +1444,14 @@ app.post('/api/auth/telegram/confirm', (req: Request, res: Response) => {
 
   // If customer connecting on storefront
   if (role === 'customer') {
-    const rawHandle = String(telegram_username || '').trim().replace(/^@+/, '');
-    if (!rawHandle) {
-      res.status(400).json({ error: 'Please enter your Telegram @username to continue.' });
+    const verifiedCustomerTelegram = verifyTelegramWebAppInitData(String(req.body?.initData || ''));
+    if (!verifiedCustomerTelegram?.id) {
+      res.status(401).json({ error: 'Customer Telegram sign-in must come from the official Telegram Mini App.' });
       return;
     }
+    const rawHandle = String(verifiedCustomerTelegram.username || ('tg_' + verifiedCustomerTelegram.id)).replace(/^@+/, '');
     const normalizedHandle = `@${rawHandle}`;
+    const verifiedCustomerTelegramId = String(verifiedCustomerTelegram.id);
     const now = new Date().toISOString();
 
     if (!business_id) {
@@ -1431,7 +1461,7 @@ app.post('/api/auth/telegram/confirm', (req: Request, res: Response) => {
     let customer = db.prepare(`
       SELECT * FROM customers
       WHERE business_id = ? AND (LOWER(telegram_handle) = LOWER(?) OR (telegram_id IS NOT NULL AND telegram_id != "" AND telegram_id = ?))
-    `).get(business_id, normalizedHandle, String(telegram_id || '')) as any;
+    `).get(business_id, normalizedHandle, verifiedCustomerTelegramId) as any;
 
     if (!customer) {
       const custUid = generateCustomerUid();
@@ -1440,12 +1470,20 @@ app.post('/api/auth/telegram/confirm', (req: Request, res: Response) => {
       db.prepare(`
         INSERT INTO customers (id, business_id, customer_uid, name, phone, telegram_handle, telegram_id, created_at)
         VALUES (?, ?, ?, ?, '', ?, ?, ?)
-      `).run(custId, business_id, custUid, custName, normalizedHandle, String(telegram_id || ''), now);
+      `).run(custId, business_id, custUid, custName, normalizedHandle, verifiedCustomerTelegramId, now);
       customer = db.prepare('SELECT * FROM customers WHERE id = ?').get(custId);
     }
 
     if (auth_key) {
-      db.prepare("UPDATE telegram_auth_sessions SET status = 'completed', telegram_username = ? WHERE auth_key = ?").run(normalizedHandle, auth_key);
+      const consumed = db.prepare(`
+        UPDATE telegram_auth_sessions
+        SET status = 'completed', telegram_username = ?
+        WHERE auth_key = ? AND status = 'pending' AND expires_at > ?
+      `).run(normalizedHandle, String(auth_key), now);
+      if (consumed.changes !== 1) {
+        res.status(401).json({ error: 'Telegram customer session expired or was already used.' });
+        return;
+      }
     }
 
     res.json({
@@ -1466,12 +1504,12 @@ app.post('/api/auth/telegram/confirm', (req: Request, res: Response) => {
 });
 
 // Store Owner Sign-In / Sign-Up with Telegram Account (Direct)
-app.post('/api/auth/telegram', (req: Request, res: Response) => {
+app.post('/api/auth/telegram', authRateLimit, (req: Request, res: Response) => {
   handleStoreOwnerTelegramAuth(req, res);
 });
 
 // Recover Forgotten Email or Password using Secondary Recovery Passcode
-app.post('/api/auth/recover', (req: Request, res: Response) => {
+app.post('/api/auth/recover', authRateLimit, (req: Request, res: Response) => {
   const { identifier, recovery_passcode, new_password } = req.body;
   const fieldErrors: Record<string, string> = {};
 
@@ -1512,11 +1550,11 @@ app.post('/api/auth/recover', (req: Request, res: Response) => {
   }
 
   if (new_password && String(new_password).trim().length > 0) {
-    if (String(new_password).trim().length < 6) {
+    if (String(new_password).trim().length < 8) {
       res.status(400).json({
-        error: 'New password must be at least 6 characters.',
+        error: 'New password must be at least 8 characters.',
         fieldErrors: {
-          new_password: 'New password must be at least 6 characters.',
+          new_password: 'New password must be at least 8 characters.',
         },
       });
       return;
@@ -1628,12 +1666,21 @@ app.post('/api/auth/password', (req: Request, res: Response) => {
     res.status(401).json({ error: 'Authentication required' });
     return;
   }
-  const { newPassword } = req.body;
-  if (!newPassword || String(newPassword).length < 4) {
-    res.status(400).json({ error: 'New password must be at least 4 characters.' });
+  const { currentPassword, newPassword } = req.body || {};
+  if (typeof currentPassword !== 'string' || !currentPassword.trim()) {
+    res.status(400).json({ error: 'Enter your current password before changing it.' });
     return;
   }
-  db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(hashPassword(String(newPassword)), req.user.id);
+  if (typeof newPassword !== 'string' || newPassword.trim().length < 8) {
+    res.status(400).json({ error: 'New password must be at least 8 characters.' });
+    return;
+  }
+  const account = db.prepare('SELECT password_hash, recovery_passcode_hash FROM users WHERE id = ?').get(req.user.id) as any;
+  if (!isUserPasswordValid(account, currentPassword.trim())) {
+    res.status(401).json({ error: 'Current password is incorrect.' });
+    return;
+  }
+  db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(hashPassword(newPassword.trim()), req.user.id);
   recordAuditLog({
     actorUserId: req.user.id,
     actorName: req.user.name,
@@ -1641,7 +1688,7 @@ app.post('/api/auth/password', (req: Request, res: Response) => {
     action: 'UPDATE_ACCOUNT_PASSWORD',
     targetType: 'user',
     targetId: req.user.id,
-    reason: 'User updated account password in Settings',
+    reason: 'User changed account password after verifying current password',
   });
   res.json({ success: true });
 });
@@ -1652,15 +1699,24 @@ app.post('/api/auth/passcode', (req: Request, res: Response) => {
     res.status(401).json({ error: 'Authentication required' });
     return;
   }
-  const { action, passcode } = req.body;
+  const { action, passcode } = req.body || {};
   const userRow = db.prepare('SELECT passcode FROM users WHERE id = ?').get(req.user.id) as any;
+  const cleanPin = String(passcode || '').trim();
 
   if (action === 'verify') {
-    if (!userRow?.passcode || userRow.passcode === String(passcode || '').trim()) {
+    if (!userRow?.passcode) {
       res.json({ verified: true });
-    } else {
-      res.status(401).json({ error: 'Incorrect passcode. Please try again.' });
+      return;
     }
+    const valid = verifyPassword(cleanPin, userRow.passcode) || userRow.passcode === cleanPin;
+    if (!valid) {
+      res.status(401).json({ error: 'Incorrect passcode. Please try again.' });
+      return;
+    }
+    if (userRow.passcode === cleanPin) {
+      db.prepare('UPDATE users SET passcode = ? WHERE id = ?').run(hashPassword(cleanPin), req.user.id);
+    }
+    res.json({ verified: true });
     return;
   }
 
@@ -1670,12 +1726,11 @@ app.post('/api/auth/passcode', (req: Request, res: Response) => {
     return;
   }
 
-  const cleanPin = String(passcode || '').trim();
   if (!/^\d{4,6}$/.test(cleanPin)) {
     res.status(400).json({ error: 'Passcode must be a 4 to 6 digit number.' });
     return;
   }
-  db.prepare('UPDATE users SET passcode = ? WHERE id = ?').run(cleanPin, req.user.id);
+  db.prepare('UPDATE users SET passcode = ? WHERE id = ?').run(hashPassword(cleanPin), req.user.id);
   res.json({ success: true, has_passcode: true });
 });
 
