@@ -555,6 +555,67 @@ async function verifyGoogleIdToken(credential: string): Promise<any | null> {
   }
 }
 
+function getTelegramTokenEncryptionKey(): Buffer {
+  const configured = String(process.env.TELEGRAM_TOKEN_ENCRYPTION_KEY || '').trim();
+  if (!/^[a-f0-9]{64}$/i.test(configured)) {
+    throw new Error('TELEGRAM_TOKEN_ENCRYPTION_KEY must be a 32-byte key encoded as 64 hexadecimal characters.');
+  }
+  return Buffer.from(configured, 'hex');
+}
+
+function encryptTelegramBotToken(token: string): string {
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv('aes-256-gcm', getTelegramTokenEncryptionKey(), iv);
+  const ciphertext = Buffer.concat([cipher.update(token, 'utf8'), cipher.final()]);
+  return [iv.toString('base64'), cipher.getAuthTag().toString('base64'), ciphertext.toString('base64')].join('.');
+}
+
+function decryptTelegramBotToken(payload: string): string {
+  const [ivPart, tagPart, ciphertextPart] = String(payload || '').split('.');
+  if (!ivPart || !tagPart || !ciphertextPart) {
+    throw new Error('The saved Telegram token is invalid. Re-enter the BotFather token.');
+  }
+  const decipher = crypto.createDecipheriv(
+    'aes-256-gcm',
+    getTelegramTokenEncryptionKey(),
+    Buffer.from(ivPart, 'base64')
+  );
+  decipher.setAuthTag(Buffer.from(tagPart, 'base64'));
+  return Buffer.concat([
+    decipher.update(Buffer.from(ciphertextPart, 'base64')),
+    decipher.final(),
+  ]).toString('utf8');
+}
+
+async function callTelegramBotApi(token: string, method: string, payload: Record<string, any> = {}): Promise<any> {
+  const response = await fetch('https://api.telegram.org/bot' + token + '/' + method, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || !data.ok) {
+    throw new Error(String(data.description || 'Telegram Bot API request failed.'));
+  }
+  return data.result;
+}
+
+function getTelegramAppOrigin(): string {
+  const configured = String(process.env.APP_URL || '').trim();
+  if (!configured) {
+    throw new Error('APP_URL must be configured before connecting a Telegram bot.');
+  }
+  const parsed = new URL(configured);
+  if (parsed.protocol !== 'https:') {
+    throw new Error('APP_URL must be an HTTPS URL for Telegram Mini Apps and webhooks.');
+  }
+  return parsed.origin;
+}
+
+function hashTelegramWebhookSecret(secret: string): string {
+  return crypto.createHash('sha256').update(secret).digest('hex');
+}
+
 // Real-Time Account & Username Checker (Verifies Telegram @handle, Google email, or Owner ID)
 app.get('/api/auth/check-account', (req: Request, res: Response) => {
   const rawIdentifier = String(req.query.identifier || '').trim();
@@ -2460,238 +2521,404 @@ app.patch('/api/businesses/:id/settings', (req: Request, res: Response) => {
 });
 
 // Connect Telegram Bot, Optional Channel, Web Domain & Notification Preferences
-app.post('/api/businesses/:id/telegram', (req: Request, res: Response) => {
+app.post('/api/businesses/:id/telegram', async (req: Request, res: Response) => {
   const access = verifyTenantAccess(req.user, req.params.id, 'telegram.manage');
   if (!access.allowed) {
     res.status(403).json({ error: access.error });
     return;
   }
 
-  const {
-    bot_token,
-    bot_username,
-    channel_username,
-    custom_domain,
-    webhook_active,
-    mini_app_published,
-    notification_settings,
-    generate_handshake_token,
-    include_buttons_in_notification = true,
-  } = req.body;
-  const b = access.business;
+  const business = access.business;
+  const { bot_token, bot_username, channel_username, custom_domain, mini_app_published,
+    notification_settings, include_buttons_in_notification = true } = req.body;
 
-  const fieldErrors: Record<string, string> = {};
-
-  // 1. Validate & normalize Bot Username
-  let resolvedBotUsername = b.telegram_bot_username || '';
-  if (bot_username !== undefined) {
-    const cleanBot = String(bot_username).trim().replace(/^@+/, '');
-    if (!cleanBot) {
-      fieldErrors.bot_username = 'Telegram Bot Username is required (e.g. @YourBusinessBot).';
-    } else if (!/^[a-zA-Z0-9_]{3,32}$/.test(cleanBot)) {
-      fieldErrors.bot_username = 'Bot Username must be 3–32 characters using letters, numbers, or underscores (no spaces).';
-    } else {
-      resolvedBotUsername = `@${cleanBot}`;
+  let token = String(bot_token || '').trim();
+  if (!token) {
+    if (!business.telegram_bot_token_encrypted) {
+      res.status(400).json({
+        error: 'Enter the real BotFather API token. A bot username alone cannot connect a Telegram bot.',
+        fieldErrors: { bot_token: 'A real BotFather token is required.' },
+      });
+      return;
+    }
+    try {
+      token = decryptTelegramBotToken(String(business.telegram_bot_token_encrypted));
+    } catch (error: any) {
+      res.status(503).json({ error: error?.message || 'Telegram token encryption is not configured.' });
+      return;
     }
   }
 
-  // 2. Validate & normalize Optional Channel Username
-  let resolvedChannelUsername = b.telegram_channel_username || '';
-  if (channel_username !== undefined) {
-    const cleanChan = String(channel_username).trim().replace(/^@+/, '');
-    if (!cleanChan) {
-      resolvedChannelUsername = '';
-    } else if (!/^[a-zA-Z0-9_]{3,32}$/.test(cleanChan)) {
-      fieldErrors.channel_username = 'Optional Channel Username must be 3–32 letters, numbers, or underscores (or leave empty).';
-    } else {
-      resolvedChannelUsername = `@${cleanChan}`;
-    }
-  }
-
-  // 3. Validate Custom Web Domain (if provided)
-  let resolvedCustomDomain = b.custom_domain || '';
-  if (custom_domain !== undefined) {
-    const cleanDom = String(custom_domain)
-      .trim()
-      .replace(/^https?:\/\//i, '')
-      .replace(/\/+$/, '')
-      .toLowerCase();
-    if (!cleanDom) {
-      resolvedCustomDomain = '';
-    } else if (!/^[a-z0-9.-]+\.[a-z]{2,}$/i.test(cleanDom)) {
-      fieldErrors.custom_domain = 'Custom Web Domain must be a valid domain name (e.g. shop.yourbrand.com) or left empty for default.';
-    } else {
-      resolvedCustomDomain = cleanDom;
-    }
-  }
-
-  // 4. Validate or generate BotFather Token
-  let maskedToken = b.telegram_bot_token_masked || '';
-  if (bot_token && typeof bot_token === 'string' && bot_token.trim().length > 0) {
-    const clean = bot_token.trim();
-    if (clean.length < 8) {
-      fieldErrors.bot_token = 'BotFather API Token must be at least 8 characters (e.g. 728194:AAH... or leave blank to keep current).';
-    } else {
-      maskedToken = clean.slice(0, 6) + ':AAH...' + clean.slice(-4);
-    }
-  } else if (generate_handshake_token || !maskedToken) {
-    const randDigits = crypto.randomInt(600000, 999999);
-    const randTail = crypto.randomBytes(2).toString('hex');
-    maskedToken = `${randDigits}:AAH...${randTail}`;
-  }
-
-  if (Object.keys(fieldErrors).length > 0) {
+  if (!/^\d{5,15}:[A-Za-z0-9_-]{20,}$/.test(token)) {
     res.status(400).json({
-      error: Object.values(fieldErrors).join(' '),
-      fieldErrors,
+      error: 'The BotFather token format is invalid. Copy the complete token from @BotFather.',
+      fieldErrors: { bot_token: 'Invalid BotFather token.' },
     });
     return;
   }
 
-  let resolvedNotifSettings = b.notification_settings_json || JSON.stringify({
-    new_orders: true,
-    payment_requests: true,
-    bookings: true,
-    support: true,
-    telegram_sync: true,
-    button_mode: 'auto',
-  });
-  if (notification_settings && typeof notification_settings === 'object') {
-    resolvedNotifSettings = JSON.stringify(notification_settings);
+  const requestedBot = String(bot_username || '').trim().replace(/^@+/, '');
+  if (requestedBot && !/^[a-zA-Z0-9_]{3,32}$/.test(requestedBot)) {
+    res.status(400).json({ error: 'Telegram bot username must be 3–32 letters, numbers, or underscores.' });
+    return;
   }
 
-  const now = new Date().toISOString();
-  const isWebhookActive = webhook_active !== undefined ? (webhook_active ? 1 : 0) : 1;
-  const isPublished = mini_app_published !== undefined ? (mini_app_published ? 1 : 0) : 1;
+  const requestedChannel = String(channel_username || '').trim().replace(/^@+/, '');
+  if (requestedChannel && !/^[a-zA-Z0-9_]{3,32}$/.test(requestedChannel)) {
+    res.status(400).json({ error: 'Telegram channel username must be 3–32 letters, numbers, or underscores.' });
+    return;
+  }
 
-  db.prepare(`
-    UPDATE businesses SET
-      telegram_bot_token_masked = ?,
-      telegram_bot_username = ?,
-      telegram_channel_username = ?,
-      custom_domain = ?,
-      telegram_webhook_active = ?,
-      mini_app_published = ?,
-      notification_settings_json = ?,
-      telegram_last_synced_at = ?
-    WHERE id = ?
-  `).run(
-    maskedToken,
-    resolvedBotUsername,
-    resolvedChannelUsername,
-    resolvedCustomDomain,
-    isWebhookActive,
-    isPublished,
-    resolvedNotifSettings,
-    now,
-    req.params.id
-  );
+  const requestedDomain = String(custom_domain || '').trim()
+    .replace(/^https?:\/\//i, '').replace(/\/+$/, '').toLowerCase();
+  if (requestedDomain && !/^[a-z0-9.-]+\.[a-z]{2,}$/i.test(requestedDomain)) {
+    res.status(400).json({ error: 'Enter a valid custom domain or leave it blank.' });
+    return;
+  }
 
-  recordAuditLog({
-    actorUserId: req.user!.id,
-    actorName: req.user!.name,
-    actorRole: access.role || 'owner',
-    businessId: req.params.id,
-    action: 'CONFIGURE_TELEGRAM_INTEGRATION',
-    targetType: 'telegram_bot',
-    targetId: req.params.id,
-    newValue: `Bot: ${resolvedBotUsername}, Channel: ${resolvedChannelUsername || 'None (Optional)'}, Domain: ${resolvedCustomDomain || 'Default'}`,
-  });
+  let appOrigin: string;
+  try {
+    getTelegramTokenEncryptionKey();
+    appOrigin = getTelegramAppOrigin();
+  } catch (error: any) {
+    res.status(503).json({ error: error?.message || 'Telegram integration is not configured on this server.' });
+    return;
+  }
 
-  const updated = db.prepare('SELECT * FROM businesses WHERE id = ?').get(req.params.id) as any;
-  const createdNotification = recordBusinessNotification({
-    businessId: req.params.id,
-    type: 'telegram',
-    tone: 'telegram',
-    title: `Connected ${resolvedBotUsername || 'Telegram Bot'} & Web Storefront`,
-    message: `Bot webhook (${maskedToken}), Mini App deep link, and web domain (${resolvedCustomDomain || `telebiz.os/s/${updated.slug}`}) are active and synced.`,
-    channel: 'telegram_and_web',
-    forceWithoutButtons: !include_buttons_in_notification,
-    buttons: [
-      { label: 'Preview Storefront', action: 'preview_store', variant: 'primary' },
-      { label: 'Copy Mini App Link', action: 'copy_miniapp_url', variant: 'secondary' },
-    ],
-  });
+  try {
+    const bot = await callTelegramBotApi(token, 'getMe');
+    const actualUsername = String(bot?.username || '').trim();
+    if (!bot?.id || !actualUsername) {
+      res.status(400).json({ error: 'Telegram did not return a valid bot identity for this token.' });
+      return;
+    }
 
-  res.json({
-    ...updated,
-    notification: createdNotification,
-    notifications: getBusinessNotifications(req.params.id, 40),
-  });
+    if (requestedBot && requestedBot.toLowerCase() !== actualUsername.toLowerCase()) {
+      res.status(400).json({
+        error: 'The entered bot username does not match the BotFather token.',
+        fieldErrors: { bot_username: 'This token belongs to @' + actualUsername + '.' },
+      });
+      return;
+    }
+
+    const webhookUrl = appOrigin + '/api/telegram/webhook/' + encodeURIComponent(business.id);
+    const webhookSecret = crypto.randomBytes(32).toString('hex');
+    const miniAppUrl = appOrigin + '/?store=' + encodeURIComponent(business.slug);
+    const encryptedToken = encryptTelegramBotToken(token);
+    const maskedToken = token.slice(0, 6) + '...' + token.slice(-4);
+    const webhookSecretHash = hashTelegramWebhookSecret(webhookSecret);
+    const published = mini_app_published === undefined
+      ? Number(business.mini_app_published || 0)
+      : (mini_app_published ? 1 : 0);
+
+    const settings: Record<string, any> = {
+      new_orders: true,
+      payment_requests: true,
+      bookings: true,
+      support: true,
+      telegram_sync: true,
+      button_mode: 'auto',
+    };
+    try {
+      Object.assign(settings, JSON.parse(String(business.notification_settings_json || '{}')));
+    } catch {
+      // Keep safe defaults if previous settings are malformed.
+    }
+    if (notification_settings && typeof notification_settings === 'object') {
+      for (const key of ['new_orders', 'payment_requests', 'bookings', 'support', 'telegram_sync']) {
+        if (typeof notification_settings[key] === 'boolean') settings[key] = notification_settings[key];
+      }
+      if (['auto', 'with_buttons', 'without_buttons'].includes(notification_settings.button_mode)) {
+        settings.button_mode = notification_settings.button_mode;
+      }
+    }
+
+    db.prepare('UPDATE businesses SET telegram_bot_token_encrypted = ?, telegram_bot_token_masked = ?, telegram_webhook_secret_hash = ?, telegram_bot_username = ?, telegram_channel_username = ?, custom_domain = ?, telegram_webhook_active = 0, mini_app_published = ?, notification_settings_json = ? WHERE id = ?')
+      .run(
+        encryptedToken,
+        maskedToken,
+        webhookSecretHash,
+        '@' + actualUsername,
+        requestedChannel ? '@' + requestedChannel : '',
+        requestedDomain,
+        published,
+        JSON.stringify(settings),
+        business.id
+      );
+
+    if (published) {
+      await callTelegramBotApi(token, 'setChatMenuButton', {
+        menu_button: {
+          type: 'web_app',
+          text: 'Open Store',
+          web_app: { url: miniAppUrl },
+        },
+      });
+    } else {
+      await callTelegramBotApi(token, 'setChatMenuButton', {
+        menu_button: { type: 'commands' },
+      });
+    }
+
+    await callTelegramBotApi(token, 'setWebhook', {
+      url: webhookUrl,
+      secret_token: webhookSecret,
+      allowed_updates: ['message', 'callback_query'],
+      drop_pending_updates: false,
+    });
+
+    const webhookInfo = await callTelegramBotApi(token, 'getWebhookInfo');
+    if (String(webhookInfo?.url || '') !== webhookUrl) {
+      throw new Error('Telegram did not confirm the expected webhook URL.');
+    }
+
+    db.prepare('UPDATE businesses SET telegram_webhook_active = 1, telegram_last_synced_at = ? WHERE id = ?')
+      .run(new Date().toISOString(), business.id);
+
+    recordAuditLog({
+      actorUserId: req.user!.id,
+      actorName: req.user!.name,
+      actorRole: access.role || 'owner',
+      businessId: business.id,
+      action: 'CONFIGURE_TELEGRAM_INTEGRATION',
+      targetType: 'telegram_bot',
+      targetId: business.id,
+      newValue: 'Verified @' + actualUsername + ' and registered the Telegram webhook.',
+    });
+
+    const updated = db.prepare('SELECT * FROM businesses WHERE id = ?').get(business.id) as any;
+    const {
+      telegram_bot_token_encrypted: _encryptedToken,
+      telegram_webhook_secret_hash: _webhookSecretHash,
+      ...safeUpdated
+    } = updated;
+
+    const notification = recordBusinessNotification({
+      businessId: business.id,
+      type: 'telegram',
+      tone: 'success',
+      title: 'Telegram bot verified and webhook connected',
+      message: '@' + actualUsername + ' passed Telegram getMe and setWebhook. ' +
+        (published ? 'The Open Store menu button is configured.' : 'The store remains a private draft until published.'),
+      channel: 'telegram_and_web',
+      forceWithoutButtons: !include_buttons_in_notification,
+      buttons: [
+        { label: 'Preview Storefront', action: 'preview_store', variant: 'primary' },
+        { label: 'Copy Mini App Link', action: 'copy_miniapp_url', variant: 'secondary' },
+      ],
+    });
+
+    res.json({
+      ...safeUpdated,
+      connected: true,
+      verified_bot_username: '@' + actualUsername,
+      webhook_url: webhookUrl,
+      mini_app_url: miniAppUrl,
+      notification,
+      notifications: getBusinessNotifications(business.id, 40),
+    });
+  } catch (error: any) {
+    db.prepare('UPDATE businesses SET telegram_webhook_active = 0 WHERE id = ?').run(business.id);
+    console.warn('Telegram bot setup failed for business', business.id, error?.message || error);
+    res.status(502).json({
+      error: error?.message || 'Telegram could not verify the bot or configure its webhook.',
+      connected: false,
+    });
+  }
 });
 
-// Live Connection & Handshake Diagnostic for Telegram Bot, Mini App & Web Domain
-app.post('/api/businesses/:id/telegram/test-connection', (req: Request, res: Response) => {
+// Real Telegram Bot API diagnostics. This route never fabricates a token or marks the store published.
+app.post('/api/businesses/:id/telegram/test-connection', async (req: Request, res: Response) => {
   const access = verifyTenantAccess(req.user, req.params.id, 'telegram.manage');
   if (!access.allowed) {
     res.status(403).json({ error: access.error });
     return;
   }
 
-  const b = access.business;
-  const { bot_username, channel_username, custom_domain, with_buttons = true } = req.body;
-  const now = new Date().toISOString();
+  const business = access.business;
+  if (!business.telegram_bot_token_encrypted) {
+    res.status(400).json({
+      connected: false,
+      error: 'No encrypted BotFather token is saved. Enter a real token and connect the bot first.',
+    });
+    return;
+  }
 
-  const rawBot = String(bot_username ?? b.telegram_bot_username ?? '').trim().replace(/^@+/, '');
-  const cleanBot = rawBot ? `@${rawBot}` : `@${b.slug.replace(/[^a-zA-Z0-9_]/g, '_')}Bot`;
-  const rawChan = String(channel_username ?? b.telegram_channel_username ?? '').trim().replace(/^@+/, '');
-  const cleanChan = rawChan ? `@${rawChan}` : '';
-  const cleanDom = String(custom_domain ?? b.custom_domain ?? '')
-    .trim()
-    .replace(/^https?:\/\//i, '')
-    .replace(/\/+$/, '');
+  try {
+    const token = decryptTelegramBotToken(String(business.telegram_bot_token_encrypted));
+    const started = Date.now();
+    const bot = await callTelegramBotApi(token, 'getMe');
+    const info = await callTelegramBotApi(token, 'getWebhookInfo');
+    const appOrigin = getTelegramAppOrigin();
+    const expectedUrl = appOrigin + '/api/telegram/webhook/' + encodeURIComponent(business.id);
+    const webhookActive = String(info?.url || '') === expectedUrl;
 
-  const maskedToken = b.telegram_bot_token_masked || `${crypto.randomInt(700000, 999999)}:AAH...${crypto.randomBytes(2).toString('hex')}`;
+    db.prepare('UPDATE businesses SET telegram_webhook_active = ? WHERE id = ?')
+      .run(webhookActive ? 1 : 0, business.id);
 
-  db.prepare(`
-    UPDATE businesses SET
-      telegram_bot_username = ?,
-      telegram_channel_username = ?,
-      custom_domain = ?,
-      telegram_bot_token_masked = ?,
-      telegram_webhook_active = 1,
-      mini_app_published = 1,
-      telegram_last_synced_at = ?
-    WHERE id = ?
-  `).run(cleanBot, cleanChan, cleanDom, maskedToken, now, b.id);
+    const diagnostics = {
+      botVerified: Boolean(bot?.id),
+      botUsername: bot?.username ? '@' + bot.username : '',
+      webhookActive,
+      expectedWebhookUrl: expectedUrl,
+      webhookUrl: String(info?.url || ''),
+      pendingUpdates: Number(info?.pending_update_count || 0),
+      lastWebhookError: String(info?.last_error_message || ''),
+      miniAppPublished: Boolean(business.mini_app_published),
+      latencyMs: Date.now() - started,
+      checkedAt: new Date().toISOString(),
+    };
 
-  const miniAppDeepLink = `https://t.me/${cleanBot.replace(/^@/, '')}/app?startapp=${b.slug}`;
-  const webStoreUrl = `https://${cleanDom || `telebiz.os/s/${b.slug}`}`;
+    if (!webhookActive) {
+      res.status(409).json({
+        connected: false,
+        error: 'The token is valid, but Telegram is not using the expected Telebiz webhook. Save the integration again to register it.',
+        diagnostics,
+      });
+      return;
+    }
 
-  const notification = recordBusinessNotification({
-    businessId: b.id,
-    type: 'telegram',
-    tone: 'success',
-    title: `Handshake Verified: ${cleanBot} & Web Store Ready`,
-    message: `Bot webhook active (18ms latency) · Mini App: ${miniAppDeepLink} · Web: ${webStoreUrl}${cleanChan ? ` · Channel: ${cleanChan}` : ''}.`,
-    channel: 'telegram_and_web',
-    forceWithoutButtons: !with_buttons,
-    buttons: [
-      { label: 'Launch Store Preview', action: 'preview_store', variant: 'emerald' },
-      { label: 'Copy Deep Link', action: 'copy_miniapp_url', variant: 'secondary' },
-    ],
-  });
+    res.json({ connected: true, diagnostics });
+  } catch (error: any) {
+    res.status(502).json({
+      connected: false,
+      error: error?.message || 'Telegram connection test failed.',
+    });
+  }
+});
 
-  const updated = db.prepare('SELECT * FROM businesses WHERE id = ?').get(b.id);
-  res.json({
-    connected: true,
-    diagnostics: {
-      botVerified: true,
-      botUsername: cleanBot,
-      tokenMasked: maskedToken,
-      webhookActive: true,
-      miniAppPublished: true,
-      miniAppDeepLink,
-      webStoreUrl,
-      channelUsername: cleanChan || null,
-      channelSynced: Boolean(cleanChan),
-      latencyMs: 18,
-      checkedAt: now,
-    },
-    business: updated,
-    notification,
-    notifications: getBusinessNotifications(b.id, 40),
-  });
+// Telegram verifies webhook deliveries with this per-bot secret header.
+app.post('/api/telegram/webhook/:businessId', async (req: Request, res: Response) => {
+  const business = db.prepare('SELECT id, slug, name, status, mini_app_published, telegram_bot_token_encrypted, telegram_webhook_secret_hash, telegram_webhook_active FROM businesses WHERE id = ?')
+    .get(req.params.businessId) as any;
+
+  if (!business || !Number(business.telegram_webhook_active) || !business.telegram_webhook_secret_hash) {
+    res.status(404).json({ error: 'Telegram webhook is not configured.' });
+    return;
+  }
+
+  const suppliedSecret = String(req.headers['x-telegram-bot-api-secret-token'] || '');
+  const suppliedHash = Buffer.from(hashTelegramWebhookSecret(suppliedSecret), 'hex');
+  const expectedHash = Buffer.from(String(business.telegram_webhook_secret_hash), 'hex');
+
+  if (!suppliedSecret || suppliedHash.length !== expectedHash.length ||
+      !crypto.timingSafeEqual(suppliedHash, expectedHash)) {
+    res.status(401).json({ error: 'Invalid Telegram webhook secret.' });
+    return;
+  }
+
+  const updateId = String(req.body?.update_id ?? '');
+  if (updateId) {
+    const inserted = db.prepare('INSERT OR IGNORE INTO telegram_webhook_updates (business_id, update_id, processed_at) VALUES (?, ?, ?)')
+      .run(business.id, updateId, new Date().toISOString());
+    if (inserted.changes === 0) {
+      res.json({ ok: true, duplicate: true });
+      return;
+    }
+  }
+
+  try {
+    if (business.status !== 'active') {
+      res.json({ ok: true, ignored: true });
+      return;
+    }
+
+    const token = decryptTelegramBotToken(String(business.telegram_bot_token_encrypted || ''));
+    const message = req.body?.message;
+
+    if (message?.chat?.id && typeof message.text === 'string') {
+      const chatId = String(message.chat.id);
+      const incoming = String(message.text).trim().slice(0, 4000);
+      const from = message.from || {};
+      const customerName = [from.first_name, from.last_name].filter(Boolean).join(' ') || 'Telegram Customer';
+      const handle = from.username ? '@' + String(from.username) : '';
+
+      if (/^\/start(?:\s|$)/i.test(incoming)) {
+        if (!Number(business.mini_app_published)) {
+          await callTelegramBotApi(token, 'sendMessage', {
+            chat_id: chatId,
+            text: business.name + ' is still preparing its store. Please check back soon.',
+          });
+        } else {
+          const appUrl = getTelegramAppOrigin() + '/?store=' + encodeURIComponent(business.slug);
+          await callTelegramBotApi(token, 'sendMessage', {
+            chat_id: chatId,
+            text: 'Welcome to ' + business.name + '. Open the store to browse products and services.',
+            reply_markup: {
+              inline_keyboard: [[{
+                text: 'Open Store',
+                web_app: { url: appUrl },
+              }]],
+            },
+          });
+        }
+      } else {
+        const now = new Date().toISOString();
+        let conversation = db.prepare("SELECT * FROM support_conversations WHERE business_id = ? AND telegram_chat_id = ? AND status != 'closed' ORDER BY created_at DESC LIMIT 1")
+          .get(business.id, chatId) as any;
+
+        if (!conversation) {
+          const conversationId = 'cnv_' + crypto.randomBytes(8).toString('hex');
+          db.prepare("INSERT INTO support_conversations (id, scope, business_id, customer_id, customer_name, telegram_chat_id, channel, subject, status, assigned_employee_id, unread_count, first_response_mins, created_at, updated_at) VALUES (?, 'business', ?, null, ?, ?, 'telegram_bot', 'Telegram message', 'open', null, 1, null, ?, ?)")
+            .run(
+              conversationId,
+              business.id,
+              customerName + (handle ? ' (' + handle + ')' : ''),
+              chatId,
+              now,
+              now
+            );
+          conversation = db.prepare('SELECT * FROM support_conversations WHERE id = ?').get(conversationId) as any;
+        } else {
+          db.prepare('UPDATE support_conversations SET unread_count = unread_count + 1, updated_at = ? WHERE id = ?')
+            .run(now, conversation.id);
+        }
+
+        db.prepare("INSERT INTO support_messages (id, conversation_id, sender_type, sender_name, body, is_internal_note, created_at) VALUES (?, ?, 'customer', ?, ?, 0, ?)")
+          .run(
+            'msg_' + crypto.randomBytes(8).toString('hex'),
+            conversation.id,
+            customerName,
+            incoming,
+            now
+          );
+
+        recordBusinessNotification({
+          businessId: business.id,
+          type: 'support',
+          tone: 'telegram',
+          title: 'New Telegram message from ' + customerName,
+          message: incoming.slice(0, 240),
+          channel: 'telegram_and_web',
+          buttons: [{ label: 'Open Support Inbox', action: 'open_support', variant: 'primary' }],
+        });
+
+        try {
+          await callTelegramBotApi(token, 'sendMessage', {
+            chat_id: chatId,
+            text: 'Thanks for contacting ' + business.name + '. Your message has been delivered to the store team.',
+          });
+        } catch {
+          // Persisted support messages remain available even if the acknowledgement fails.
+        }
+      }
+    }
+
+    if (req.body?.callback_query?.id) {
+      await callTelegramBotApi(token, 'answerCallbackQuery', {
+        callback_query_id: req.body.callback_query.id,
+      });
+    }
+
+    res.json({ ok: true });
+  } catch (error: any) {
+    if (updateId) {
+      db.prepare('DELETE FROM telegram_webhook_updates WHERE business_id = ? AND update_id = ?')
+        .run(business.id, updateId);
+    }
+    console.warn('Telegram webhook processing failed for business', business.id, error?.message || error);
+    res.status(500).json({ error: 'Telegram update could not be processed.' });
+  }
 });
 
 // List, Dispatch & Manage Stylized Business Notifications (Supports With Action Buttons OR Without Buttons)

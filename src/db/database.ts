@@ -514,6 +514,13 @@ export function initDatabase() {
       expires_at TEXT NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS telegram_webhook_updates (
+      business_id TEXT NOT NULL REFERENCES businesses(id) ON DELETE CASCADE,
+      update_id TEXT NOT NULL,
+      processed_at TEXT NOT NULL,
+      PRIMARY KEY (business_id, update_id)
+    );
+
     CREATE TABLE IF NOT EXISTS business_notifications (
       id TEXT PRIMARY KEY,
       business_id TEXT NOT NULL REFERENCES businesses(id) ON DELETE CASCADE,
