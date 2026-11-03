@@ -4631,23 +4631,34 @@ app.post('/api/storefront/:slug/identify', (req: Request, res: Response) => {
   }
 
   const ownerRow = db.prepare('SELECT owner_uid FROM users WHERE id = ?').get(business.owner_id) as any;
-  const ownerUid = business.owner_uid || ownerRow?.owner_uid || 'OWN-HAN-204881';
-  const { device_fingerprint, telegram_id, telegram_username, source } = req.body;
-  const fp = String(device_fingerprint || 'fp_' + crypto.randomBytes(6).toString('hex')).trim();
+  const ownerUid = business.owner_uid || ownerRow?.owner_uid || business.id;
+  const { device_fingerprint } = req.body || {};
+
+  // Telegram identity is used only after validating Telegram's HMAC-signed initData.
+  const verifiedTelegramVisitor = verifyTelegramWebAppInitData(String(req.body?.initData || ''));
+  const trustedTelegramId = verifiedTelegramVisitor?.id ? String(verifiedTelegramVisitor.id) : '';
+  const trustedTelegramUsername = verifiedTelegramVisitor?.username
+    ? '@' + String(verifiedTelegramVisitor.username).replace(/^@+/, '')
+    : '';
+  const trustedSource = verifiedTelegramVisitor ? 'telegram_mini_app' : 'web_store';
+
+  const fp = String(device_fingerprint || 'fp_' + crypto.randomBytes(16).toString('hex')).trim().slice(0, 120);
   const now = new Date().toISOString();
 
-  // Check if this visitor fingerprint or Telegram ID is already recognized for this business
   let customer = db.prepare(`
     SELECT * FROM customers
-    WHERE business_id = ? AND (device_fingerprint = ? OR (telegram_id != '' AND telegram_id = ?))
+    WHERE business_id = ? AND (
+      (device_fingerprint != '' AND device_fingerprint = ?)
+      OR (? != '' AND telegram_id != '' AND telegram_id = ?)
+    )
     LIMIT 1
-  `).get(business.id, fp, String(telegram_id || '')) as any;
+  `).get(business.id, fp, trustedTelegramId, trustedTelegramId) as any;
 
   if (!customer) {
     const cusId = 'cus_' + crypto.randomBytes(4).toString('hex');
     const customerUid = generateCustomerUid(ownerUid);
-    const visitorLabel = telegram_username
-      ? `Telegram Visitor (${telegram_username})`
+    const visitorLabel = trustedTelegramUsername
+      ? `Telegram Visitor (${trustedTelegramUsername})`
       : `Store Visitor #${customerUid.slice(-4)}`;
 
     db.prepare(`
@@ -4656,16 +4667,16 @@ app.post('/api/storefront/:slug/identify', (req: Request, res: Response) => {
         segment, loyalty_points, referral_code, consent_marketing,
         source, visits_count, total_spent, last_seen_at, created_at,
         customer_uid, owner_uid, device_fingerprint
-      ) VALUES (?, ?, ?, ?, ?, ?, 'first_time', 10, ?, 1, ?, 1, 0, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, 'first_time', 0, ?, 0, ?, 1, 0, ?, ?, ?, ?, ?)
     `).run(
       cusId,
       business.id,
       visitorLabel,
       'Visitor-' + customerUid.slice(-4),
-      String(telegram_id || ''),
-      String(telegram_username || ''),
+      trustedTelegramId,
+      trustedTelegramUsername,
       'REF-' + customerUid.slice(-4),
-      source === 'web' ? 'web_store' : 'telegram_mini_app',
+      trustedSource,
       now,
       now,
       customerUid,
@@ -4674,9 +4685,7 @@ app.post('/api/storefront/:slug/identify', (req: Request, res: Response) => {
     );
     customer = db.prepare('SELECT * FROM customers WHERE id = ?').get(cusId);
   } else {
-    if (!customer.customer_uid) {
-      customer.customer_uid = generateCustomerUid(ownerUid);
-    }
+    if (!customer.customer_uid) customer.customer_uid = generateCustomerUid(ownerUid);
     db.prepare(`
       UPDATE customers
       SET visits_count = visits_count + 1, last_seen_at = ?, customer_uid = ?, owner_uid = ?
