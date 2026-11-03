@@ -863,27 +863,45 @@ app.post('/api/auth/google', authRateLimit, async (req: Request, res: Response) 
   });
 });
 
-// Google OAuth Authorization URL endpoint (prompts user to choose an account)
+// Google OAuth Authorization URL endpoint
 const pendingGoogleOAuthStates = new Map<string, number>();
 
 app.get('/api/auth/google/url', authRateLimit, (req: Request, res: Response) => {
   const clientId = process.env.GOOGLE_CLIENT_ID || process.env.CLIENT_ID;
   const clientSecret = process.env.GOOGLE_CLIENT_SECRET || process.env.CLIENT_SECRET;
   if (!clientId || !clientSecret) {
-    res.json({ configured: false, error: 'Google sign-in is not configured on this server.' });
+    res.status(503).json({ configured: false, error: 'Google sign-in is not configured on this server.' });
     return;
   }
 
   const protocol = req.headers['x-forwarded-proto'] || req.protocol || 'https';
   const host = req.get('host') || 'localhost:3000';
-  const appUrl = String(process.env.APP_URL || (protocol + '://' + host)).replace(/\\/+$/, '');
+  const appUrl = String(process.env.APP_URL || (protocol + '://' + host)).replace(/\/+$/, '');
   const redirectUri = appUrl + '/auth/callback/google';
   const state = crypto.randomBytes(24).toString('hex');
   const now = Date.now();
-  for (const [key, expiry] of pendingGoogleOAuthStaapp.get(['/auth/callback/google', '/auth/callback/google/'], async (req: Request, res: Response) => {
+
+  for (const [key, expiresAt] of pendingGoogleOAuthStates.entries()) {
+    if (expiresAt <= now) pendingGoogleOAuthStates.delete(key);
+  }
+  pendingGoogleOAuthStates.set(state, now + 5 * 60 * 1000);
+
+  const params = new URLSearchParams({
+    client_id: clientId,
+    redirect_uri: redirectUri,
+    response_type: 'code',
+    scope: 'openid email profile',
+    prompt: 'select_account',
+    access_type: 'online',
+    state,
+  });
+  res.json({ configured: true, url: 'https://accounts.google.com/o/oauth2/v2/auth?' + params.toString() });
+});
+
+app.get(['/auth/callback/google', '/auth/callback/google/'], async (req: Request, res: Response) => {
   const state = String(req.query.state || '');
-  const stateExpiresAt = pendingGoogleOAuthStates.get(state);
-  if (!stateExpiresAt || stateExpiresAt <= Date.now()) {
+  const expiresAt = pendingGoogleOAuthStates.get(state);
+  if (!state || !expiresAt || expiresAt <= Date.now()) {
     res.status(401).send('Google sign-in session expired. Close this window and try again.');
     return;
   }
@@ -900,9 +918,9 @@ app.get('/api/auth/google/url', authRateLimit, (req: Request, res: Response) => 
   try {
     const protocol = req.headers['x-forwarded-proto'] || req.protocol || 'https';
     const host = req.get('host') || 'localhost:3000';
-    const appUrl = String(process.env.APP_URL || (protocol + '://' + host)).replace(/\\/+$/, '');
+    const appUrl = String(process.env.APP_URL || (protocol + '://' + host)).replace(/\/+$/, '');
     const redirectUri = appUrl + '/auth/callback/google';
-    const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
+    const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({
@@ -913,27 +931,34 @@ app.get('/api/auth/google/url', authRateLimit, (req: Request, res: Response) => 
         grant_type: 'authorization_code',
       }),
     });
-    if (!tokenRes.ok) throw new Error('Google token exchange failed');
-    const tokenData = await tokenRes.json();
+    if (!tokenResponse.ok) throw new Error('Google token exchange failed');
+
+    const tokenData = await tokenResponse.json();
     if (!tokenData.id_token) throw new Error('Google did not return an identity token');
 
-    const claimsRes = await fetch(
+    const claimsResponse = await fetch(
       'https://oauth2.googleapis.com/tokeninfo?id_token=' + encodeURIComponent(tokenData.id_token)
     );
-    if (!claimsRes.ok) throw new Error('Google identity token could not be verified');
-    const claims = await claimsRes.json();
+    if (!claimsResponse.ok) throw new Error('Google identity token could not be verified');
+
+    const claims = await claimsResponse.json();
     const issuerOk = claims.iss === 'accounts.google.com' || claims.iss === 'https://accounts.google.com';
-    const exp = Number(claims.exp || 0);
-    const userEmail = String(claims.email || '').trim().toLowerCase();
-    if (!issuerOk || claims.aud !== clientId || claims.email_verified !== 'true' ||
-        !Number.isFinite(exp) || exp <= Math.floor(Date.now() / 1000) ||
-        !/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(userEmail)) {
+    const email = String(claims.email || '').trim().toLowerCase();
+    const expiry = Number(claims.exp || 0);
+    if (
+      !issuerOk ||
+      claims.aud !== clientId ||
+      claims.email_verified !== 'true' ||
+      !Number.isFinite(expiry) ||
+      expiry <= Math.floor(Date.now() / 1000) ||
+      !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
+    ) {
       throw new Error('Google identity token claims are invalid');
     }
 
-    const userName = String(claims.name || '').trim();
     const now = new Date().toISOString();
-    let user = db.prepare('SELECT * FROM users WHERE LOWER(email) = ?').get(userEmail) as any;
+    const googleName = String(claims.name || '').trim();
+    let user = db.prepare('SELECT * FROM users WHERE LOWER(email) = ?').get(email) as any;
     if (user?.account_status === 'blocked') {
       res.status(403).send('This Telebiz account is blocked. Contact support.');
       return;
@@ -941,66 +966,63 @@ app.get('/api/auth/google/url', authRateLimit, (req: Request, res: Response) => 
 
     if (!user) {
       const userId = 'usr_g_' + crypto.randomBytes(5).toString('hex');
-      const finalName = userName || userEmail.split('@')[0] || 'Store Owner';
-      const ownerUid = generateOwnerUid(finalName);
-      db.prepare(`
-        INSERT INTO users (
-          id, email, name, password_hash, platform_role, telegram_username,
-          preferred_language, owner_uid, recovery_passcode_hash, recovery_hint, auth_provider, created_at
-        ) VALUES (?, ?, ?, ?, 'user', '', 'en', ?, '', 'Set a recovery passcode in account security settings', 'google', ?)
-      `).run(userId, userEmail, finalName, hashPassword(crypto.randomBytes(32).toString('hex')), ownerUid, now);
+      const name = googleName || email.split('@')[0] || 'Store Owner';
+      const ownerUid = generateOwnerUid(name);
+      db.prepare(
+        "INSERT INTO users (id, email, name, password_hash, platform_role, telegram_username, preferred_language, owner_uid, recovery_passcode_hash, recovery_hint, auth_provider, created_at) VALUES (?, ?, ?, ?, 'user', '', 'en', ?, '', 'Set a recovery passcode in account security settings', 'google', ?)"
+      ).run(userId, email, name, hashPassword(crypto.randomBytes(32).toString('hex')), ownerUid, now);
       user = db.prepare('SELECT * FROM users WHERE id = ?').get(userId);
-    } else if (userName && (!user.name || user.name === userEmail.split('@')[0])) {
-      db.prepare('UPDATE users SET name = ? WHERE id = ?').run(userName, user.id);
-      user.name = userName;
+    } else if (googleName && (!user.name || user.name === email.split('@')[0])) {
+      db.prepare('UPDATE users SET name = ? WHERE id = ?').run(googleName, user.id);
+      user.name = googleName;
     }
 
     if (!user.owner_uid) {
-      const ownerUid = generateOwnerUid(user.name || userEmail.split('@')[0]);
+      const ownerUid = generateOwnerUid(user.name || email.split('@')[0]);
       db.prepare('UPDATE users SET owner_uid = ? WHERE id = ?').run(ownerUid, user.id);
       user.owner_uid = ownerUid;
     }
 
     const token = 'sess_' + crypto.randomBytes(32).toString('hex');
-    db.prepare(`
-      INSERT INTO sessions (token, user_id, expires_at, ip_address, user_agent, revoked, created_at)
-      VALUES (?, ?, ?, ?, ?, 0, ?)
-    `).run(token, user.id, new Date(Date.now() + 30 * 86400000).toISOString(), req.ip || '', req.headers['user-agent'] || '', now);
-    const refreshed = db.prepare('SELECT * FROM users WHERE id = ?').get(user.id) as any;
+    db.prepare(
+      'INSERT INTO sessions (token, user_id, expires_at, ip_address, user_agent, revoked, created_at) VALUES (?, ?, ?, ?, ?, 0, ?)'
+    ).run(
+      token,
+      user.id,
+      new Date(Date.now() + 30 * 86400000).toISOString(),
+      req.ip || '',
+      req.headers['user-agent'] || '',
+      now
+    );
 
-    const googleAuthPayload = JSON.stringify({
+    const refreshedUser = db.prepare('SELECT * FROM users WHERE id = ?').get(user.id) as any;
+    const safePayload = JSON.stringify({
       token,
       user: {
-        id: refreshed.id,
-        email: refreshed.email,
-        name: refreshed.name,
-        owner_uid: refreshed.owner_uid,
-        telegram_username: refreshed.telegram_username || '',
-        platform_role: refreshed.platform_role,
-        preferred_language: refreshed.preferred_language || 'en',
-        last_selected_business_id: refreshed.last_selected_business_id || '',
+        id: refreshedUser.id,
+        email: refreshedUser.email,
+        name: refreshedUser.name,
+        owner_uid: refreshedUser.owner_uid,
+        telegram_username: refreshedUser.telegram_username || '',
+        platform_role: refreshedUser.platform_role,
+        preferred_language: refreshedUser.preferred_language || 'en',
+        last_selected_business_id: refreshedUser.last_selected_business_id || '',
       },
     }).replace(/[<>&\u2028\u2029]/g, (character) =>
       '\\u' + character.charCodeAt(0).toString(16).padStart(4, '0')
     );
 
-    res.send(`
-      <!doctype html>
-      <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-      <title>Telebiz sign-in complete</title></head>
-      <body style="font-family:system-ui;display:grid;place-items:center;min-height:100vh;margin:0;background:#f8fafc;color:#0f172a">
-      <main style="background:white;padding:28px;border-radius:18px;text-align:center;box-shadow:0 12px 30px #0001">
-      <h2>Google sign-in verified</h2><p>You can close this window.</p></main>
-      <script>
-        if (window.opener) {
-          const payload = ${googleAuthPayload};
-          window.opener.postMessage({ type: 'GOOGLE_AUTH_SUCCESS', ...payload }, window.location.origin);
-          window.close();
-        } else {
-          window.location.href = '/';
-        }
-      </script></body></html>
-    `);
+    const html =
+      '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">' +
+      '<title>Telebiz sign-in complete</title></head>' +
+      '<body style="font-family:system-ui;display:grid;place-items:center;min-height:100vh;margin:0;background:#f8fafc;color:#0f172a">' +
+      '<main style="background:white;padding:28px;border-radius:18px;text-align:center;box-shadow:0 12px 30px #0001">' +
+      '<h2>Google sign-in verified</h2><p>You can close this window.</p></main>' +
+      '<script>if(window.opener){const payload=' + safePayload +
+      ';window.opener.postMessage({type:"GOOGLE_AUTH_SUCCESS",...payload},window.location.origin);window.close();}' +
+      'else{document.body.insertAdjacentHTML("beforeend","<p>Please return to the Telebiz tab.</p>");}</script>' +
+      '</body></html>';
+    res.type('html').send(html);
   } catch (error) {
     console.warn('Google OAuth callback failed:', error);
     res.status(401).send('Google sign-in could not be verified. Close this window and try again.');
