@@ -491,8 +491,8 @@ export default function App() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               telegram_username: handle,
-              telegram_id: String(tgWebAppUser.id),
               name: fullName,
+              initData: (window as any).Telegram?.WebApp?.initData || '',
               intent: 'auto',
               role: 'store_owner',
             }),
@@ -913,8 +913,8 @@ export default function App() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             telegram_username: handle,
-            telegram_id: String(tgWebAppUser.id),
             name: fullName,
+            initData: (window as any).Telegram?.WebApp?.initData || '',
             intent: 'auto',
             role: 'store_owner',
           }),
@@ -1001,6 +1001,7 @@ export default function App() {
 
   useEffect(() => {
     const handleOAuthMessage = (event: MessageEvent) => {
+      if (event.origin !== window.location.origin) return;
       if (event.data?.type === 'GOOGLE_AUTH_SUCCESS' && event.data?.token && event.data?.user) {
         const { token, user } = event.data;
         localStorage.setItem('telebiz_remember_me', 'true');
@@ -1043,24 +1044,23 @@ export default function App() {
   };
 
   const handleGoogleAuth = async (
-    emailToUse: string,
-    nameToUse?: string,
-    options?: {
+    _emailToUse: string,
+    _nameToUse?: string,
+    _options?: {
       directConnect?: boolean;
       intent?: 'login' | 'signup' | 'auto';
       passcode?: string;
       telegramHandle?: string;
     }
   ) => {
-    const cleanEmail = emailToUse.trim().toLowerCase();
-    const isDirect = Boolean(options?.directConnect);
-    const resolvedName = (nameToUse ?? customGoogleName).trim() || cleanEmail.split('@')[0];
-    const resolvedPasscode = (options?.passcode ?? customGooglePasscode).trim();
-    const resolvedTg = (options?.telegramHandle ?? customGoogleTg).trim();
-
-    if (!cleanEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
-      setAuthFieldErrors({ email: 'Please enter a valid Google email address (e.g. yourname@gmail.com).' });
-      setAuthError('Please enter a valid Google email address.');
+    // Open synchronously so the browser does not block the OAuth popup.
+    const popup = window.open(
+      'about:blank',
+      'telebizGoogleAuth',
+      'popup=yes,width=520,height=680,left=120,top=80'
+    );
+    if (!popup) {
+      setAuthError('Your browser blocked the Google sign-in popup. Allow popups for this site and try again.');
       return;
     }
 
@@ -1068,42 +1068,16 @@ export default function App() {
     setAuthError('');
     setAuthFieldErrors({});
     try {
-      const res = await fetch('/api/auth/google', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          email: cleanEmail,
-          name: resolvedName,
-          telegram_username: resolvedTg || undefined,
-          recovery_passcode: resolvedPasscode || undefined,
-          intent: 'auto',
-          direct_connect: isDirect,
-        }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        if (data.fieldErrors) {
-          setAuthFieldErrors(data.fieldErrors);
-        }
-        setAuthError(data.error || 'Google authentication failed.');
-        return;
+      const response = await fetch('/api/auth/google/url');
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data.configured || !data.url) {
+        popup.close();
+        throw new Error(data.error || 'Google sign-in is not configured. Add GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET on the server.');
       }
-      saveDeviceGoogleAccount(data.user.email, data.user.name || resolvedName);
-      localStorage.setItem('telebiz_remember_me', 'true');
-      localStorage.setItem('telebiz_remembered_identifier', data.user.email);
-      setCustomGoogleEmail('');
-      setCustomGoogleName('');
-      setCustomGoogleTg('');
-      setCustomGooglePasscode('');
-      setShowAddGoogleAccount(false);
-      await completeAuthenticatedSession(
-        data.token,
-        data.user,
-        `Signed in with Google as ${data.user.name} (${data.user.email}) · ID: ${data.user.owner_uid}`,
-        'overview'
-      );
-    } catch (err: any) {
-      setAuthError(err.message || 'Network error during Google sign in.');
+      popup.location.href = data.url;
+    } catch (error: any) {
+      popup.close();
+      setAuthError(error.message || 'Could not start Google sign-in.');
     } finally {
       setGoogleAuthLoading(false);
     }
@@ -1149,7 +1123,8 @@ export default function App() {
           auth_key: tgWaitingForSession && tgAuthKey ? tgAuthKey : undefined,
           telegram_username: cleanTg,
           name: rawName || cleanTgNoAt,
-          recovery_passcode: rawPass || '2026',
+          recovery_passcode: rawPass,
+          initData: (window as any).Telegram?.WebApp?.initData || '',
           intent: 'auto',
           role: 'store_owner',
           language: lang,
@@ -1183,7 +1158,7 @@ export default function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           identifier: authEmail.trim(),
-          recovery_passcode: authRecoveryPasscode.trim() || '2026',
+          recovery_passcode: authRecoveryPasscode.trim(),
           new_password: authRecoverNewPassword.trim() || undefined,
         }),
       });
@@ -1213,8 +1188,11 @@ export default function App() {
       if (!cleanEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
         regErrors.email = 'A valid Email Address is required (e.g. owner@yourbrand.com).';
       }
-      if (!authPassword.trim() || authPassword.trim().length < 4) {
-        regErrors.password = 'Password must be at least 4 characters.';
+      if (!authPassword.trim() || authPassword.trim().length < 8) {
+        regErrors.password = 'Password must be at least 8 characters.';
+      }
+      if (authRecoveryPasscode.trim().length < 8) {
+        regErrors.recovery_passcode = 'Recovery passcode must be at least 8 characters.';
       }
       if (Object.keys(regErrors).length > 0) {
         setAuthFieldErrors(regErrors);
@@ -1245,7 +1223,7 @@ export default function App() {
         email: authEmail.trim(),
         password: authPassword.trim(),
         telegram_username: authTgUsername.trim(),
-        recovery_passcode: authRecoveryPasscode.trim() || '2026',
+        recovery_passcode: authRecoveryPasscode.trim(),
         recovery_hint: authRecoveryHint,
         language: lang,
       }),
