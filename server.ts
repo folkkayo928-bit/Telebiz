@@ -1824,6 +1824,8 @@ app.post('/api/businesses', (req: Request, res: Response) => {
     return;
   }
 
+  const authenticatedUser = req.user;
+
   const {
     name,
     category,
@@ -1976,7 +1978,7 @@ app.post('/api/businesses', (req: Request, res: Response) => {
   const finalBgColor = background_color || presetConfig.bg;
   const finalPattern = background_pattern || presetConfig.pattern;
 
-  const ownerRow = db.prepare('SELECT owner_uid FROM users WHERE id = ?').get(req.user.id) as { owner_uid?: string } | undefined;
+  const ownerRow = db.prepare('SELECT owner_uid FROM users WHERE id = ?').get(authenticatedUser.id) as { owner_uid?: string } | undefined;
 
   const persistStore = db.transaction(() => {
   db.prepare(`
@@ -2011,12 +2013,12 @@ app.post('/api/businesses', (req: Request, res: Response) => {
     description || `Welcome to ${name}. Browse our catalog and order directly with fast checkout.`,
     `Welcome to ${name}. Order directly via Telegram Mini App or Web Storefront with fast delivery and verified checkout.`,
     contact_phone || '',
-    contact_email || req.user.email,
+    contact_email || authenticatedUser.email,
     address || '',
     JSON.stringify({ mon_fri: '08:30 - 20:00', sat: '09:00 - 21:00', sun: '10:00 - 18:00' }),
     telegram_bot_username || '',
     published,
-    req.user.id,
+    authenticatedUser.id,
     ownerRow?.owner_uid || '',
     now
   );
@@ -2024,20 +2026,20 @@ app.post('/api/businesses', (req: Request, res: Response) => {
   // Existing stores and their related records are preserved; no cleanup-by-guessing.
 
   // Persist the newly created business as the user's active selected store across reloads and logouts
-  db.prepare('UPDATE users SET last_selected_business_id = ? WHERE id = ?').run(bizId, req.user.id);
+  db.prepare('UPDATE users SET last_selected_business_id = ? WHERE id = ?').run(bizId, authenticatedUser.id);
 
   // Create default main branch
   const branchId = 'br_' + crypto.randomBytes(4).toString('hex');
   db.prepare(`
     INSERT INTO business_branches (id, business_id, name, address, phone, manager_name, working_hours, is_main, status)
     VALUES (?, ?, ?, ?, ?, ?, '08:30 - 20:00', 1, 'open')
-  `).run(branchId, bizId, `${name} Main Branch`, address || '', contact_phone || '', req.user.name);
+  `).run(branchId, bizId, `${name} Main Branch`, address || '', contact_phone || '', authenticatedUser.name);
 
   // Create owner employee record
   db.prepare(`
     INSERT INTO employees (id, business_id, user_id, name, email, role, permissions_json, branch_id, schedule_json, status, created_at)
     VALUES (?, ?, ?, ?, ?, 'owner', '["all"]', ?, '{"shift":"Full Access"}', 'active', ?)
-  `).run('emp_' + crypto.randomBytes(4).toString('hex'), bizId, req.user.id, req.user.name, req.user.email, branchId, now);
+  `).run('emp_' + crypto.randomBytes(4).toString('hex'), bizId, authenticatedUser.id, authenticatedUser.name, authenticatedUser.email, branchId, now);
 
   // Create initial Mini App Version 1
   const initialLayout = JSON.stringify([
@@ -2078,15 +2080,15 @@ app.post('/api/businesses', (req: Request, res: Response) => {
   db.prepare(`
     INSERT INTO mini_app_versions (id, business_id, version_number, layout_json, theme_json, pages_json, status, created_by, note, created_at)
     VALUES (?, ?, 1, ?, ?, ?, ?, ?, 'Initial visual template creation', ?)
-  `).run('ver_' + crypto.randomBytes(4).toString('hex'), bizId, initialLayout, initialTheme, initialPages, published ? 'published' : 'draft', req.user.name, now);
+  `).run('ver_' + crypto.randomBytes(4).toString('hex'), bizId, initialLayout, initialTheme, initialPages, published ? 'published' : 'draft', authenticatedUser.name, now);
 
   });
   persistStore();
 
   recordAuditLog({
-    actorUserId: req.user.id,
-    actorName: req.user.name,
-    actorRole: req.user.platform_role,
+    actorUserId: authenticatedUser.id,
+    actorName: authenticatedUser.name,
+    actorRole: authenticatedUser.platform_role,
     businessId: bizId,
     action: 'CREATE_BUSINESS',
     targetType: 'business',
