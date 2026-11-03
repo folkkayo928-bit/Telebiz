@@ -127,6 +127,7 @@ export default function App() {
   // Modals & Interactive States
   const [fullStorefrontOpen, setFullStorefrontOpen] = useState(false);
   const [newBizModalOpen, setNewBizModalOpen] = useState(false);
+  const [newBizCreating, setNewBizCreating] = useState(false);
   const [launchGuideOpen, setLaunchGuideOpen] = useState(false);
   const [authModalOpen, setAuthModalOpen] = useState(false);
   const [statusBanner, setStatusBanner] = useState('');
@@ -560,6 +561,7 @@ export default function App() {
               setSelectedBusinessId(targetBizId);
               await loadTenantWorkspace(targetBizId, effectiveToken);
             } else {
+              if (data.user.platform_role !== 'super_admin') setNewBizModalOpen(true);
               setLoading(false);
             }
           }
@@ -1344,6 +1346,7 @@ export default function App() {
 
   const handleCreateBusiness = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!newBizName.trim() || !newBizCategory || newBizCreating) return;
     const templatePresetMap: Record<string, { primary: string; accent: string; font: string; bg: string; darkness: string; pattern: string }> = {
       clean_modern: { primary: '#0F172A', accent: '#6366F1', font: 'Plus Jakarta Sans', bg: '#F8FAFC', darkness: 'light', pattern: 'subtle_grid' },
       luxury_chains_jewelry: { primary: '#121214', accent: '#D4AF37', font: 'Cinzel', bg: '#0B0C10', darkness: 'dark', pattern: 'gold_dust' },
@@ -1353,44 +1356,52 @@ export default function App() {
       digital_menu: { primary: '#450A0A', accent: '#D97706', font: 'Space Grotesk', bg: '#180707', darkness: 'dark', pattern: 'subtle_grid' },
     };
     const chosenPreset = templatePresetMap[newBizTemplate] || templatePresetMap.clean_modern;
-
-    const res = await fetch('/api/businesses', {
-      method: 'POST',
-      headers: headersWithAuth(),
-      body: JSON.stringify({
-        name: newBizName,
-        store_id: newBizSlug.trim() || undefined,
-        categories: newBizCustomCats.trim() ? newBizCustomCats.split(',').map((c) => c.trim()).filter(Boolean) : undefined,
-        category: newBizCategory,
-        template_id: newBizTemplate,
-        primary_color: chosenPreset.primary,
-        accent_color: chosenPreset.accent,
-        font_family: chosenPreset.font,
-        background_color: chosenPreset.bg,
-        page_darkness: chosenPreset.darkness,
-        background_pattern: chosenPreset.pattern,
-        creation_method: newBizMethod,
-        description: newBizDesc,
-        contact_phone: newBizPhone,
-        address: newBizAddress,
-        telegram_bot_username: newBizBot,
-        dfy_notes: newBizDfyNotes,
-      }),
-    });
-    const created = await res.json();
-    if (res.ok && created?.id) {
+    setNewBizCreating(true);
+    setCommerceError('');
+    try {
+      const res = await fetch('/api/businesses', {
+        method: 'POST',
+        headers: headersWithAuth(),
+        body: JSON.stringify({
+          name: newBizName.trim(),
+          store_id: newBizSlug.trim() || undefined,
+          categories: newBizCustomCats.trim() ? newBizCustomCats.split(',').map((c) => c.trim()).filter(Boolean) : undefined,
+          category: newBizCategory,
+          template_id: newBizTemplate,
+          primary_color: chosenPreset.primary,
+          accent_color: chosenPreset.accent,
+          font_family: chosenPreset.font,
+          background_color: chosenPreset.bg,
+          page_darkness: chosenPreset.darkness,
+          background_pattern: chosenPreset.pattern,
+          creation_method: newBizMethod,
+          description: newBizDesc.trim(),
+          contact_phone: newBizPhone.trim(),
+          address: newBizAddress.trim(),
+          telegram_bot_username: newBizBot.trim(),
+          dfy_notes: newBizDfyNotes.trim(),
+        }),
+      });
+      const created = await res.json().catch(() => ({}));
+      if (!res.ok || !created?.id) throw new Error(created.error || 'The store could not be created. Please try again.');
       setNewBizModalOpen(false);
       setNewBizName('');
       setNewBizSlug('');
       setNewBizCustomCats('');
       setNewBizDesc('');
+      setNewBizPhone('');
+      setNewBizAddress('');
+      setNewBizBot('');
+      setNewBizDfyNotes('');
       localStorage.setItem('telebiz_selected_business_id', created.id);
       setSelectedBusinessId(created.id);
-      await loadAccountAndBusinesses(undefined, created.id);
+      await loadAccountAndBusinesses(authToken || undefined, created.id);
       setFullStorefrontOpen(true);
-      setStatusBanner(
-        `Store "${created.name}" created and saved! Your catalog starts with a clean slate so you can add your products, prices, and categories.`
-      );
+      setStatusBanner(`"${created.name}" was created as a private draft. Add your real products, payment methods, contact details, and Telegram bot before publishing it.`);
+    } catch (error: any) {
+      setCommerceError(error.message || 'Network error. The store was not created.');
+    } finally {
+      setNewBizCreating(false);
     }
   };
 
@@ -6857,7 +6868,7 @@ export default function App() {
                   Create Your Business Storefront & Telegram Mini App
                 </h3>
                 <p className="text-slate-500 mt-0.5">
-                  Pick a visual template below — we automatically build your store with sample categories, products, and checkout so you can preview and edit immediately.
+                  Pick a visual template for your design. Telebiz creates an empty private draft; add your real products, payment methods, and Telegram connection before publishing.
                 </p>
               </div>
               <button
@@ -6872,6 +6883,11 @@ export default function App() {
             </div>
 
             <form onSubmit={handleCreateBusiness} className="space-y-4">
+              {commerceError && (
+                <div role="alert" className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700">
+                  {commerceError}
+                </div>
+              )}
               {/* STEP 1: STORE IDENTITY & CUSTOM STORE ID */}
               <div className="card-3d rounded-2xl p-4 bg-slate-50/70 dark:bg-slate-950/40 border border-slate-200 dark:border-slate-800 space-y-3">
                 <div className="font-extrabold text-sm text-slate-900 dark:text-white flex items-center justify-between">
@@ -7109,9 +7125,9 @@ export default function App() {
                   </button>
                   <button
                     type="submit"
-                    className="btn-3d-primary px-5 py-2.5 rounded-xl text-white font-extrabold text-xs flex-1 sm:flex-none"
+                    className="btn-3d-primary px-5 py-2.5 rounded-xl text-white font-extrabold text-xs flex-1 sm:flex-none disabled:opacity-60" disabled={newBizCreating}
                   >
-                    Save &amp; Open Store Preview →
+                    {newBizCreating ? 'Creating…' : 'Create Private Draft →'}
                   </button>
                 </div>
               </div>
@@ -7155,7 +7171,7 @@ export default function App() {
                   </h4>
                 </div>
                 <p className="text-slate-600 dark:text-slate-300 leading-relaxed">
-                  Store owners register an account (or click <strong>+ Create New Business</strong>) and pick a visual template like <strong>Al-Saudia Luxury Boutique</strong>. The platform automatically generates their storefront with pre-built categories, 4 sample products (with sizes, color swatches, compare-at discounts), a booking service, and opens the <strong>Live Storefront Preview</strong> immediately.
+                  Store owners register an account, create a private draft, and choose a visual template. They then add their real products, services, payment instructions, contact details, and Telegram bot before publishing the store.
                 </p>
                 <button
                   type="button"
