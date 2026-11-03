@@ -1681,8 +1681,8 @@ app.post('/api/auth/passcode', (req: Request, res: Response) => {
 
 // List & add Platform Co-Admins (Super Admin management)
 app.get('/api/superadmin/admins', (req: Request, res: Response) => {
-  if (!req.user) {
-    res.status(401).json({ error: 'Authentication required' });
+  if (!req.user || req.user.platform_role !== 'super_admin') {
+    res.status(403).json({ error: 'Platform administrator authorization required.' });
     return;
   }
   const admins = db.prepare("SELECT id, email, name, platform_role, telegram_username, created_at FROM users WHERE platform_role = 'super_admin' ORDER BY created_at ASC").all();
@@ -1783,7 +1783,7 @@ app.post('/api/businesses', (req: Request, res: Response) => {
   const now = new Date().toISOString();
   const expiresAt = new Date(Date.now() + 30 * 86400000).toISOString();
   const dfyStatus = creation_method === 'done_for_you' ? 'requested' : 'not_applicable';
-  const published = creation_method === 'done_for_you' ? 0 : 1;
+  const published = 0;
   const initials = name.split(' ').map((w: string) => w[0]).join('').slice(0, 2).toUpperCase() || 'TB';
 
   // Process user categories (never force Arabian or preset mock categories)
@@ -1898,6 +1898,7 @@ app.post('/api/businesses', (req: Request, res: Response) => {
 
   const ownerRow = db.prepare('SELECT owner_uid FROM users WHERE id = ?').get(req.user.id) as { owner_uid?: string } | undefined;
 
+  const persistStore = db.transaction(() => {
   db.prepare(`
     INSERT INTO businesses (
       id, slug, name, category, status, creation_method, dfy_status, dfy_notes,
@@ -1929,36 +1930,18 @@ app.post('/api/businesses', (req: Request, res: Response) => {
     initials,
     description || `Welcome to ${name}. Browse our catalog and order directly with fast checkout.`,
     `Welcome to ${name}. Order directly via Telegram Mini App or Web Storefront with fast delivery and verified checkout.`,
-    contact_phone || '+251 911 000 000',
+    contact_phone || '',
     contact_email || req.user.email,
-    address || 'Addis Ababa, Ethiopia',
+    address || '',
     JSON.stringify({ mon_fri: '08:30 - 20:00', sat: '09:00 - 21:00', sun: '10:00 - 18:00' }),
-    telegram_bot_username || `@${slug.replace(/[^a-z0-9]/g, '')}Bot`,
+    telegram_bot_username || '',
     published,
     req.user.id,
     ownerRow?.owner_uid || '',
     now
   );
 
-  // If the user had an untouched auto-generated default placeholder store ("<Name>'s Store") with 0 products & 0 orders,
-  // remove that empty placeholder so the user's newly created custom store is their primary store!
-  try {
-    const autoStoreName = `${req.user.name}'s Store`;
-    if (name !== autoStoreName) {
-      const placeholderStores = db.prepare(
-        'SELECT id FROM businesses WHERE owner_id = ? AND name = ? AND id != ?'
-      ).all(req.user.id, autoStoreName, bizId) as Array<{ id: string }>;
-      for (const ph of placeholderStores) {
-        const pCount = (db.prepare('SELECT COUNT(*) as cnt FROM products WHERE business_id = ?').get(ph.id) as { cnt: number }).cnt;
-        const oCount = (db.prepare('SELECT COUNT(*) as cnt FROM orders WHERE business_id = ?').get(ph.id) as { cnt: number }).cnt;
-        if (pCount === 0 && oCount === 0) {
-          db.prepare('DELETE FROM businesses WHERE id = ?').run(ph.id);
-        }
-      }
-    }
-  } catch (cleanupErr) {
-    console.warn('Placeholder store cleanup warning:', cleanupErr);
-  }
+  // Existing stores and their related records are preserved; no cleanup-by-guessing.
 
   // Persist the newly created business as the user's active selected store across reloads and logouts
   db.prepare('UPDATE users SET last_selected_business_id = ? WHERE id = ?').run(bizId, req.user.id);
@@ -1968,7 +1951,7 @@ app.post('/api/businesses', (req: Request, res: Response) => {
   db.prepare(`
     INSERT INTO business_branches (id, business_id, name, address, phone, manager_name, working_hours, is_main, status)
     VALUES (?, ?, ?, ?, ?, ?, '08:30 - 20:00', 1, 'open')
-  `).run(branchId, bizId, `${name} Main Branch`, address || 'Addis Ababa', contact_phone || '+251 911 000 000', req.user.name);
+  `).run(branchId, bizId, `${name} Main Branch`, address || '', contact_phone || '', req.user.name);
 
   // Create owner employee record
   db.prepare(`
@@ -2017,6 +2000,9 @@ app.post('/api/businesses', (req: Request, res: Response) => {
     VALUES (?, ?, 1, ?, ?, ?, ?, ?, 'Initial visual template creation', ?)
   `).run('ver_' + crypto.randomBytes(4).toString('hex'), bizId, initialLayout, initialTheme, initialPages, published ? 'published' : 'draft', req.user.name, now);
 
+  });
+  persistStore();
+
   recordAuditLog({
     actorUserId: req.user.id,
     actorName: req.user.name,
@@ -2027,8 +2013,6 @@ app.post('/api/businesses', (req: Request, res: Response) => {
     targetId: bizId,
     newValue: `${name} (${category}, ${creation_method}, template=${template_id || 'custom'})`,
   });
-
-  ensureDefaultBusinessPaymentMethods();
 
   const created = db.prepare('SELECT * FROM businesses WHERE id = ?').get(bizId);
   res.status(201).json(created);
@@ -4445,6 +4429,14 @@ app.get('/api/storefront/:slug', (req: Request, res: Response) => {
   if (!business) {
     res.status(404).json({ error: 'Business Mini App not found' });
     return;
+  }
+
+  if (!business.mini_app_published) {
+    const previewAccess = verifyTenantAccess(req.user, business.id);
+    if (!previewAccess.allowed) {
+      res.status(404).json({ error: 'Business Mini App not found' });
+      return;
+    }
   }
 
   if (business.status === 'suspended' || business.status === 'paused') {
