@@ -914,6 +914,8 @@ app.get('/api/auth/google/url', (req: Request, res: Response) => {
     if (expiry <= now) pendingGoogleOAuthStates.delete(key);
   }
   pendingGoogleOAuthStates.set(state, now + 10 * 60 * 1000);
+  const secureCookie = req.secure || String(req.headers['x-forwarded-proto'] || '').includes('https') ? ' Secure;' : '';
+  res.setHeader('Set-Cookie', 'telebiz_google_state=' + state + '; HttpOnly; SameSite=Lax; Path=/; Max-Age=600;' + secureCookie);
   const params = new URLSearchParams({
     client_id: clientId, redirect_uri: redirectUri, response_type: 'code',
     scope: 'openid email profile', prompt: 'select_account', access_type: 'online', state,
@@ -923,12 +925,16 @@ app.get('/api/auth/google/url', (req: Request, res: Response) => {
 
 app.get(['/auth/callback/google', '/auth/callback/google/'], async (req: Request, res: Response) => {
   const state = String(req.query.state || '');
+  const cookieState = String(req.headers.cookie || '').split(';')
+    .map((part) => part.trim())
+    .find((part) => part.startsWith('telebiz_google_state='))?.slice('telebiz_google_state='.length) || '';
   const expiry = pendingGoogleOAuthStates.get(state);
-  if (!state || !expiry || expiry <= Date.now()) {
+  if (!state || cookieState !== state || !expiry || expiry <= Date.now()) {
     res.status(401).send('Google sign-in expired or could not be verified. Start again.');
     return;
   }
   pendingGoogleOAuthStates.delete(state);
+  res.setHeader('Set-Cookie', 'telebiz_google_state=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0');
   const code = String(req.query.code || '');
   const clientId = process.env.GOOGLE_CLIENT_ID || process.env.CLIENT_ID;
   const clientSecret = process.env.GOOGLE_CLIENT_SECRET || process.env.CLIENT_SECRET;
@@ -1492,6 +1498,11 @@ app.post('/api/auth/recover', (req: Request, res: Response) => {
     return;
   }
 
+  if (user.account_status !== 'active') {
+    res.status(403).json({ error: 'This account is not active. Contact Telebiz support.' });
+    return;
+  }
+
   if (!verifyUserSecondaryPasscode(user, String(recovery_passcode))) {
     res.status(401).json({
       error: `Incorrect Secondary Recovery Passcode for ${user.name} (${user.telegram_username || user.email}). Please enter the right passcode.`,
@@ -1503,9 +1514,9 @@ app.post('/api/auth/recover', (req: Request, res: Response) => {
   }
 
   if (new_password && String(new_password).trim().length > 0) {
-    if (String(new_password).trim().length < 6) {
+    if (String(new_password).trim().length < 8) {
       res.status(400).json({
-        error: 'New password must be at least 6 characters.',
+        error: 'New password must be at least 8 characters.',
         fieldErrors: {
           new_password: 'New password must be at least 6 characters.',
         },
@@ -1619,22 +1630,55 @@ app.post('/api/auth/password', (req: Request, res: Response) => {
     res.status(401).json({ error: 'Authentication required' });
     return;
   }
-  const { newPassword } = req.body;
-  if (!newPassword || String(newPassword).length < 4) {
-    res.status(400).json({ error: 'New password must be at least 4 characters.' });
+  const { currentPassword, newPassword } = req.body;
+  const userRow = db.prepare('SELECT password_hash, auth_provider, account_status FROM users WHERE id = ?').get(req.user.id) as any;
+  if (!userRow || userRow.account_status !== 'active') {
+    res.status(403).json({ error: 'This account is not active.' });
     return;
   }
-  db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(hashPassword(String(newPassword)), req.user.id);
+  const cleanNewPassword = String(newPassword || '');
+  if (cleanNewPassword.length < 8 || cleanNewPassword.length > 200) {
+    res.status(400).json({ error: 'New password must be at least 8 characters.' });
+    return;
+  }
+  if (userRow.auth_provider === 'email' && !verifyPassword(String(currentPassword || ''), String(userRow.password_hash || ''))) {
+    res.status(401).json({ error: 'Enter your current password before setting a new one.' });
+    return;
+  }
+
+  db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(hashPassword(cleanNewPassword), req.user.id);
+  if (userRow.auth_provider !== 'email') {
+    db.prepare("UPDATE users SET auth_provider = 'email' WHERE id = ?").run(req.user.id);
+  }
+  const currentToken = String(req.headers.authorization || '').startsWith('Bearer ')
+    ? String(req.headers.authorization).slice(7)
+    : '';
+  db.prepare('UPDATE sessions SET revoked = 1 WHERE user_id = ? AND token != ?').run(req.user.id, currentToken);
   recordAuditLog({
-    actorUserId: req.user.id,
-    actorName: req.user.name,
-    actorRole: req.user.platform_role,
-    action: 'UPDATE_ACCOUNT_PASSWORD',
-    targetType: 'user',
-    targetId: req.user.id,
+    actorUserId: req.user.id, actorName: req.user.name, actorRole: req.user.platform_role,
+    action: 'UPDATE_ACCOUNT_PASSWORD', targetType: 'user', targetId: req.user.id,
     reason: 'User updated account password in Settings',
   });
-  res.json({ success: true });
+  res.json({ success: true, sessionsRevoked: true });
+});
+
+app.post('/api/auth/recovery-passcode', (req: Request, res: Response) => {
+  if (!req.user) {
+    res.status(401).json({ error: 'Authentication required' });
+    return;
+  }
+  const { recovery_passcode, recovery_hint } = req.body;
+  const cleanPasscode = String(recovery_passcode || '');
+  if (cleanPasscode.length < 8 || cleanPasscode.length > 200) {
+    res.status(400).json({ error: 'Recovery passcode must be at least 8 characters.' });
+    return;
+  }
+  db.prepare('UPDATE users SET recovery_passcode_hash = ?, recovery_hint = ? WHERE id = ?').run(
+    hashPassword(cleanPasscode),
+    String(recovery_hint || 'Personal recovery passcode').trim().slice(0, 120),
+    req.user.id
+  );
+  res.json({ success: true, has_recovery_passcode: true });
 });
 
 // Set, verify, or clear security passcode lock
@@ -1644,14 +1688,27 @@ app.post('/api/auth/passcode', (req: Request, res: Response) => {
     return;
   }
   const { action, passcode } = req.body;
-  const userRow = db.prepare('SELECT passcode FROM users WHERE id = ?').get(req.user.id) as any;
+  const row = db.prepare('SELECT passcode FROM users WHERE id = ?').get(req.user.id) as any;
+  const stored = String(row?.passcode || '');
+  const supplied = String(passcode || '').trim();
 
   if (action === 'verify') {
-    if (!userRow?.passcode || userRow.passcode === String(passcode || '').trim()) {
+    if (!stored) {
       res.json({ verified: true });
-    } else {
-      res.status(401).json({ error: 'Incorrect passcode. Please try again.' });
+      return;
     }
+    let valid = stored.startsWith('scrypt$') ? verifyPassword(supplied, stored) : false;
+    if (!valid && !stored.startsWith('scrypt$')) {
+      const left = Buffer.from(supplied);
+      const right = Buffer.from(stored);
+      valid = left.length === right.length && crypto.timingSafeEqual(left, right);
+      if (valid) db.prepare('UPDATE users SET passcode = ? WHERE id = ?').run(hashPassword(supplied), req.user.id);
+    }
+    if (!valid) {
+      res.status(401).json({ error: 'Incorrect passcode. Please try again.' });
+      return;
+    }
+    res.json({ verified: true });
     return;
   }
 
@@ -1661,12 +1718,11 @@ app.post('/api/auth/passcode', (req: Request, res: Response) => {
     return;
   }
 
-  const cleanPin = String(passcode || '').trim();
-  if (!/^\d{4,6}$/.test(cleanPin)) {
+  if (!/^\\d{4,6}$/.test(supplied)) {
     res.status(400).json({ error: 'Passcode must be a 4 to 6 digit number.' });
     return;
   }
-  db.prepare('UPDATE users SET passcode = ? WHERE id = ?').run(cleanPin, req.user.id);
+  db.prepare('UPDATE users SET passcode = ? WHERE id = ?').run(hashPassword(supplied), req.user.id);
   res.json({ success: true, has_passcode: true });
 });
 
