@@ -1,0 +1,35 @@
+name: Telebiz CI
+
+on:
+  push:
+    branches: [main, security/**]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Typecheck, tests and production build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install locked dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Test password and migration helpers
+        run: TELEBIZ_DATABASE_PATH=/tmp/telebiz-ci-tests.db bun run test
+
+      - name: TypeScript check
+        run: bun run lint
+
+      - name: Build production frontend
+        run: bun run build
