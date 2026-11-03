@@ -566,7 +566,9 @@ export const MiniAppStorefront: React.FC<StorefrontProps> = ({
     setLoading(true);
     setError('');
     try {
-      const res = await fetch('/api/storefront/' + slug);
+      const res = await fetch('/api/storefront/' + slug, {
+        headers: authToken ? { Authorization: `Bearer ${authToken}` } : {},
+      });
       const json = await res.json();
       if (!res.ok) {
         setError(json.error || 'Unable to load this storefront.');
@@ -665,8 +667,7 @@ export const MiniAppStorefront: React.FC<StorefrontProps> = ({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           device_fingerprint: fp,
-          telegram_id: tgUser?.id ? String(tgUser.id) : '',
-          telegram_username: tgUser?.username ? `@${tgUser.username}` : '',
+          initData: (window as any)?.Telegram?.WebApp?.initData || '',
           source: detectedSource,
         }),
       })
@@ -686,7 +687,7 @@ export const MiniAppStorefront: React.FC<StorefrontProps> = ({
     } catch {
       // ignore
     }
-  }, [slug, mode]);
+  }, [slug, mode, authToken]);
 
   if (loading) {
     return (
