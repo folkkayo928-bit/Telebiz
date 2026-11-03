@@ -1334,9 +1334,19 @@ function handleStoreOwnerTelegramAuth(req: Request, res: Response) {
 
   const normalizedHandle = '@' + rawHandle;
   const now = new Date().toISOString();
-  let user = findUserByTelegramHandle(normalizedHandle);
-  if (!user && verifiedTelegramId) {
-    user = db.prepare('SELECT * FROM users WHERE telegram_id IS NOT NULL AND telegram_id != "" AND telegram_id = ?').get(verifiedTelegramId) as any;
+  const handleOwner = findUserByTelegramHandle(normalizedHandle);
+  // The signed numeric Telegram ID is the account identity. Usernames are
+  // mutable and may be reassigned, so they must never select an account when
+  // signed initData is present.
+  let user = verifiedTelegramId
+    ? db.prepare('SELECT * FROM users WHERE telegram_id IS NOT NULL AND telegram_id != "" AND telegram_id = ?').get(verifiedTelegramId) as any
+    : handleOwner;
+
+  if (verifiedTelegramId && !user && handleOwner) {
+    res.status(409).json({
+      error: 'This Telegram username is linked to a different Telebiz account. Sign in with the Telegram account already linked to that store or contact support to resolve the old link.',
+    });
+    return;
   }
 
   let isNewAccount = false;
@@ -1356,14 +1366,14 @@ function handleStoreOwnerTelegramAuth(req: Request, res: Response) {
 
     if (verifiedTelegramId) {
       const conflicting = findUserByTelegramHandle(normalizedHandle);
-      if (conflicting && conflicting.id !== user.id) {
-        res.status(409).json({ error: 'This Telegram username is already linked to another Telebiz account.' });
-        return;
+      if (!conflicting || conflicting.id === user.id) {
+        db.prepare('UPDATE users SET telegram_id = ?, telegram_username = ? WHERE id = ?')
+          .run(verifiedTelegramId, normalizedHandle, user.id);
+        user.telegram_id = verifiedTelegramId;
+        user.telegram_username = normalizedHandle;
       }
-      db.prepare('UPDATE users SET telegram_id = ?, telegram_username = ? WHERE id = ?')
-        .run(verifiedTelegramId, normalizedHandle, user.id);
-      user.telegram_id = verifiedTelegramId;
-      user.telegram_username = normalizedHandle;
+      // If the username belongs to another account, keep this verified-ID
+      // session valid but do not overwrite or transfer either account's link.
     }
     if (displayName && displayName.length >= 2 && (!user.name || user.name === rawHandle)) {
       db.prepare('UPDATE users SET name = ? WHERE id = ?').run(displayName, user.id);
