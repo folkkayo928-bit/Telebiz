@@ -195,7 +195,7 @@ export default function App() {
   const [empName, setEmpName] = useState('');
   const [empEmail, setEmpEmail] = useState('');
   const [empRole, setEmpRole] = useState('sales');
-  const [empPerms, setEmpPerms] = useState<string[]>(['orders.manage', 'support.reply']);
+  const [empPerms, setEmpPerms] = useState<string[]>(['workspace.view', 'orders.manage', 'support.reply']);
 
   const [branchName, setBranchName] = useState('');
   const [branchAddress, setBranchAddress] = useState('');
@@ -5442,6 +5442,47 @@ export default function App() {
                       <option value="product_manager">Product Manager</option>
                       <option value="analyst">Analyst</option>
                     </select>
+                    <div className="rounded-xl border border-slate-200 dark:border-slate-700 p-3 space-y-2">
+                      <div className="font-bold text-slate-800 dark:text-slate-100">Access permissions</div>
+                      <p className="text-[10px] text-slate-500">Only selected actions will be available to this employee.</p>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        {[
+                          { value: 'workspace.view', label: 'View workspace' },
+                          { value: 'orders.manage', label: 'Manage orders & payments' },
+                          { value: 'bookings.manage', label: 'Manage bookings' },
+                          { value: 'products.manage', label: 'Manage products & categories' },
+                          { value: 'builder.edit', label: 'Edit storefront builder' },
+                          { value: 'support.view', label: 'View support inbox' },
+                          { value: 'support.reply', label: 'Reply to customers' },
+                          { value: 'analytics.view', label: 'View analytics' },
+                          { value: 'reviews.manage', label: 'Manage reviews' },
+                          { value: 'settings.manage', label: 'Manage store settings' },
+                          { value: 'telegram.manage', label: 'Configure Telegram' },
+                          { value: 'notifications.view', label: 'View notifications' },
+                          { value: 'notifications.manage', label: 'Send notifications' },
+                          { value: 'marketing.manage', label: 'Manage promotions & campaigns' },
+                          { value: 'finance.manage', label: 'Manage expenses' },
+                          { value: 'branches.manage', label: 'Manage branches' },
+                          { value: 'subscription.manage', label: 'Manage subscription' },
+                          { value: 'addons.manage', label: 'Manage add-ons' },
+                          { value: 'team.manage', label: 'Manage employees' },
+                        ].map((permission) => (
+                          <label key={permission.value} className="flex items-center gap-2 text-[11px] font-medium text-slate-700 dark:text-slate-300">
+                            <input
+                              type="checkbox"
+                              checked={empPerms.includes(permission.value)}
+                              onChange={(e) => setEmpPerms((prev) =>
+                                e.target.checked
+                                  ? [...prev, permission.value]
+                                  : prev.filter((value) => value !== permission.value)
+                              )}
+                              className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                            />
+                            <span>{permission.label}</span>
+                          </label>
+                        ))}
+                      </div>
+                    </div>
                     <button
                       type="submit"
                       className="w-full py-2 rounded-lg bg-sky-600 hover:bg-sky-500 text-white font-semibold"
