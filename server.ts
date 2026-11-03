@@ -9,6 +9,7 @@ import {
   db,
   initDatabase,
   hashPassword,
+  verifyPassword,
   ensureDefaultBusinessPaymentMethods,
   generateOwnerUid,
   generateCustomerUid,
@@ -120,8 +121,8 @@ function authMiddleware(req: Request, _res: Response, next: NextFunction) {
       SELECT s.token, u.id, u.email, u.name, u.platform_role, u.preferred_language, u.account_status
       FROM sessions s
       JOIN users u ON u.id = s.user_id
-      WHERE s.token = ? AND s.revoked = 0
-    `).get(token) as (AuthUser & { token: string; account_status?: string }) | undefined;
+      WHERE s.token = ? AND s.revoked = 0 AND s.expires_at > ?
+    `).get(token, new Date().toISOString()) as (AuthUser & { token: string; account_status?: string }) | undefined;
 
     if (session && session.account_status !== 'blocked') {
       req.user = {
@@ -184,7 +185,7 @@ function verifyTenantAccess(user: AuthUser | undefined, businessId: string, requ
 // 1. AUTHENTICATION & ACCOUNT ROUTES
 // ============================================================================
 
-function ensureUserHasOwnStore(user: {
+function ensureUserHasOwnStore(_user: {
   id: string;
   name: string;
   email?: string;
@@ -192,125 +193,9 @@ function ensureUserHasOwnStore(user: {
   owner_uid?: string;
   platform_role?: string;
 }) {
-  if (!user || !user.id || user.platform_role === 'super_admin') return;
-  const existingCount = (
-    db
-      .prepare('SELECT COUNT(*) as cnt FROM businesses WHERE owner_id = ?')
-      .get(user.id) as { cnt: number }
-  ).cnt;
-  if (existingCount > 0) return;
-
-  const bizId = 'biz_' + crypto.randomBytes(5).toString('hex');
-  const cleanBase = String(user.name || 'my-store')
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-|-$/g, '')
-    .slice(0, 22);
-  const slug = `${cleanBase || 'store'}-${crypto.randomBytes(2).toString('hex')}`;
-  const botHandle = user.telegram_username
-    ? `@${String(user.telegram_username).replace(/^@+/, '')}Bot`
-    : `@${(cleanBase || 'Store').replace(/[^a-z0-9]/gi, '')}Bot`;
-  const now = new Date().toISOString();
-  const expiresAt = new Date(Date.now() + 30 * 86400000).toISOString();
-  const storeName = `${user.name}'s Store`;
-  const initials = String(user.name || 'ST').slice(0, 2).toUpperCase();
-  const description = `Official Telegram Mini App & Web Storefront managed by ${user.name}.`;
-
-  db.prepare(`
-    INSERT INTO businesses (
-      id, slug, name, category, status, creation_method, dfy_status, dfy_notes,
-      plan_id, billing_cycle, subscription_status, subscription_expires_at, grace_period_days,
-      primary_color, accent_color, font_family, background_color, page_darkness, background_pattern, template_id,
-      categories_json, logo_text, description, about_text,
-      contact_phone, contact_email, address, working_hours_json, custom_domain,
-      restricted_features_json, telegram_bot_token_masked, telegram_bot_username,
-      telegram_channel_username, telegram_webhook_active, mini_app_published,
-      mini_app_version, ai_generations_used, ai_generations_limit, owner_id, owner_uid, created_at
-    ) VALUES (
-      ?, ?, ?, 'retail', 'active', 'self_service', 'not_applicable', '',
-      'growth', 'monthly', 'active', ?, 7,
-      '#0F172A', '#6366F1', 'Plus Jakarta Sans', '#F8FAFC', 'light', 'subtle_grid', 'clean_modern',
-      ?, ?, ?, ?,
-      '+251 911 000 000', ?, 'Addis Ababa, Ethiopia', ?, ?,
-      '[]', '819203:AAF...verified', ?,
-      '', 1, 1,
-      1, 0, 25, ?, ?, ?
-    )
-  `).run(
-    bizId,
-    slug,
-    storeName,
-    expiresAt,
-    JSON.stringify(['Featured', 'New Arrivals', 'Best Sellers']),
-    initials,
-    description,
-    description,
-    user.email || `${slug}@telebiz.os`,
-    JSON.stringify({ mon_fri: '08:30 - 20:00', sat: '09:00 - 21:00', sun: '10:00 - 18:00' }),
-    `shop.${slug}.et`,
-    botHandle,
-    user.id,
-    user.owner_uid || '',
-    now
-  );
-
-  db.prepare(`
-    UPDATE users SET last_selected_business_id = ?
-    WHERE id = ? AND (last_selected_business_id IS NULL OR last_selected_business_id = '')
-  `).run(bizId, user.id);
-
-  const branchId = 'br_' + crypto.randomBytes(4).toString('hex');
-  db.prepare(`
-    INSERT INTO business_branches (id, business_id, name, address, phone, manager_name, working_hours, is_main, status)
-    VALUES (?, ?, ?, 'Addis Ababa, Ethiopia', '+251 911 000 000', ?, '08:30 - 20:00', 1, 'open')
-  `).run(branchId, bizId, `${storeName} Main Branch`, user.name);
-
-  db.prepare(`
-    INSERT INTO employees (id, business_id, user_id, name, email, role, permissions_json, branch_id, schedule_json, status, created_at)
-    VALUES (?, ?, ?, ?, ?, 'owner', '["all"]', ?, '{"shift":"Full Access"}', 'active', ?)
-  `).run('emp_' + crypto.randomBytes(4).toString('hex'), bizId, user.id, user.name, user.email || `${slug}@telebiz.os`, branchId, now);
-
-  const initialLayout = JSON.stringify([
-    { id: 'sec_hero', type: 'hero', title: storeName, subtitle: description, ctaText: 'Shop Catalog', visible: true },
-    { id: 'sec_catalog', type: 'product_grid', title: 'Catalog Offerings', subtitle: 'Explore our latest collection and products.', visible: true },
-    { id: 'sec_about', type: 'business_info', title: 'Location & Direct Support', subtitle: 'Addis Ababa, Ethiopia', visible: true },
-  ]);
-
-  const initialTheme = JSON.stringify({
-    tastePreset: 'clean_modern',
-    primaryColor: '#0F172A',
-    accentColor: '#6366F1',
-    backgroundType: 'clean_studio',
-    backgroundColor: '#F8FAFC',
-    backgroundPattern: 'subtle_grid',
-    pageDarkness: 'light',
-    fontFamily: 'Plus Jakarta Sans',
-    headingTransform: 'capitalize',
-    productCardStyle: 'modern_clean',
-    productGridColumns: '2_cols',
-    productAspectRatio: 'aspect-[1/1]',
-    cardRadius: '16px',
-    cardBackgroundStyle: 'white',
-    headerStyle: 'modern_clean',
-    buttonStyle: '3d',
-    showStockBadges: true,
-    showStarRatings: true,
-    enableTelegramStars: true,
-    enableWebCheckout: true,
-  });
-
-  const initialPages = JSON.stringify([
-    { slug: 'home', title: 'Home', enabled: true },
-    { slug: 'catalog', title: 'Catalog', enabled: true },
-    { slug: 'about', title: 'About & Contact', enabled: true },
-  ]);
-
-  db.prepare(`
-    INSERT INTO mini_app_versions (id, business_id, version_number, layout_json, theme_json, pages_json, status, created_by, note, created_at)
-    VALUES (?, ?, 1, ?, ?, ?, 'published', ?, 'Initial store setup', ?)
-  `).run('ver_' + crypto.randomBytes(4).toString('hex'), bizId, initialLayout, initialTheme, initialPages, user.name, now);
-
-  ensureDefaultBusinessPaymentMethods();
+  // Account creation does not create a fake or published store.
+  // Stores are created explicitly through the authenticated business API.
+  return;
 }
 
 app.post('/api/auth/logout', (req: Request, res: Response) => {
@@ -519,31 +404,65 @@ function findUserByIdentifier(rawInput: string): any {
 }
 
 function verifyUserSecondaryPasscode(user: any, enteredPasscode: string): boolean {
-  if (!user) return false;
-  const cleanSecret = String(enteredPasscode || '').trim();
-  if (!cleanSecret) return true;
-  const hashed = hashPassword(cleanSecret);
-
-  if (user.recovery_passcode_hash && user.recovery_passcode_hash === hashed) return true;
-  if (user.passcode && String(user.passcode).trim() === cleanSecret) return true;
-  if (user.password_hash && user.password_hash === hashed) return true;
-  if (cleanSecret === '2026') return true;
-
-  return false;
+  if (!user || typeof enteredPasscode !== 'string' || !enteredPasscode.trim()) return false;
+  const cleanSecret = enteredPasscode.trim();
+  return verifyPassword(cleanSecret, user.recovery_passcode_hash || '') ||
+    verifyPassword(cleanSecret, user.password_hash || '');
 }
 
 function isUserPasswordValid(user: any, enteredPassword: string): boolean {
-  if (!user || !enteredPassword) return false;
-  const cleanSecret = String(enteredPassword).trim();
-  if (!cleanSecret) return false;
-  const hashed = hashPassword(cleanSecret);
+  if (!user || typeof enteredPassword !== 'string' || !enteredPassword.trim()) return false;
+  const cleanSecret = enteredPassword.trim();
+  return verifyPassword(cleanSecret, user.password_hash || '') ||
+    verifyPassword(cleanSecret, user.recovery_passcode_hash || '');
+}
 
-  if (user.password_hash && user.password_hash === hashed) return true;
-  if (user.recovery_passcode_hash && user.recovery_passcode_hash === hashed) return true;
-  if (user.passcode && String(user.passcode).trim() === cleanSecret) return true;
-  if (cleanSecret === '2026') return true;
+function verifyTelegramWebAppInitData(initData: string): any | null {
+  const botToken = process.env.TELEGRAM_BOT_TOKEN;
+  if (!botToken || !initData || typeof initData !== 'string') return null;
+  try {
+    const params = new URLSearchParams(initData);
+    const receivedHash = params.get('hash') || '';
+    if (!/^[a-f0-9]{64}$/i.test(receivedHash)) return null;
+    params.delete('hash');
+    const checkString = Array.from(params.entries())
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, value]) => key + '=' + value)
+      .join('\n');
+    const secretKey = crypto.createHmac('sha256', 'WebAppData').update(botToken).digest();
+    const calculatedHash = crypto.createHmac('sha256', secretKey).update(checkString).digest();
+    const receivedBuffer = Buffer.from(receivedHash, 'hex');
+    if (receivedBuffer.length !== calculatedHash.length ||
+        !crypto.timingSafeEqual(receivedBuffer, calculatedHash)) return null;
+    const authDate = Number(params.get('auth_date') || 0);
+    const now = Math.floor(Date.now() / 1000);
+    if (!Number.isFinite(authDate) || authDate <= 0 || authDate > now + 60 || now - authDate > 86400) return null;
+    const rawUser = params.get('user');
+    if (!rawUser) return null;
+    const user = JSON.parse(rawUser);
+    return user && user.id ? user : null;
+  } catch {
+    return null;
+  }
+}
 
-  return false;
+async function verifyGoogleIdToken(credential: string): Promise<any | null> {
+  const clientId = process.env.GOOGLE_CLIENT_ID || process.env.CLIENT_ID;
+  if (!clientId || !credential) return null;
+  try {
+    const response = await fetch('https://oauth2.googleapis.com/tokeninfo?id_token=' + encodeURIComponent(credential));
+    if (!response.ok) return null;
+    const claims = await response.json();
+    const issuerOk = claims.iss === 'accounts.google.com' || claims.iss === 'https://accounts.google.com';
+    const email = String(claims.email || '').trim().toLowerCase();
+    const exp = Number(claims.exp || 0);
+    if (!issuerOk || claims.aud !== clientId || claims.email_verified !== 'true' ||
+        !Number.isFinite(exp) || exp <= Math.floor(Date.now() / 1000) ||
+        !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return null;
+    return { email, name: String(claims.name || '').trim() };
+  } catch {
+    return null;
+  }
 }
 
 // Real-Time Account & Username Checker (Verifies Telegram @handle, Google email, or Owner ID)
@@ -683,7 +602,7 @@ app.post('/api/auth/login', (req: Request, res: Response) => {
 
   if (!isUserPasswordValid(user, cleanPass)) {
     res.status(401).json({
-      error: `Incorrect password or secondary passcode for ${user.name} (${user.email}). Please enter the right password or use "Forgot password?" (default recovery passcode: 2026).`,
+      error: `Incorrect password or secondary passcode for ${user.name} (${user.email}). Please check your credentials or use account recovery.`,
       fieldErrors: {
         password: 'Incorrect password or passcode for this account.',
       },
@@ -691,15 +610,21 @@ app.post('/api/auth/login', (req: Request, res: Response) => {
     return;
   }
 
+  if (user.password_hash && !user.password_hash.startsWith('scrypt$') && verifyPassword(cleanPass, user.password_hash)) {
+    const upgraded = hashPassword(cleanPass);
+    db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(upgraded, user.id);
+    user.password_hash = upgraded;
+  }
+  if (user.recovery_passcode_hash && !user.recovery_passcode_hash.startsWith('scrypt$') && verifyPassword(cleanPass, user.recovery_passcode_hash)) {
+    const upgraded = hashPassword(cleanPass);
+    db.prepare('UPDATE users SET recovery_passcode_hash = ? WHERE id = ?').run(upgraded, user.id);
+    user.recovery_passcode_hash = upgraded;
+  }
+
   if (!user.owner_uid) {
     const newUid = generateOwnerUid(user.name);
     db.prepare('UPDATE users SET owner_uid = ? WHERE id = ?').run(newUid, user.id);
     user.owner_uid = newUid;
-  }
-
-  if (user.email && user.email.toLowerCase() === 'folkkayo928@gmail.com' && user.platform_role !== 'super_admin') {
-    db.prepare("UPDATE users SET platform_role = 'super_admin' WHERE id = ?").run(user.id);
-    user.platform_role = 'super_admin';
   }
 
   ensureUserHasOwnStore(user);
