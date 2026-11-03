@@ -1,21 +1,12 @@
 import Database from 'better-sqlite3';
 import crypto from 'crypto';
-import fs from 'fs';
 import path from 'path';
 
-// Clean up any legacy corrupted WAL files if present
-for (const legacyFile of ['telebiz_platform.db', 'telebiz_platform.db-shm', 'telebiz_platform.db-wal']) {
-  try {
-    const legacyPath = path.resolve(process.cwd(), legacyFile);
-    if (fs.existsSync(legacyPath)) {
-      fs.unlinkSync(legacyPath);
-    }
-  } catch {
-    // ignore cleanup errors
-  }
-}
-
-const dbPath = path.resolve(process.cwd(), 'telebiz_store.db');
+// Use persistent storage outside the deploy checkout in production. Never
+// delete database, WAL, or recovery files automatically during application boot.
+const dbPath = path.resolve(
+  process.env.TELEBIZ_DATABASE_PATH || path.resolve(process.cwd(), 'telebiz_store.db')
+);
 
 function openDatabaseWithRecovery(targetPath: string): Database.Database {
   const instance = new Database(targetPath);
@@ -35,7 +26,32 @@ function openDatabaseWithRecovery(targetPath: string): Database.Database {
 export const db = openDatabaseWithRecovery(dbPath);
 
 export function hashPassword(password: string): string {
-  return crypto.createHash('sha256').update(password + '_telebiz_salt_2026').digest('hex');
+  const salt = crypto.randomBytes(16).toString('hex');
+  const derived = crypto.scryptSync(String(password), salt, 64).toString('hex');
+  return 'scrypt$' + salt + '$' + derived;
+}
+
+/** Verify current scrypt hashes and legacy hashes for existing-account migration. */
+export function verifyPassword(password: string, storedHash: string): boolean {
+  if (typeof password !== 'string' || !password || typeof storedHash !== 'string' || !storedHash) return false;
+  try {
+    if (storedHash.startsWith('scrypt$')) {
+      const parts = storedHash.split('$');
+      const salt = parts[1];
+      const expectedHex = parts[2];
+      if (!salt || !expectedHex || !/^[a-f0-9]{128}$/i.test(expectedHex)) return false;
+      const actual = crypto.scryptSync(password, salt, 64);
+      const expected = Buffer.from(expectedHex, 'hex');
+      return actual.length === expected.length && crypto.timingSafeEqual(actual, expected);
+    }
+
+    // One-time compatibility for the former fixed-salt SHA-256 format.
+    const legacy = crypto.createHash('sha256').update(password + '_telebiz_salt_2026').digest();
+    const expected = Buffer.from(storedHash, 'hex');
+    return expected.length === legacy.length && crypto.timingSafeEqual(actual, expected);
+  } catch {
+    return false;
+  }
 }
 
 export function generateOwnerUid(seedName = 'OWNER'): string {
@@ -548,16 +564,19 @@ export function initDatabase() {
     CREATE INDEX IF NOT EXISTS idx_events_business_type ON analytics_events(business_id, event_type);
   `);
 
-  // Check if already seeded
+  // Demo fixtures are opt-in and must never be installed in production.
   const existingUsers = db.prepare('SELECT COUNT(*) as count FROM users').get() as { count: number };
-  if (existingUsers.count === 0) {
+  const allowDemoSeed =
+    process.env.NODE_ENV !== 'production' && process.env.TELEBIZ_ENABLE_DEMO_SEED === 'true';
+  if (existingUsers.count === 0 && allowDemoSeed) {
     seedInitialPlatformData();
   }
 
-  ensureDefaultBusinessPaymentMethods();
+  if (allowDemoSeed) ensureDefaultBusinessPaymentMethods();
 }
 
 export function ensureDefaultBusinessPaymentMethods() {
+  if (process.env.NODE_ENV === 'production' || process.env.TELEBIZ_ENABLE_DEMO_SEED !== 'true') return;
   const now = new Date().toISOString();
 
   // Ensure folkkayo928@gmail.com is seeded with super_admin platform role
