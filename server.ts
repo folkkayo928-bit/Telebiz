@@ -4590,11 +4590,26 @@ app.post('/api/storefront/:slug/reviews', (req: Request, res: Response) => {
   const cleanProduct = String(product_name || '').trim().slice(0, 120);
   const cleanOrder = String(order_number || '').trim().slice(0, 60);
 
+  // A customer-entered order number alone is not proof of purchase.
+  // Mark the review verified only when the same customer has a paid or
+  // completed order belonging to this exact store.
+  const matchingPaidOrder = cleanOrder
+    ? db.prepare(`
+        SELECT id FROM orders
+        WHERE business_id = ?
+          AND order_number = ?
+          AND LOWER(TRIM(customer_name)) = LOWER(?)
+          AND (LOWER(payment_status) = 'paid' OR LOWER(status) = 'completed')
+        LIMIT 1
+      `).get(business.id, cleanOrder, cleanName)
+    : null;
+  const verifiedPurchase = Boolean(matchingPaidOrder);
+
   db.prepare(`
     INSERT INTO store_reviews (
       id, business_id, customer_name, rating, comment, product_name, order_number, verified_purchase, created_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)
-  `).run(revId, business.id, cleanName, numericRating, cleanComment, cleanProduct, cleanOrder, now);
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(revId, business.id, cleanName, numericRating, cleanComment, cleanProduct, cleanOrder, verifiedPurchase ? 1 : 0, now);
 
   const starsStr = '★'.repeat(numericRating) + '☆'.repeat(5 - numericRating);
   recordBusinessNotification({
@@ -4618,6 +4633,10 @@ app.post('/api/storefront/:slug/reviews', (req: Request, res: Response) => {
   res.status(201).json({
     createdId: revId,
     reviews,
+    verifiedPurchase,
+    message: verifiedPurchase
+      ? 'Review submitted. Your purchase was verified.'
+      : 'Review submitted. It is shown as an unverified review until a matching paid order is found.',
     reviewStats: {
       totalReviews,
       averageRating,
