@@ -627,6 +627,11 @@ app.post('/api/auth/login', authRateLimit, (req: Request, res: Response) => {
     return;
   }
 
+  if (user.account_status === 'blocked') {
+    res.status(403).json({ error: 'This account is blocked. Contact Telebiz support.' });
+    return;
+  }
+
   if (!isUserPasswordValid(user, cleanPass)) {
     res.status(401).json({
       error: `Incorrect password or secondary passcode for ${user.name} (${user.email}). Please check your credentials or use account recovery.`,
@@ -1351,6 +1356,11 @@ function handleStoreOwnerTelegramAuth(req: Request, res: Response) {
 
   let isNewAccount = false;
   if (user) {
+    if (user.account_status === 'blocked') {
+      res.status(403).json({ error: 'This account is blocked. Contact Telebiz support.' });
+      return;
+    }
+
     // Signed Telegram WebApp data proves ownership. Outside the WebApp, require
     // the existing account's recovery passcode before issuing a session.
     if (!verifiedTelegramUser && !verifyUserSecondaryPasscode(user, rawPasscode)) {
@@ -3149,7 +3159,15 @@ app.post('/api/businesses/:id/products', (req: Request, res: Response) => {
   }
 
   const numericPrice = Number(price);
-  let resolvedCompareAt: number | null = compare_at_price ? Number(compare_at_price) : null;
+  const numericStock = Number(stock ?? 25);
+  const parsedCompareAt = compare_at_price === undefined || compare_at_price === null || compare_at_price === '' ? null : Number(compare_at_price);
+  if (!String(name).trim() || String(name).trim().length > 160 || !Number.isFinite(numericPrice) || numericPrice < 0 ||
+      !Number.isInteger(numericStock) || numericStock < 0 ||
+      (parsedCompareAt !== null && (!Number.isFinite(parsedCompareAt) || parsedCompareAt < 0))) {
+    res.status(400).json({ error: 'Product name, price, stock, or comparison price is invalid.' });
+    return;
+  }
+  let resolvedCompareAt: number | null = parsedCompareAt;
   let resolvedDiscountPct = discount_percent ? Math.min(95, Math.max(0, Math.round(Number(discount_percent)))) : 0;
 
   if (resolvedDiscountPct > 0 && (!resolvedCompareAt || resolvedCompareAt <= numericPrice)) {
@@ -3181,7 +3199,7 @@ app.post('/api/businesses/:id/products', (req: Request, res: Response) => {
     numericPrice,
     resolvedCompareAt,
     resolvedDiscountPct,
-    Number(stock ?? 25),
+    numericStock,
     sku || 'SKU-' + crypto.randomBytes(2).toString('hex').toUpperCase(),
     JSON.stringify(Array.isArray(variations) ? variations : (variations ? String(variations).split(',').map((s: string) => s.trim()).filter(Boolean) : ['S', 'M', 'L', 'XL'])),
     featured ? 1 : 0,
@@ -3243,6 +3261,13 @@ app.patch('/api/businesses/:id/products/:productId', (req: Request, res: Respons
     : existing.variations_json;
 
   const finalPrice = price !== undefined ? Number(price) : Number(existing.price);
+  const finalStock = stock !== undefined ? Number(stock) : Number(existing.stock);
+  if (!Number.isFinite(finalPrice) || finalPrice < 0 || !Number.isInteger(finalStock) || finalStock < 0 ||
+      (compare_at_price !== undefined && compare_at_price !== null && compare_at_price !== '' &&
+       (!Number.isFinite(Number(compare_at_price)) || Number(compare_at_price) < 0))) {
+    res.status(400).json({ error: 'Product price, stock, or comparison price is invalid.' });
+    return;
+  }
   let finalCompareAt = compare_at_price !== undefined
     ? (compare_at_price ? Number(compare_at_price) : null)
     : existing.compare_at_price;
@@ -3275,7 +3300,7 @@ app.patch('/api/businesses/:id/products/:productId', (req: Request, res: Respons
     finalPrice,
     finalCompareAt,
     finalDiscountPct,
-    stock !== undefined ? Number(stock) : existing.stock,
+    finalStock,
     available !== undefined ? (available ? 1 : 0) : existing.available,
     featured !== undefined ? (featured ? 1 : 0) : existing.featured,
     parsedVariations,
