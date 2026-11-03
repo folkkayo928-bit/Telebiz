@@ -564,8 +564,41 @@ export function initDatabase() {
     CREATE INDEX IF NOT EXISTS idx_events_business_type ON analytics_events(business_id, event_type);
   `);
 
-  // Check if already seeded
+  // Production must never get seeded demo credentials. A fresh production
+  // database instead requires a one-time, secret-based administrator bootstrap.
   const existingUsers = db.prepare('SELECT COUNT(*) as count FROM users').get() as { count: number };
+  const existingAdmins = db.prepare("SELECT COUNT(*) as count FROM users WHERE platform_role = 'super_admin'").get() as { count: number };
+  if (process.env.NODE_ENV === 'production' && existingAdmins.count === 0) {
+    const adminEmail = String(process.env.TELEBIZ_BOOTSTRAP_ADMIN_EMAIL || '').trim().toLowerCase();
+    const adminPassword = String(process.env.TELEBIZ_BOOTSTRAP_ADMIN_PASSWORD || '');
+    const adminName = String(process.env.TELEBIZ_BOOTSTRAP_ADMIN_NAME || 'Telebiz Platform Administrator').trim();
+
+    if (!/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(adminEmail) || adminPassword.length < 16) {
+      throw new Error(
+        'No platform administrator exists. Set TELEBIZ_BOOTSTRAP_ADMIN_EMAIL and a unique TELEBIZ_BOOTSTRAP_ADMIN_PASSWORD of at least 16 characters, then restart.'
+      );
+    }
+
+    const conflictingUser = db.prepare('SELECT id FROM users WHERE LOWER(email) = ?').get(adminEmail);
+    if (conflictingUser) {
+      throw new Error(
+        'The bootstrap administrator email already belongs to a non-admin account. Choose an unused administrator email; existing accounts are never promoted automatically.'
+      );
+    }
+
+    const now = new Date().toISOString();
+    const userId = 'usr_admin_' + crypto.randomBytes(8).toString('hex');
+    const ownerUid = generateOwnerUid(adminName);
+    db.prepare(`
+      INSERT INTO users (
+        id, email, name, password_hash, platform_role, preferred_language,
+        created_at, owner_uid, recovery_passcode_hash, recovery_hint,
+        auth_provider, account_status
+      ) VALUES (?, ?, ?, ?, 'super_admin', 'en', ?, ?, '', 'Set a recovery passcode in account security settings', 'email', 'active')
+    `).run(userId, adminEmail, adminName, hashPassword(adminPassword), now, ownerUid);
+    console.info('Created the first Telebiz platform administrator from deployment secrets.');
+  }
+
   const allowDemoSeed = process.env.NODE_ENV !== 'production' && process.env.TELEBIZ_ENABLE_DEMO_SEED === 'true';
   if (existingUsers.count === 0 && allowDemoSeed) {
     seedInitialPlatformData();
