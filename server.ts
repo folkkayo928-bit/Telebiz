@@ -1042,36 +1042,12 @@ app.get('/api/auth/session', (req, res, next) => (app._router.handle as any)({ .
 
 // Telegram Redirect & Direct Connect Auth Initiation
 app.post('/api/auth/telegram/redirect', authRateLimit, (req: Request, res: Response) => {
-  const { role = 'store_owner', business_id } = req.body;
-  const authKey = 'tgauth_' + crypto.randomBytes(32).toString('hex');
-  const now = new Date().toISOString();
-  const expiresAt = new Date(Date.now() + 15 * 60000).toISOString();
-
-  let botUsername = 'TeleBizStoreBot';
-  if (business_id) {
-    const biz = db.prepare('SELECT telegram_bot_username FROM businesses WHERE id = ?').get(business_id) as any;
-    if (biz?.telegram_bot_username) {
-      botUsername = biz.telegram_bot_username.replace(/^@+/, '');
-    }
-  }
-
-  db.prepare(`
-    INSERT INTO telegram_auth_sessions (auth_key, role, status, created_at, expires_at)
-    VALUES (?, ?, 'pending', ?, ?)
-  `).run(authKey, role, now, expiresAt);
-
-  const protocol = req.headers['x-forwarded-proto'] || req.protocol || 'https';
-  const host = req.get('host') || 'localhost:3000';
-  const directVerifyUrl = `${protocol}://${host}/auth/telegram-connect?auth_key=${authKey}&bot=${encodeURIComponent(botUsername)}`;
-  const redirectUrl = `https://t.me/${botUsername}?start=auth_${authKey}`;
-  const deepLink = `tg://resolve?domain=${botUsername}&start=auth_${authKey}`;
-
-  res.json({
-    auth_key: authKey,
-    bot_username: `@${botUsername}`,
-    redirect_url: redirectUrl,
-    direct_verify_url: directVerifyUrl,
-    deep_link: deepLink,
+  // External bot-based sign-in requires a deployed Telegram bot update handler.
+  // This repository currently supports verified signed initData inside the
+  // official Telegram Mini App only; do not issue pretend pending sessions.
+  res.status(501).json({
+    available: false,
+    error: 'Telegram sign-in is available inside the official Telebiz Telegram Mini App. External Telegram bot sign-in is not enabled yet.',
   });
 });
 
