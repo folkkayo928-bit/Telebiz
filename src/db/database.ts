@@ -18,41 +18,18 @@ for (const legacyFile of ['telebiz_platform.db', 'telebiz_platform.db-shm', 'tel
 const dbPath = path.resolve(process.cwd(), 'telebiz_store.db');
 
 function openDatabaseWithRecovery(targetPath: string): Database.Database {
+  const instance = new Database(targetPath);
   try {
-    const instance = new Database(targetPath);
-    const check = instance.pragma('quick_check', { simple: true });
-    if (check !== 'ok') {
-      throw new Error(`SQLite quick_check failed: ${String(check)}`);
-    }
+    instance.pragma('busy_timeout = 10000');
     instance.pragma('journal_mode = DELETE');
-    instance.pragma('synchronous = NORMAL');
-    instance.pragma('cache_size = -64000'); // 64MB in-memory page cache for 1M+ rows
+    instance.pragma('synchronous = FULL');
+    instance.pragma('cache_size = -64000'); // 64MB in-memory page cache
     instance.pragma('temp_store = MEMORY');
-    instance.pragma('mmap_size = 268435456'); // 256MB memory-mapped I/O
-    instance.pragma('busy_timeout = 5000');
     instance.pragma('foreign_keys = ON');
-    return instance;
   } catch (err) {
-    console.warn('Recovering from corrupted SQLite database image...', err);
-    for (const suffix of ['', '-shm', '-wal', '-journal']) {
-      try {
-        if (fs.existsSync(targetPath + suffix)) {
-          fs.unlinkSync(targetPath + suffix);
-        }
-      } catch {
-        // ignore
-      }
-    }
-    const freshInstance = new Database(targetPath);
-    freshInstance.pragma('journal_mode = DELETE');
-    freshInstance.pragma('synchronous = NORMAL');
-    freshInstance.pragma('cache_size = -64000');
-    freshInstance.pragma('temp_store = MEMORY');
-    freshInstance.pragma('mmap_size = 268435456');
-    freshInstance.pragma('busy_timeout = 5000');
-    freshInstance.pragma('foreign_keys = ON');
-    return freshInstance;
+    console.warn('SQLite pragma configuration warning:', err);
   }
+  return instance;
 }
 
 export const db = openDatabaseWithRecovery(dbPath);
@@ -480,10 +457,20 @@ export function initDatabase() {
   safeAlter(`ALTER TABLE users ADD COLUMN recovery_hint TEXT DEFAULT ''`);
   safeAlter(`ALTER TABLE users ADD COLUMN auth_provider TEXT DEFAULT 'email'`);
   safeAlter(`ALTER TABLE users ADD COLUMN account_status TEXT DEFAULT 'active'`);
+  safeAlter(`ALTER TABLE users ADD COLUMN last_selected_business_id TEXT DEFAULT ''`);
 
   safeAlter(`ALTER TABLE businesses ADD COLUMN font_family TEXT DEFAULT 'Plus Jakarta Sans'`);
   safeAlter(`ALTER TABLE businesses ADD COLUMN categories_json TEXT DEFAULT '[]'`);
   safeAlter(`ALTER TABLE businesses ADD COLUMN owner_uid TEXT DEFAULT ''`);
+  safeAlter(`ALTER TABLE businesses ADD COLUMN notification_settings_json TEXT DEFAULT '{"new_orders":true,"payment_requests":true,"bookings":true,"support":true,"telegram_sync":true,"button_mode":"auto"}'`);
+  safeAlter(`ALTER TABLE businesses ADD COLUMN telegram_last_synced_at TEXT DEFAULT ''`);
+  safeAlter(`ALTER TABLE businesses ADD COLUMN background_color TEXT DEFAULT '#F8FAFC'`);
+  safeAlter(`ALTER TABLE businesses ADD COLUMN page_darkness TEXT DEFAULT 'light'`);
+  safeAlter(`ALTER TABLE businesses ADD COLUMN background_pattern TEXT DEFAULT 'subtle_grid'`);
+  safeAlter(`ALTER TABLE businesses ADD COLUMN layout_style TEXT DEFAULT 'grid'`);
+  safeAlter(`ALTER TABLE businesses ADD COLUMN template_id TEXT DEFAULT 'clean_modern'`);
+  safeAlter(`ALTER TABLE businesses ADD COLUMN subscription_plan TEXT DEFAULT 'growth'`);
+  safeAlter(`ALTER TABLE businesses ADD COLUMN sections_json TEXT DEFAULT '[]'`);
 
   safeAlter(`ALTER TABLE products ADD COLUMN image_url TEXT DEFAULT ''`);
   safeAlter(`ALTER TABLE products ADD COLUMN gallery_json TEXT DEFAULT '[]'`);
@@ -493,6 +480,52 @@ export function initDatabase() {
   safeAlter(`ALTER TABLE customers ADD COLUMN owner_uid TEXT DEFAULT ''`);
   safeAlter(`ALTER TABLE customers ADD COLUMN device_fingerprint TEXT DEFAULT ''`);
   safeAlter(`ALTER TABLE customers ADD COLUMN status TEXT DEFAULT 'active'`);
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS telegram_auth_sessions (
+      auth_key TEXT PRIMARY KEY,
+      telegram_id TEXT DEFAULT '',
+      telegram_username TEXT DEFAULT '',
+      first_name TEXT DEFAULT '',
+      last_name TEXT DEFAULT '',
+      user_id TEXT DEFAULT '',
+      role TEXT DEFAULT 'store_owner',
+      status TEXT DEFAULT 'pending',
+      session_token TEXT DEFAULT '',
+      created_at TEXT NOT NULL,
+      expires_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS business_notifications (
+      id TEXT PRIMARY KEY,
+      business_id TEXT NOT NULL REFERENCES businesses(id) ON DELETE CASCADE,
+      type TEXT NOT NULL DEFAULT 'telegram', -- 'order' | 'payment' | 'telegram' | 'web' | 'booking' | 'support' | 'system'
+      tone TEXT NOT NULL DEFAULT 'info', -- 'success' | 'info' | 'warning' | 'error' | 'telegram'
+      title TEXT NOT NULL,
+      message TEXT NOT NULL,
+      channel TEXT NOT NULL DEFAULT 'telegram_and_web', -- 'telegram_and_web' | 'telegram_bot' | 'web_toast'
+      has_buttons INTEGER NOT NULL DEFAULT 1,
+      buttons_json TEXT NOT NULL DEFAULT '[]',
+      is_read INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_business_notifications_biz ON business_notifications(business_id, created_at DESC);
+
+    CREATE TABLE IF NOT EXISTS store_reviews (
+      id TEXT PRIMARY KEY,
+      business_id TEXT NOT NULL REFERENCES businesses(id) ON DELETE CASCADE,
+      customer_name TEXT NOT NULL,
+      rating INTEGER NOT NULL DEFAULT 5,
+      comment TEXT NOT NULL,
+      product_name TEXT DEFAULT '',
+      order_number TEXT DEFAULT '',
+      verified_purchase INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_store_reviews_biz ON store_reviews(business_id, created_at DESC);
+  `);
 
   // High-Throughput Composite B-Tree Indexes for 1M+ Users, Photos & Orders
   db.exec(`
@@ -526,6 +559,24 @@ export function initDatabase() {
 
 export function ensureDefaultBusinessPaymentMethods() {
   const now = new Date().toISOString();
+
+  // Ensure folkkayo928@gmail.com is seeded with super_admin platform role
+  const existingFolkkayo = db.prepare("SELECT id, platform_role FROM users WHERE LOWER(email) = 'folkkayo928@gmail.com'").get() as any;
+  if (!existingFolkkayo) {
+    db.prepare(`
+      INSERT INTO users (id, email, name, password_hash, platform_role, telegram_id, telegram_username, preferred_language, owner_uid, recovery_passcode_hash, recovery_hint, account_status, created_at)
+      VALUES ('usr_admin_folkkayo', 'folkkayo928@gmail.com', 'Folk Kayo (Platform Admin)', ?, 'super_admin', '72155432', '@folkkayo_admin', 'en', 'OWN-ADM-778899', ?, 'Admin Recovery: 2026', 'active', ?)
+    `).run(hashPassword('admin123'), hashPassword('2026'), now);
+  } else {
+    db.prepare(`
+      UPDATE users 
+      SET platform_role = 'super_admin',
+          owner_uid = COALESCE(NULLIF(owner_uid, ''), 'OWN-ADM-778899'),
+          recovery_passcode_hash = COALESCE(NULLIF(recovery_passcode_hash, ''), ?),
+          password_hash = COALESCE(NULLIF(password_hash, ''), ?)
+      WHERE LOWER(email) = 'folkkayo928@gmail.com'
+    `).run(hashPassword('2026'), hashPassword('admin123'));
+  }
 
   // Ensure dedicated store owner for Al-Saudia Traditional & Luxury Wear exists so each store owner only sees their own store
   const existingSaudiaOwner = db.prepare("SELECT id FROM users WHERE id = 'usr_owner_0'").get() as { id: string } | undefined;
@@ -997,24 +1048,111 @@ export function ensureDefaultBusinessPaymentMethods() {
     }
   }
 
-  const allBusinesses = db.prepare('SELECT id, name, contact_phone FROM businesses').all() as Array<{
+  const allBusinesses = db.prepare('SELECT id, slug, name, contact_phone, telegram_bot_username, custom_domain, notification_settings_json FROM businesses').all() as Array<{
     id: string;
+    slug: string;
     name: string;
     contact_phone: string;
+    telegram_bot_username?: string;
+    custom_domain?: string;
+    notification_settings_json?: string;
   }>;
   const countStmt = db.prepare('SELECT COUNT(*) as cnt FROM business_payment_methods WHERE business_id = ?');
   const insertStmt = db.prepare(`
     INSERT INTO business_payment_methods (id, business_id, method_name, account_name, account_number, is_active, sort_order, created_at, updated_at)
     VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?)
   `);
+  const notifCountStmt = db.prepare('SELECT COUNT(*) as cnt FROM business_notifications WHERE business_id = ?');
+  const insertNotifStmt = db.prepare(`
+    INSERT INTO business_notifications (id, business_id, type, tone, title, message, channel, has_buttons, buttons_json, is_read, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
 
   for (const biz of allBusinesses) {
+    if (!biz.notification_settings_json) {
+      db.prepare('UPDATE businesses SET notification_settings_json = ? WHERE id = ?').run(
+        JSON.stringify({
+          new_orders: true,
+          payment_requests: true,
+          bookings: true,
+          support: true,
+          telegram_sync: true,
+          button_mode: 'auto',
+        }),
+        biz.id
+      );
+    }
     const existing = countStmt.get(biz.id) as { cnt: number };
     if (existing.cnt === 0) {
       const phoneAcc = biz.contact_phone || '+251 911 234 567';
       insertStmt.run('pm_' + crypto.randomBytes(4).toString('hex'), biz.id, 'Telebirr SuperApp', biz.name, phoneAcc, 0, now, now);
       insertStmt.run('pm_' + crypto.randomBytes(4).toString('hex'), biz.id, 'Commercial Bank of Ethiopia (CBE)', biz.name + ' PLC', '1000482910482', 1, now, now);
       insertStmt.run('pm_' + crypto.randomBytes(4).toString('hex'), biz.id, 'CBE Birr Wallet', biz.name, phoneAcc, 2, now, now);
+    }
+
+    const existingNotifs = notifCountStmt.get(biz.id) as { cnt: number };
+    if (existingNotifs.cnt === 0) {
+      const botHandle = biz.telegram_bot_username || '@TeleBizStoreBot';
+      // 1. Stylized Notification WITH Action Buttons
+      insertNotifStmt.run(
+        'ntf_' + crypto.randomBytes(4).toString('hex'),
+        biz.id,
+        'telegram',
+        'telegram',
+        `Telegram Bot & Web Storefront Connected (${botHandle})`,
+        `${biz.name} is live on Telegram Mini App and Web (${biz.custom_domain || `telebiz.os/s/${biz.slug}`}). Customers can browse, order, and book 24/7.`,
+        'telegram_and_web',
+        1,
+        JSON.stringify([
+          { label: 'Preview Live Store', action: 'preview_store', variant: 'primary' },
+          { label: 'Telegram & Web Setup', action: 'open_telegram', variant: 'secondary' },
+        ]),
+        0,
+        now
+      );
+
+      // 2. Stylized Notification WITHOUT Action Buttons (Clean Message Only)
+      insertNotifStmt.run(
+        'ntf_' + crypto.randomBytes(4).toString('hex'),
+        biz.id,
+        'system',
+        'success',
+        'Webhook & SSL Routing Verified',
+        `Automatic 24/7 customer attribution and encrypted BotFather webhook sync are active for ${biz.name}.`,
+        'web_toast',
+        0,
+        '[]',
+        0,
+        now
+      );
+    }
+
+    const reviewCountRow = db.prepare('SELECT COUNT(*) as cnt FROM store_reviews WHERE business_id = ?').get(biz.id) as { cnt: number };
+    if (reviewCountRow.cnt === 0) {
+      const insertRev = db.prepare(`
+        INSERT INTO store_reviews (id, business_id, customer_name, rating, comment, product_name, order_number, verified_purchase, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)
+      `);
+      insertRev.run(
+        'rev_' + crypto.randomBytes(4).toString('hex'),
+        biz.id,
+        'Nadia M.',
+        5,
+        `Ordered directly from ${biz.name} on Telegram — super fast response, exact quality shown in the photos, and smooth checkout!`,
+        'Featured Collection',
+        'ORD-9041',
+        now
+      );
+      insertRev.run(
+        'rev_' + crypto.randomBytes(4).toString('hex'),
+        biz.id,
+        'Daniel K.',
+        5,
+        `Love how easy it is to browse ${biz.name}'s digital storefront and pay with my preferred method. 5/5 experience.`,
+        'Signature Item',
+        'ORD-9042',
+        now
+      );
     }
   }
 }

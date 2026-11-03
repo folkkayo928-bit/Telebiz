@@ -30,6 +30,7 @@ import {
   Sparkles,
   Star,
   Store,
+  Tag,
   Truck,
   User,
   X,
@@ -141,7 +142,7 @@ const PRODUCT_SWATCHES: Record<string, Array<{ name: string; hex: string }>> = {
 };
 
 export function ProductVisualCard({
-  imageType,
+  imageType = 'default',
   imageUrl,
   galleryUrls = [],
   title,
@@ -149,7 +150,7 @@ export function ProductVisualCard({
   aspectClass = 'aspect-[1/1.05]',
   variantIndex = 0,
 }: {
-  imageType: string;
+  imageType?: string;
   imageUrl?: string;
   galleryUrls?: string[];
   title: string;
@@ -201,11 +202,19 @@ export function ProductVisualCard({
     hotel: 'from-[#E4EFEA] via-[#CFE2DA] to-[#B5D0C5]',
     salon: 'from-[#F3E5E8] via-[#E8D2D7] to-[#D9B8C0]',
   };
-  const bgGradient = studioBackdrops[imageType] || 'from-[#EFE7DA] via-[#E3D6C2] to-[#D4C2A7]';
+  const bgGradient = studioBackdrops[imageType] || 'from-slate-100 via-slate-200 to-slate-300';
   const isDarkStudio = imageType === 'bisht_gold' || imageType === 'accessories_gold';
 
   const renderIllustration = () => {
-    if (imageType?.startsWith('thobe') || imageType === 'jalabiya_sand' || imageType === 'bisht_gold') {
+    if (
+      (imageType?.startsWith('thobe') || imageType === 'jalabiya_sand' || imageType === 'bisht_gold') &&
+      (title?.toLowerCase().includes('thobe') ||
+        title?.toLowerCase().includes('bisht') ||
+        title?.toLowerCase().includes('jalabiya') ||
+        title?.toLowerCase().includes('saudi') ||
+        title?.toLowerCase().includes('arabian') ||
+        title?.toLowerCase().includes('traditional'))
+    ) {
       const garmentFill =
         imageType === 'thobe_black' || imageType === 'bisht_gold'
           ? '#18181B'
@@ -259,6 +268,32 @@ export function ProductVisualCard({
               <ellipse cx="90" cy="21" rx="18" ry="5" fill="#111827" />
             </g>
           )}
+        </svg>
+      );
+    }
+
+    if (
+      imageType === 'digital_game' ||
+      imageType === 'gaming' ||
+      imageType === 'digital_product' ||
+      imageType === 'digital_menu' ||
+      imageType === 'electronics' ||
+      imageType === 'tech'
+    ) {
+      return (
+        <svg
+          viewBox="0 0 180 180"
+          className="h-[82%] w-[82%] drop-shadow-[0_16px_32px_rgba(0,0,0,0.35)] transition-transform duration-300 group-hover:scale-105"
+        >
+          {/* Futuristic Gaming Controller / Tech Badge */}
+          <rect x="22" y="44" width="136" height="92" rx="34" fill="#090D16" stroke={accentColor || '#6366F1'} strokeWidth="3" />
+          <path d="M46,90 L76,90 M61,75 L61,105" stroke="#FFFFFF" strokeWidth="4" strokeLinecap="round" />
+          <circle cx="126" cy="80" r="5.5" fill="#EF4444" />
+          <circle cx="138" cy="90" r="5.5" fill="#3B82F6" />
+          <circle cx="114" cy="90" r="5.5" fill="#10B981" />
+          <circle cx="126" cy="100" r="5.5" fill="#F59E0B" />
+          <rect x="78" y="86" width="24" height="6" rx="3" fill="#64748B" />
+          <circle cx="90" cy="62" r="4" fill={accentColor || '#6366F1'} opacity="0.9" />
         </svg>
       );
     }
@@ -496,6 +531,16 @@ export const MiniAppStorefront: React.FC<StorefrontProps> = ({
   const [supportError, setSupportError] = useState('');
   const [submittingSupport, setSubmittingSupport] = useState(false);
 
+  // Customer 1-to-5 Star Review state
+  const [reviewRating, setReviewRating] = useState<number>(5);
+  const [reviewName, setReviewName] = useState('');
+  const [reviewProduct, setReviewProduct] = useState('');
+  const [reviewComment, setReviewComment] = useState('');
+  const [submittingReview, setSubmittingReview] = useState(false);
+  const [reviewSuccess, setReviewSuccess] = useState('');
+  const [reviewError, setReviewError] = useState('');
+  const [showReviewForm, setShowReviewForm] = useState(false);
+
   const sessionId = 'sess_' + slug;
 
   const recordFunnelEvent = async (eventType: string, pageName: string = activeTab, productId?: string, sourceOverride?: 'telegram' | 'web') => {
@@ -542,6 +587,57 @@ export const MiniAppStorefront: React.FC<StorefrontProps> = ({
     }
   };
 
+  const handleSubmitReview = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setReviewError('');
+    setReviewSuccess('');
+    const finalName = (reviewName || customerName || '').trim();
+    const finalComment = reviewComment.trim();
+    if (!finalName) {
+      setReviewError('Please enter your name so the store knows who left the review.');
+      return;
+    }
+    if (!finalComment || finalComment.length < 3) {
+      setReviewError('Please write a short comment sharing your experience.');
+      return;
+    }
+    setSubmittingReview(true);
+    try {
+      const res = await fetch('/api/storefront/' + slug + '/reviews', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          customer_name: finalName,
+          rating: reviewRating,
+          comment: finalComment,
+          product_name: reviewProduct,
+          order_number: orderResult?.orderNumber || '',
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        setReviewError(json.error || 'Could not submit your review.');
+      } else {
+        setReviewSuccess(`Thank you! Your ${reviewRating}-star review has been shared with this store.`);
+        setReviewComment('');
+        setShowReviewForm(false);
+        setData((prev: any) =>
+          prev
+            ? {
+                ...prev,
+                reviews: json.reviews || prev.reviews || [],
+                reviewStats: json.reviewStats || prev.reviewStats,
+              }
+            : prev
+        );
+      }
+    } catch (err: any) {
+      setReviewError(err.message || 'Network error while submitting review.');
+    } finally {
+      setSubmittingReview(false);
+    }
+  };
+
   useEffect(() => {
     const telegramWebApp = typeof window !== 'undefined' && Boolean((window as any).Telegram?.WebApp?.initData);
     const detectedSource = telegramWebApp ? 'telegram' : 'web';
@@ -559,6 +655,11 @@ export const MiniAppStorefront: React.FC<StorefrontProps> = ({
         localStorage.setItem('telebiz_visitor_fp', fp);
       }
       const tgUser = (window as any)?.Telegram?.WebApp?.initDataUnsafe?.user;
+      if (tgUser) {
+        const fullName = [tgUser.first_name, tgUser.last_name].filter(Boolean).join(' ');
+        if (fullName) setCustomerName(fullName);
+        if (tgUser.username) setTelegramUsername(`@${tgUser.username}`);
+      }
       fetch('/api/storefront/' + slug + '/identify', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -573,6 +674,12 @@ export const MiniAppStorefront: React.FC<StorefrontProps> = ({
         .then((ident) => {
           if (ident?.identified) {
             setCustomerIdentity(ident);
+            if (ident.telegram_handle && !telegramUsername) {
+              setTelegramUsername(ident.telegram_handle);
+            }
+            if (ident.name && !customerName) {
+              setCustomerName(ident.name);
+            }
           }
         })
         .catch(() => {});
@@ -615,7 +722,18 @@ export const MiniAppStorefront: React.FC<StorefrontProps> = ({
     );
   }
 
-  const { business, version, products = [], services = [], branches = [], promotions = [], faqs = [], paymentMethods = [] } = data;
+  const {
+    business,
+    version,
+    products = [],
+    services = [],
+    branches = [],
+    promotions = [],
+    faqs = [],
+    paymentMethods = [],
+    reviews = [],
+    reviewStats = { totalReviews: 0, averageRating: 5.0 },
+  } = data;
   const catMeta = BUSINESS_CATEGORIES.find((c) => c.id === business.category) || BUSINESS_CATEGORIES[0];
   const layoutSections: any[] = parseJsonArray(version?.layout_json, []);
   const versionTheme = (() => {
@@ -657,22 +775,22 @@ export const MiniAppStorefront: React.FC<StorefrontProps> = ({
   const wishlistedProducts = products.filter((p: any) => wishlistedIds.includes(p.id));
   const cartCount = cart.reduce((sum, item) => sum + item.qty, 0);
   const cartSubtotal = cart.reduce((sum, item) => sum + item.price * item.qty, 0);
-  const primaryColor = livePrimary || overrideTheme?.primaryColor || business.primary_color || '#0F382A';
-  const accentColor = liveAccent || overrideTheme?.accentColor || business.accent_color || '#C69C6D';
-  const storeFontFamily = liveFont || overrideTheme?.fontFamily || business.font_family || versionTheme?.fontFamily || 'Playfair Display';
+  const primaryColor = livePrimary || overrideTheme?.primaryColor || business.primary_color || '#0F172A';
+  const accentColor = liveAccent || overrideTheme?.accentColor || business.accent_color || '#6366F1';
+  const storeFontFamily = liveFont || overrideTheme?.fontFamily || business.font_family || versionTheme?.fontFamily || 'Plus Jakarta Sans';
 
   // Dynamic Taste, Atmosphere, Typography & Product Seating Resolution
-  const tastePreset = overrideTheme?.tastePreset || versionTheme?.tastePreset || (business.category === 'jewelry' ? 'jewelry_luxury' : business.category === 'streetwear_baggy' || business.category === 'clothing' ? 'streetwear_baggy' : business.category === 'coffee_shop' || business.category === 'gourmet_food' ? 'gourmet_food' : 'arabian_heritage');
-  const backgroundType = overrideTheme?.backgroundType || versionTheme?.backgroundType || (tastePreset === 'jewelry_luxury' ? 'obsidian_velvet' : tastePreset === 'streetwear_baggy' ? 'street_concrete' : tastePreset === 'gourmet_food' ? 'craft_paper' : 'warm_sand');
-  const backgroundColor = overrideTheme?.backgroundColor || versionTheme?.backgroundColor || (backgroundType === 'obsidian_velvet' ? '#0B0C10' : backgroundType === 'street_concrete' ? '#121316' : backgroundType === 'craft_paper' ? '#F6F2EB' : backgroundType === 'clean_studio' ? '#FAFAFA' : '#FAF7F0');
-  const backgroundPattern = overrideTheme?.backgroundPattern || versionTheme?.backgroundPattern || (tastePreset === 'jewelry_luxury' ? 'gold_dust' : tastePreset === 'streetwear_baggy' ? 'concrete_grain' : tastePreset === 'gourmet_food' ? 'craft_fibers' : 'islamic_geometry');
-  const isDarkTheme = (overrideTheme?.pageDarkness || versionTheme?.pageDarkness) === 'dark' || ((overrideTheme?.pageDarkness || versionTheme?.pageDarkness) !== 'light' && (backgroundColor === '#0B0C10' || backgroundColor === '#121316' || backgroundColor === '#09090B' || backgroundColor === '#18181B' || backgroundColor === '#000000'));
+  const tastePreset = overrideTheme?.tastePreset || versionTheme?.tastePreset || (business.category === 'jewelry' ? 'jewelry_luxury' : business.category === 'streetwear_baggy' || business.category === 'clothing' ? 'streetwear_baggy' : business.category === 'coffee_shop' || business.category === 'gourmet_food' ? 'gourmet_food' : business.category === 'arabian_heritage' ? 'arabian_heritage' : 'clean_modern');
+  const backgroundType = overrideTheme?.backgroundType || versionTheme?.backgroundType || (tastePreset === 'jewelry_luxury' ? 'obsidian_velvet' : tastePreset === 'streetwear_baggy' ? 'street_concrete' : tastePreset === 'gourmet_food' ? 'craft_paper' : tastePreset === 'arabian_heritage' ? 'warm_sand' : 'clean_studio');
+  const backgroundColor = overrideTheme?.backgroundColor || versionTheme?.backgroundColor || (backgroundType === 'obsidian_velvet' ? '#0B0C10' : backgroundType === 'street_concrete' ? '#121316' : backgroundType === 'craft_paper' ? '#F6F2EB' : backgroundType === 'warm_sand' ? '#FAF7F0' : '#FAFAFA');
+  const backgroundPattern = overrideTheme?.backgroundPattern || versionTheme?.backgroundPattern || (tastePreset === 'jewelry_luxury' ? 'gold_dust' : tastePreset === 'streetwear_baggy' ? 'concrete_grain' : tastePreset === 'gourmet_food' ? 'craft_fibers' : tastePreset === 'arabian_heritage' ? 'islamic_geometry' : 'subtle_grid');
+  const isDarkTheme = (overrideTheme?.pageDarkness || versionTheme?.pageDarkness) === 'dark' || ((overrideTheme?.pageDarkness || versionTheme?.pageDarkness) !== 'light' && (backgroundColor === '#0B0C10' || backgroundColor === '#121316' || backgroundColor === '#09090B' || backgroundColor === '#18181B' || backgroundColor === '#000000' || backgroundColor === '#180707' || backgroundColor === '#1C0606'));
   const headingTransform = overrideTheme?.headingTransform || versionTheme?.headingTransform || (tastePreset === 'streetwear_baggy' || tastePreset === 'jewelry_luxury' ? 'uppercase' : 'capitalize');
-  const productCardStyle = overrideTheme?.productCardStyle || versionTheme?.productCardStyle || (tastePreset === 'jewelry_luxury' ? 'jewelry_pedestal' : tastePreset === 'streetwear_baggy' ? 'streetwear_lookbook' : tastePreset === 'gourmet_food' ? 'artisan_craft' : 'arabian_heritage');
+  const productCardStyle = overrideTheme?.productCardStyle || versionTheme?.productCardStyle || (tastePreset === 'jewelry_luxury' ? 'jewelry_pedestal' : tastePreset === 'streetwear_baggy' ? 'streetwear_lookbook' : tastePreset === 'gourmet_food' ? 'artisan_craft' : tastePreset === 'arabian_heritage' ? 'arabian_heritage' : 'modern_clean');
   const productAspectRatio = overrideTheme?.productAspectRatio || versionTheme?.productAspectRatio || (productCardStyle === 'streetwear_lookbook' ? 'aspect-[3/4.2]' : productCardStyle === 'jewelry_pedestal' ? 'aspect-[1/1.15]' : productCardStyle === 'artisan_craft' ? 'aspect-[1/1]' : 'aspect-[1/1.08]');
-  const cardRadius = overrideTheme?.cardRadius || versionTheme?.cardRadius || (productCardStyle === 'streetwear_lookbook' ? '0px' : productCardStyle === 'jewelry_pedestal' ? '16px' : productCardStyle === 'artisan_craft' ? '18px' : '22px');
+  const cardRadius = overrideTheme?.cardRadius || versionTheme?.cardRadius || (productCardStyle === 'streetwear_lookbook' ? '0px' : productCardStyle === 'jewelry_pedestal' ? '16px' : productCardStyle === 'artisan_craft' ? '18px' : '20px');
   const cardBackgroundStyle = overrideTheme?.cardBackgroundStyle || versionTheme?.cardBackgroundStyle || (isDarkTheme ? 'dark_surface' : productCardStyle === 'artisan_craft' ? 'craft_beige' : 'white');
-  const headerStyle = overrideTheme?.headerStyle || versionTheme?.headerStyle || (tastePreset === 'streetwear_baggy' ? 'street_banner' : tastePreset === 'gourmet_food' ? 'artisan_minimal' : 'royal_crest');
+  const headerStyle = overrideTheme?.headerStyle || versionTheme?.headerStyle || (tastePreset === 'streetwear_baggy' ? 'street_banner' : tastePreset === 'gourmet_food' ? 'artisan_minimal' : tastePreset === 'arabian_heritage' || tastePreset === 'jewelry_luxury' ? 'royal_crest' : 'modern_clean');
   const buttonStyle = (overrideTheme?.buttonStyle || versionTheme?.buttonStyle || (productCardStyle === 'streetwear_lookbook' ? 'sharp' : '3d')) as '3d' | 'pill' | 'sharp';
   const showStockBadges = overrideTheme?.showStockBadges ?? versionTheme?.showStockBadges ?? true;
   const showStarRatings = overrideTheme?.showStarRatings ?? versionTheme?.showStarRatings ?? true;
@@ -1490,34 +1608,43 @@ export const MiniAppStorefront: React.FC<StorefrontProps> = ({
         <div className="flex-1 overflow-x-auto bg-[#EDEAE4] p-4 sm:p-6">
           <div className="mx-auto grid min-w-[980px] max-w-[1220px] grid-cols-3 gap-6">
             {/* PHONE 1: HOME SCREEN */}
-            <div className="flex flex-col overflow-hidden rounded-[38px] border-[6px] border-white bg-[#FAF8F5] shadow-2xl">
-              <div className="flex items-center justify-between px-5 pt-3 pb-2 text-[11px] font-bold text-slate-900">
+            <div
+              className={`flex flex-col overflow-hidden rounded-[38px] border-[6px] border-white shadow-2xl transition-colors ${
+                isDarkTheme ? 'text-white' : 'text-slate-900'
+              }`}
+              style={{ backgroundColor }}
+            >
+              <div className={`flex items-center justify-between px-5 pt-3 pb-2 text-[11px] font-bold ${isDarkTheme ? 'text-white' : 'text-slate-900'}`}>
                 <span>9:41</span>
-                <span className="text-[10px] uppercase tracking-widest text-stone-400">Screen 1 · Home</span>
+                <span className="text-[10px] uppercase tracking-widest opacity-60">Screen 1 · Home</span>
               </div>
               {/* Brand Crest Header */}
               <div className="flex items-center justify-between px-4 py-2">
-                <button type="button" onClick={() => setActiveTab('catalog')} className="p-1.5 text-slate-800">
+                <button type="button" onClick={() => setActiveTab('catalog')} className={`p-1.5 ${isDarkTheme ? 'text-white' : 'text-slate-800'}`}>
                   <Menu className="h-5 w-5" />
                 </button>
                 <div className="text-center">
                   <div className="mx-auto mb-0.5 flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-bold" style={{ color: accentColor }}>
-                    ♛
+                    {headerStyle === 'royal_crest' ? '♛' : headerStyle === 'artisan_minimal' ? '☕' : '✦'}
                   </div>
                   <div
                     className="text-base font-bold leading-none tracking-tight"
-                    style={{ color: '#8C6239', fontFamily: `'${storeFontFamily}', 'Playfair Display', serif` }}
+                    style={{
+                      color: isDarkTheme ? '#FFFFFF' : primaryColor,
+                      fontFamily: `'${storeFontFamily}', serif`,
+                      textTransform: headingTransform,
+                    }}
                   >
                     {business.name.split(' ')[0]}
                   </div>
-                  <div className="mt-0.5 text-[8px] font-bold uppercase tracking-[0.22em] text-stone-500">
+                  <div className={`mt-0.5 text-[8px] font-bold uppercase tracking-[0.22em] ${isDarkTheme ? 'text-slate-400' : 'text-stone-500'}`}>
                     {String(catMeta.label || business.category).replace(/^\d+\.\s*/, '')}
                   </div>
                 </div>
                 <button
                   type="button"
                   onClick={() => setCheckoutOpen(true)}
-                  className="relative p-1.5 text-slate-800"
+                  className={`relative p-1.5 ${isDarkTheme ? 'text-white' : 'text-slate-800'}`}
                 >
                   <ShoppingBag className="h-5 w-5" />
                   <span
@@ -1531,31 +1658,52 @@ export const MiniAppStorefront: React.FC<StorefrontProps> = ({
 
               {/* Search Bar */}
               <div className="px-4 py-1.5">
-                <div className="flex items-center gap-2 rounded-full bg-[#F1ECE2] px-3.5 py-2 text-xs text-stone-500">
+                <div
+                  className={`flex items-center gap-2 rounded-full px-3.5 py-2 text-xs ${
+                    isDarkTheme ? 'bg-white/10 text-slate-300' : 'bg-[#F1ECE2] text-stone-600'
+                  }`}
+                >
                   <Search className="h-3.5 w-3.5" />
                   <input
                     type="text"
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                     placeholder={`Search ${business.name}...`}
-                    className="w-full bg-transparent text-[11px] text-slate-800 outline-none"
+                    className={`w-full bg-transparent text-[11px] outline-none ${isDarkTheme ? 'text-white placeholder:text-slate-400' : 'text-slate-800'}`}
                   />
-                  <SlidersHorizontal className="h-3.5 w-3.5 text-slate-700" />
+                  <SlidersHorizontal className={`h-3.5 w-3.5 ${isDarkTheme ? 'text-slate-300' : 'text-slate-700'}`} />
                 </div>
               </div>
 
-              {/* Hero Card */}
+              {/* Dynamic Styled Hero Card */}
               <div className="px-4 py-2">
-                <div className="relative overflow-hidden rounded-[22px] bg-gradient-to-r from-[#EFE6D5] via-[#E6D7BE] to-[#D6C1A0] p-4">
+                <div
+                  className="relative overflow-hidden rounded-[22px] p-4 shadow-sm"
+                  style={{
+                    background: isDarkTheme
+                      ? `linear-gradient(135deg, ${primaryColor} 0%, #0B0F17 100%)`
+                      : `linear-gradient(135deg, ${primaryColor}14 0%, ${accentColor}25 100%)`,
+                    border: `1px solid ${accentColor}40`,
+                  }}
+                >
                   <div className="relative z-10 max-w-[62%] space-y-2">
-                    <h3
-                      className="text-lg font-bold leading-snug text-slate-950"
-                      style={{ fontFamily: `'${storeFontFamily}', 'Playfair Display', serif` }}
+                    <span
+                      className="inline-block text-[9px] font-extrabold uppercase tracking-wider"
+                      style={{ color: isDarkTheme ? accentColor : primaryColor }}
                     >
-                      {heroSection?.title || 'Timeless Royal Elegance'}
+                      {String(catMeta.label || business.category || 'Featured').replace(/^\d+\.\s*/, '')}
+                    </span>
+                    <h3
+                      className={`text-lg font-bold leading-snug ${isDarkTheme ? 'text-white' : 'text-slate-950'}`}
+                      style={{
+                        fontFamily: `'${storeFontFamily}', serif`,
+                        textTransform: headingTransform,
+                      }}
+                    >
+                      {heroSection?.title || business.name}
                     </h3>
-                    <p className="line-clamp-2 text-[10px] text-stone-700">
-                      {heroSection?.subtitle || 'Traditional craftsmanship, modern lifestyle.'}
+                    <p className={`line-clamp-2 text-[10px] ${isDarkTheme ? 'text-slate-300' : 'text-stone-700'}`}>
+                      {heroSection?.subtitle || business.description || 'Welcome to our store. Browse catalog below.'}
                     </p>
                     <button
                       type="button"
@@ -1566,20 +1714,55 @@ export const MiniAppStorefront: React.FC<StorefrontProps> = ({
                       Shop Now <ArrowRight className="h-3 w-3" />
                     </button>
                   </div>
-                  <div className="absolute right-1 bottom-0 top-1 w-32 opacity-95">
-                    <ProductVisualCard
-                      imageType={products[0]?.image_type || 'thobe_set'}
-                      imageUrl={products[0]?.image_url}
-                      title={business.name}
-                      accentColor={primaryColor}
-                      aspectClass="h-full"
-                    />
+                  <div className="absolute right-1 bottom-0 top-1 w-32 flex items-center justify-center">
+                    {products[0]?.image_url ? (
+                      <ProductVisualCard
+                        imageUrl={products[0]?.image_url}
+                        title={business.name}
+                        accentColor={primaryColor}
+                        aspectClass="h-full"
+                      />
+                    ) : products[0]?.image_type && !products[0]?.image_type.startsWith('thobe') ? (
+                      <ProductVisualCard
+                        imageType={products[0]?.image_type}
+                        title={business.name}
+                        accentColor={primaryColor}
+                        aspectClass="h-full"
+                      />
+                    ) : (
+                      <div
+                        className="flex flex-col items-center justify-center rounded-2xl p-3 text-center shadow-md backdrop-blur-md"
+                        style={{
+                          backgroundColor: isDarkTheme ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.85)',
+                          border: `1px solid ${accentColor}40`,
+                        }}
+                      >
+                        <div
+                          className="flex h-11 w-11 items-center justify-center rounded-xl font-extrabold text-base shadow-xs"
+                          style={{ backgroundColor: primaryColor, color: '#FFFFFF' }}
+                        >
+                          {String(business.logo_text || business.name || 'ST').slice(0, 2).toUpperCase()}
+                        </div>
+                        <span
+                          className="mt-1.5 block max-w-[80px] truncate text-[8px] font-extrabold uppercase tracking-wider opacity-85"
+                          style={{ color: isDarkTheme ? '#FFFFFF' : '#0F172A' }}
+                        >
+                          {String(catMeta.label || business.category || 'Store').replace(/^\d+\.\s*/, '')}
+                        </span>
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
 
               {/* 4-Icon Trust Row */}
-              <div className="mx-4 my-1.5 grid grid-cols-4 divide-x divide-stone-200 rounded-2xl bg-white py-2.5 text-center shadow-xs">
+              <div
+                className={`mx-4 my-1.5 grid grid-cols-4 divide-x rounded-2xl py-2.5 text-center shadow-xs ${
+                  isDarkTheme
+                    ? 'border border-white/10 bg-white/5 divide-white/10 text-white'
+                    : 'divide-stone-200 bg-white text-slate-800'
+                }`}
+              >
                 {[
                   { icon: ShieldCheck, label: 'Premium\nQuality' },
                   { icon: CreditCard, label: 'Secure\nPayment' },
@@ -1589,8 +1772,8 @@ export const MiniAppStorefront: React.FC<StorefrontProps> = ({
                   const Icon = item.icon;
                   return (
                     <div key={i} className="flex flex-col items-center gap-1 px-1">
-                      <Icon className="h-4 w-4 text-slate-800" />
-                      <span className="whitespace-pre-line text-[9px] font-semibold leading-tight text-stone-600">
+                      <Icon className={`h-4 w-4 ${isDarkTheme ? 'text-white' : 'text-slate-800'}`} />
+                      <span className={`whitespace-pre-line text-[9px] font-semibold leading-tight ${isDarkTheme ? 'text-slate-300' : 'text-stone-600'}`}>
                         {item.label}
                       </span>
                     </div>
@@ -1601,12 +1784,12 @@ export const MiniAppStorefront: React.FC<StorefrontProps> = ({
               {/* Shop By Category */}
               <div className="px-4 py-2">
                 <div className="mb-2 flex items-center justify-between">
-                  <span className="text-xs font-extrabold text-slate-900">Shop By Category</span>
-                  <span className="text-[10px] font-semibold text-stone-500">View All →</span>
+                  <span className={`text-xs font-extrabold ${isDarkTheme ? 'text-white' : 'text-slate-900'}`}>Shop By Category</span>
+                  <span className="text-[10px] font-semibold opacity-60">View All →</span>
                 </div>
                 <div className="grid grid-cols-4 gap-2">
                   {productCategories.slice(1, 5).map((cat, idx) => {
-                    const catProd = products.find((p: any) => p.category_name === cat) || products[idx] || products[0];
+                    const catProd = products.find((p: any) => p.category_name === cat) || products[idx];
                     return (
                       <button
                         key={cat}
@@ -1614,16 +1797,42 @@ export const MiniAppStorefront: React.FC<StorefrontProps> = ({
                         onClick={() => setSelectedCategory(cat)}
                         className="group text-center"
                       >
-                        <div className="overflow-hidden rounded-xl border border-stone-200">
-                          <ProductVisualCard
-                            imageType={catProd?.image_type || 'thobe_white'}
-                            imageUrl={catProd?.image_url}
-                            title={cat}
-                            accentColor={primaryColor}
-                            aspectClass="aspect-square"
-                          />
+                        <div className="overflow-hidden rounded-xl">
+                          {catProd?.image_url ? (
+                            <ProductVisualCard
+                              imageUrl={catProd.image_url}
+                              title={cat}
+                              accentColor={primaryColor}
+                              aspectClass="aspect-square"
+                            />
+                          ) : (
+                            <div
+                              className="flex aspect-square w-full items-center justify-center rounded-xl border transition group-hover:scale-105"
+                              style={{
+                                background: isDarkTheme
+                                  ? `linear-gradient(135deg, ${primaryColor}40, rgba(255,255,255,0.06))`
+                                  : `linear-gradient(135deg, ${primaryColor}12, ${accentColor}20)`,
+                                borderColor: `${accentColor}30`,
+                              }}
+                            >
+                              <div
+                                className="flex h-8 w-8 items-center justify-center rounded-lg shadow-2xs"
+                                style={{ backgroundColor: primaryColor, color: '#FFFFFF' }}
+                              >
+                                {idx % 4 === 0 ? (
+                                  <ShoppingBag className="h-4 w-4" />
+                                ) : idx % 4 === 1 ? (
+                                  <Sparkles className="h-4 w-4" />
+                                ) : idx % 4 === 2 ? (
+                                  <Tag className="h-4 w-4" />
+                                ) : (
+                                  <Package className="h-4 w-4" />
+                                )}
+                              </div>
+                            </div>
+                          )}
                         </div>
-                        <span className="mt-1 block truncate text-[10px] font-bold text-slate-800">
+                        <span className={`mt-1 block truncate text-[10px] font-bold ${isDarkTheme ? 'text-slate-200' : 'text-slate-800'}`}>
                           {cat}
                         </span>
                       </button>
@@ -1979,6 +2188,25 @@ export const MiniAppStorefront: React.FC<StorefrontProps> = ({
                     )}
                   </div>
                 )}
+
+                {/* Post-Purchase 1-to-5 Star Quick Review Prompt */}
+                <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-amber-200 bg-amber-50/90 px-3.5 py-2.5 text-xs text-amber-950">
+                  <div className="flex items-center gap-2">
+                    <span className="font-extrabold text-amber-600">★★★★★</span>
+                    <span className="font-bold">Bought from {business.name}? Rate your experience (1 to 5 stars)!</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActiveTab('home');
+                      setSelectedProductForDetail(null);
+                      setShowReviewForm(true);
+                    }}
+                    className="rounded-lg bg-amber-500 px-3 py-1.5 text-[11px] font-extrabold text-slate-950 hover:bg-amber-400 transition"
+                  >
+                    Leave 1–5 Star Review
+                  </button>
+                </div>
               </section>
             </div>
           )}
@@ -2013,23 +2241,39 @@ export const MiniAppStorefront: React.FC<StorefrontProps> = ({
                 {/* TAB 1: HOME (Matches Screen 1 of Reference Photo) */}
                 {activeTab === 'home' && (
                   <div className="space-y-7">
-                    {/* Warm Split Hero Banner Card */}
-                    <section className="relative overflow-hidden rounded-[28px] border border-[#E5DAC6] bg-gradient-to-r from-[#F2E9DA] via-[#E8DBC5] to-[#D9C5A6] shadow-sm">
+                    {/* Dynamic Split Hero Banner Card */}
+                    <section
+                      className="relative overflow-hidden rounded-[28px] border shadow-sm"
+                      style={{
+                        background: isDarkTheme
+                          ? `linear-gradient(135deg, ${primaryColor} 0%, #0B0F17 100%)`
+                          : `linear-gradient(135deg, ${primaryColor}14 0%, ${accentColor}25 100%)`,
+                        borderColor: `${accentColor}40`,
+                      }}
+                    >
                       <div className="grid grid-cols-1 items-center lg:grid-cols-12">
                         <div className="space-y-4 p-6 sm:p-10 lg:col-span-7">
-                          <span className="inline-block text-[11px] font-extrabold uppercase tracking-[0.2em] text-[#7A542E]">
+                          <span
+                            className="inline-block text-[11px] font-extrabold uppercase tracking-[0.2em]"
+                            style={{ color: isDarkTheme ? accentColor : primaryColor }}
+                          >
                             {String(catMeta.label || business.category).replace(/^\d+\.\s*/, '')}
                           </span>
                           <h2
-                            className="text-3xl font-bold leading-tight tracking-tight text-slate-950 sm:text-5xl"
-                            style={{ fontFamily: `'${storeFontFamily}', 'Playfair Display', Georgia, serif` }}
+                            className={`text-3xl font-bold leading-tight tracking-tight sm:text-5xl ${
+                              isDarkTheme ? 'text-white' : 'text-slate-950'
+                            }`}
+                            style={{
+                              fontFamily: `'${storeFontFamily}', serif`,
+                              textTransform: headingTransform,
+                            }}
                           >
-                            {heroSection?.title || 'Timeless Elegance'}
+                            {heroSection?.title || business.name}
                           </h2>
-                          <p className="max-w-lg text-sm leading-6 text-stone-700">
+                          <p className={`max-w-lg text-sm leading-6 ${isDarkTheme ? 'text-slate-300' : 'text-stone-700'}`}>
                             {heroSection?.subtitle ||
                               business.description ||
-                              'Traditional craftsmanship, modern lifestyle.'}
+                              'Welcome to our store. Browse catalog below.'}
                           </p>
                           <div className="flex flex-wrap items-center gap-3 pt-2">
                             <button
@@ -2057,20 +2301,66 @@ export const MiniAppStorefront: React.FC<StorefrontProps> = ({
                           </div>
                         </div>
 
-                        <div className="relative h-64 overflow-hidden sm:h-80 lg:col-span-5 lg:h-full">
-                          <ProductVisualCard
-                            imageType={products[0]?.image_type || 'thobe_set'}
-                            imageUrl={products[0]?.image_url}
-                            title={business.name}
-                            accentColor={primaryColor}
-                            aspectClass="h-full w-full"
-                          />
+                        <div className="relative h-64 overflow-hidden sm:h-80 lg:col-span-5 lg:h-full flex items-center justify-center">
+                          {products[0]?.image_url ? (
+                            <ProductVisualCard
+                              imageUrl={products[0]?.image_url}
+                              title={business.name}
+                              accentColor={primaryColor}
+                              aspectClass="h-full w-full"
+                            />
+                          ) : products[0]?.image_type && !products[0]?.image_type.startsWith('thobe') ? (
+                            <ProductVisualCard
+                              imageType={products[0]?.image_type}
+                              title={business.name}
+                              accentColor={primaryColor}
+                              aspectClass="h-full w-full"
+                            />
+                          ) : (
+                            <div className="flex h-full w-full items-center justify-center p-6">
+                              <div
+                                className="flex flex-col items-center justify-center rounded-3xl p-8 text-center shadow-xl backdrop-blur-md"
+                                style={{
+                                  backgroundColor: isDarkTheme ? 'rgba(255,255,255,0.06)' : 'rgba(255,255,255,0.85)',
+                                  border: `1px solid ${accentColor}40`,
+                                }}
+                              >
+                                <div
+                                  className="flex h-20 w-20 items-center justify-center rounded-2xl font-extrabold text-3xl shadow-sm"
+                                  style={{ backgroundColor: primaryColor, color: '#FFFFFF' }}
+                                >
+                                  {String(business.logo_text || business.name || 'ST').slice(0, 2).toUpperCase()}
+                                </div>
+                                <div
+                                  className="mt-3 font-display font-bold text-base"
+                                  style={{ color: isDarkTheme ? '#FFFFFF' : '#0F172A' }}
+                                >
+                                  {business.name}
+                                </div>
+                                <span
+                                  className="mt-1.5 inline-block rounded-full px-3 py-1 text-[10px] font-extrabold uppercase tracking-wider"
+                                  style={{
+                                    backgroundColor: `${accentColor}25`,
+                                    color: isDarkTheme ? accentColor : primaryColor,
+                                  }}
+                                >
+                                  {String(catMeta.label || business.category || 'Official Storefront').replace(/^\d+\.\s*/, '')}
+                                </span>
+                              </div>
+                            </div>
+                          )}
                         </div>
                       </div>
                     </section>
 
-                    {/* 4-Column Trust & Guarantee Bar (Matches Reference Photo) */}
-                    <section className="grid grid-cols-2 divide-y divide-stone-200/80 rounded-[22px] border border-[#E8E1D5] bg-white p-4 shadow-2xs sm:grid-cols-4 sm:divide-x sm:divide-y-0">
+                    {/* 4-Column Trust & Guarantee Bar */}
+                    <section
+                      className={`grid grid-cols-2 divide-y rounded-[22px] border p-4 shadow-2xs sm:grid-cols-4 sm:divide-x sm:divide-y-0 ${
+                        isDarkTheme
+                          ? 'border-white/10 bg-white/5 divide-white/10 text-white'
+                          : 'border-[#E8E1D5] bg-white divide-stone-200/80 text-slate-900'
+                      }`}
+                    >
                       {[
                         { icon: ShieldCheck, title: 'Premium Quality', sub: 'Authentic materials' },
                         { icon: CreditCard, title: 'Secure Payment', sub: 'Verified bank & wallet' },
@@ -2080,28 +2370,32 @@ export const MiniAppStorefront: React.FC<StorefrontProps> = ({
                         const Icon = item.icon;
                         return (
                           <div key={idx} className="flex flex-col items-center justify-center p-2 text-center">
-                            <Icon className="h-5 w-5 text-slate-900" />
-                            <div className="mt-1.5 text-xs font-bold text-slate-900">{item.title}</div>
-                            <div className="text-[10px] text-stone-500">{item.sub}</div>
+                            <Icon className={`h-5 w-5 ${isDarkTheme ? 'text-white' : 'text-slate-900'}`} />
+                            <div className={`mt-1.5 text-xs font-bold ${isDarkTheme ? 'text-white' : 'text-slate-900'}`}>
+                              {item.title}
+                            </div>
+                            <div className={`text-[10px] ${isDarkTheme ? 'text-slate-400' : 'text-stone-500'}`}>
+                              {item.sub}
+                            </div>
                           </div>
                         );
                       })}
                     </section>
 
-                    {/* Shop By Category Visual Row (Matches Reference Photo) */}
+                    {/* Shop By Category Visual Row */}
                     {catMeta.supportsProducts && productCategories.length > 1 && (
                       <section className="space-y-3.5">
                         <div className="flex items-center justify-between">
                           <h3
-                            className="text-lg font-bold text-slate-950 sm:text-xl"
-                            style={{ fontFamily: `'${storeFontFamily}', 'Playfair Display', serif` }}
+                            className={`text-lg font-bold sm:text-xl ${isDarkTheme ? 'text-white' : 'text-slate-950'}`}
+                            style={{ fontFamily: `'${storeFontFamily}', serif` }}
                           >
                             Shop By Category
                           </h3>
                           <button
                             type="button"
                             onClick={() => navigateTo('catalog')}
-                            className="inline-flex items-center gap-1 text-xs font-bold text-stone-600 hover:text-slate-950"
+                            className="inline-flex items-center gap-1 text-xs font-bold opacity-75 hover:opacity-100"
                           >
                             View All <ArrowRight className="h-3.5 w-3.5" />
                           </button>
@@ -2110,7 +2404,7 @@ export const MiniAppStorefront: React.FC<StorefrontProps> = ({
                         <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
                           {productCategories.slice(1, 6).map((cat, idx) => {
                             const sampleProd =
-                              products.find((p: any) => p.category_name === cat) || products[idx] || products[0];
+                              products.find((p: any) => p.category_name === cat) || products[idx];
                             return (
                               <button
                                 key={cat}
@@ -2119,18 +2413,48 @@ export const MiniAppStorefront: React.FC<StorefrontProps> = ({
                                   setSelectedCategory(cat);
                                   navigateTo('catalog');
                                 }}
-                                className="group flex flex-col items-center rounded-[20px] border border-[#E8E1D5] bg-white p-2.5 text-center shadow-2xs transition hover:-translate-y-0.5 hover:shadow-md"
+                                className={`group flex flex-col items-center rounded-[20px] border p-2.5 text-center shadow-2xs transition hover:-translate-y-0.5 hover:shadow-md ${
+                                  isDarkTheme
+                                    ? 'border-white/10 bg-white/5 text-white'
+                                    : 'border-[#E8E1D5] bg-white text-slate-900'
+                                }`}
                               >
                                 <div className="w-full overflow-hidden rounded-[14px]">
-                                  <ProductVisualCard
-                                    imageType={sampleProd?.image_type || 'thobe_white'}
-                                    imageUrl={sampleProd?.image_url}
-                                    title={cat}
-                                    accentColor={primaryColor}
-                                    aspectClass="aspect-[1/0.95]"
-                                  />
+                                  {sampleProd?.image_url ? (
+                                    <ProductVisualCard
+                                      imageUrl={sampleProd.image_url}
+                                      title={cat}
+                                      accentColor={primaryColor}
+                                      aspectClass="aspect-[1/0.95]"
+                                    />
+                                  ) : (
+                                    <div
+                                      className="flex aspect-[1/0.95] w-full items-center justify-center rounded-[14px] transition group-hover:scale-105"
+                                      style={{
+                                        background: isDarkTheme
+                                          ? `linear-gradient(135deg, ${primaryColor}40, rgba(255,255,255,0.06))`
+                                          : `linear-gradient(135deg, ${primaryColor}12, ${accentColor}20)`,
+                                        borderColor: `${accentColor}30`,
+                                      }}
+                                    >
+                                      <div
+                                        className="flex h-12 w-12 items-center justify-center rounded-xl shadow-xs"
+                                        style={{ backgroundColor: primaryColor, color: '#FFFFFF' }}
+                                      >
+                                        {idx % 4 === 0 ? (
+                                          <ShoppingBag className="h-6 w-6" />
+                                        ) : idx % 4 === 1 ? (
+                                          <Sparkles className="h-6 w-6" />
+                                        ) : idx % 4 === 2 ? (
+                                          <Tag className="h-6 w-6" />
+                                        ) : (
+                                          <Package className="h-6 w-6" />
+                                        )}
+                                      </div>
+                                    </div>
+                                  )}
                                 </div>
-                                <span className="mt-2.5 text-xs font-bold text-slate-900 group-hover:text-indigo-950">
+                                <span className={`mt-2.5 text-xs font-bold truncate max-w-full ${isDarkTheme ? 'text-slate-200 group-hover:text-white' : 'text-slate-900 group-hover:text-indigo-950'}`}>
                                   {cat}
                                 </span>
                               </button>
@@ -2185,7 +2509,7 @@ export const MiniAppStorefront: React.FC<StorefrontProps> = ({
                             at checkout
                           </div>
                         </div>
-                        <button
+                          <button
                           type="button"
                           onClick={() => {
                             setDiscountCode(promotions[0].code);
@@ -2198,6 +2522,223 @@ export const MiniAppStorefront: React.FC<StorefrontProps> = ({
                         </button>
                       </section>
                     )}
+
+                    {/* Customer Reviews Section (1 to 5 Stars) */}
+                    <section
+                      className={`rounded-[26px] border p-5 sm:p-7 space-y-5 shadow-xs ${
+                        isDarkTheme
+                          ? 'border-white/10 bg-white/5 text-white'
+                          : 'border-[#E8E1D5] bg-white text-slate-900'
+                      }`}
+                    >
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-stone-200/70 dark:border-white/10 pb-4">
+                        <div>
+                          <div className="inline-flex items-center gap-2">
+                            <div className="flex items-center gap-0.5 text-amber-400">
+                              {[1, 2, 3, 4, 5].map((st) => (
+                                <Star
+                                  key={st}
+                                  className={`h-4 w-4 ${
+                                    st <= Math.round(Number(reviewStats?.averageRating || 5))
+                                      ? 'fill-amber-400 text-amber-400'
+                                      : 'text-stone-300'
+                                  }`}
+                                />
+                              ))}
+                            </div>
+                            <span className="text-sm font-extrabold">
+                              {Number(reviewStats?.averageRating || 5).toFixed(1)} / 5.0
+                            </span>
+                            <span className={`text-xs ${isDarkTheme ? 'text-slate-400' : 'text-stone-500'}`}>
+                              ({reviews.length} customer {reviews.length === 1 ? 'review' : 'reviews'})
+                            </span>
+                          </div>
+                          <h3
+                            className={`mt-1 text-lg font-bold sm:text-xl ${
+                              isDarkTheme ? 'text-white' : 'text-slate-950'
+                            }`}
+                            style={{ fontFamily: `'${storeFontFamily}', 'Playfair Display', serif` }}
+                          >
+                            Customer Reviews &amp; Ratings (1 to 5 Stars)
+                          </h3>
+                          <p className={`text-xs ${isDarkTheme ? 'text-slate-300' : 'text-stone-500'}`}>
+                            Bought something from {business.name}? Share your 1 to 5 star rating below.
+                          </p>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowReviewForm((prev) => !prev);
+                            setReviewError('');
+                            setReviewSuccess('');
+                          }}
+                          className="inline-flex items-center gap-2 rounded-full px-5 py-2.5 text-xs font-extrabold text-white shadow-sm transition hover:-translate-y-0.5 shrink-0"
+                          style={{ backgroundColor: primaryColor }}
+                        >
+                          <Star className="h-3.5 w-3.5 fill-amber-300 text-amber-300" />
+                          <span>{showReviewForm ? 'Close Review Form' : 'Write a Review (1–5 ★)'}</span>
+                        </button>
+                      </div>
+
+                      {reviewSuccess && (
+                        <div className="rounded-2xl border border-emerald-300 bg-emerald-50 px-4 py-3 text-xs font-bold text-emerald-900 flex items-center justify-between">
+                          <span>{reviewSuccess}</span>
+                          <button
+                            type="button"
+                            onClick={() => setReviewSuccess('')}
+                            className="text-emerald-700 hover:text-emerald-950"
+                          >
+                            <X className="h-4 w-4" />
+                          </button>
+                        </div>
+                      )}
+
+                      {showReviewForm && (
+                        <form
+                          onSubmit={handleSubmitReview}
+                          className={`rounded-2xl border p-4 sm:p-5 space-y-4 ${
+                            isDarkTheme
+                              ? 'border-white/15 bg-slate-900/80 text-white'
+                              : 'border-stone-200 bg-[#FAF8F5] text-slate-900'
+                          }`}
+                        >
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                            <span className="text-xs font-extrabold uppercase tracking-wider">
+                              Select Your Star Rating (1 to 5 Stars)
+                            </span>
+                            <div className="flex items-center gap-1.5">
+                              {[1, 2, 3, 4, 5].map((starVal) => (
+                                <button
+                                  key={starVal}
+                                  type="button"
+                                  onClick={() => setReviewRating(starVal)}
+                                  className={`inline-flex items-center gap-1 rounded-xl border px-3 py-1.5 text-xs font-extrabold transition ${
+                                    reviewRating >= starVal
+                                      ? 'border-amber-400 bg-amber-400/20 text-amber-600 dark:text-amber-300'
+                                      : 'border-stone-300 bg-white/60 text-stone-400 dark:border-white/10 dark:bg-white/5'
+                                  }`}
+                                >
+                                  <Star
+                                    className={`h-4 w-4 ${
+                                      reviewRating >= starVal ? 'fill-amber-400 text-amber-400' : 'text-stone-400'
+                                    }`}
+                                  />
+                                  <span>{starVal}</span>
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            <div>
+                              <label className="block text-[11px] font-bold mb-1">Your Name *</label>
+                              <input
+                                type="text"
+                                value={reviewName || customerName}
+                                onChange={(e) => setReviewName(e.target.value)}
+                                placeholder="e.g. Alex M."
+                                className="w-full rounded-xl border border-stone-300 bg-white px-3.5 py-2 text-xs text-slate-900 focus:outline-none"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-[11px] font-bold mb-1">Item Purchased (Optional)</label>
+                              <select
+                                value={reviewProduct}
+                                onChange={(e) => setReviewProduct(e.target.value)}
+                                className="w-full rounded-xl border border-stone-300 bg-white px-3.5 py-2 text-xs text-slate-900 focus:outline-none"
+                              >
+                                <option value="">General Storefront Experience</option>
+                                {products.map((p: any) => (
+                                  <option key={p.id} value={p.name}>
+                                    {p.name}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                          </div>
+
+                          <div>
+                            <label className="block text-[11px] font-bold mb-1">Your Review *</label>
+                            <textarea
+                              rows={3}
+                              value={reviewComment}
+                              onChange={(e) => setReviewComment(e.target.value)}
+                              placeholder="Share what you loved about the product, quality, or fast Telegram service..."
+                              className="w-full rounded-xl border border-stone-300 bg-white px-3.5 py-2 text-xs text-slate-900 focus:outline-none"
+                            />
+                          </div>
+
+                          {reviewError && (
+                            <div className="rounded-xl bg-rose-50 border border-rose-200 px-3 py-2 text-xs font-bold text-rose-700">
+                              {reviewError}
+                            </div>
+                          )}
+
+                          <div className="flex items-center justify-end gap-2">
+                            <button
+                              type="button"
+                              onClick={() => setShowReviewForm(false)}
+                              className="rounded-xl border border-stone-300 px-4 py-2 text-xs font-bold"
+                            >
+                              Cancel
+                            </button>
+                            <button
+                              type="submit"
+                              disabled={submittingReview}
+                              className="rounded-xl px-5 py-2 text-xs font-extrabold text-white shadow-sm disabled:opacity-50"
+                              style={{ backgroundColor: primaryColor }}
+                            >
+                              {submittingReview ? 'Submitting...' : `Post ${reviewRating}-Star Review`}
+                            </button>
+                          </div>
+                        </form>
+                      )}
+
+                      <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2">
+                        {reviews.map((rev: any) => (
+                          <div
+                            key={rev.id}
+                            className={`rounded-2xl border p-4 space-y-2 ${
+                              isDarkTheme
+                                ? 'border-white/10 bg-white/5 text-white'
+                                : 'border-stone-200/80 bg-[#FAF8F5] text-slate-900'
+                            }`}
+                          >
+                            <div className="flex items-center justify-between gap-2">
+                              <div className="flex items-center gap-0.5 text-amber-400">
+                                {[1, 2, 3, 4, 5].map((s) => (
+                                  <Star
+                                    key={s}
+                                    className={`h-3.5 w-3.5 ${
+                                      s <= Number(rev.rating || 5)
+                                        ? 'fill-amber-400 text-amber-400'
+                                        : 'text-stone-300'
+                                    }`}
+                                  />
+                                ))}
+                              </div>
+                              {rev.verified_purchase ? (
+                                <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 px-2.5 py-0.5 text-[10px] font-extrabold text-emerald-700 dark:text-emerald-300">
+                                  <CheckCircle2 className="h-3 w-3" /> Verified Buyer
+                                </span>
+                              ) : null}
+                            </div>
+                            <p className={`text-xs leading-relaxed ${isDarkTheme ? 'text-slate-200' : 'text-stone-700'}`}>
+                              “{rev.comment}”
+                            </p>
+                            <div className="flex items-center justify-between pt-1 text-[11px]">
+                              <span className="font-bold">{rev.customer_name}</span>
+                              {rev.product_name ? (
+                                <span className={`truncate max-w-[180px] ${isDarkTheme ? 'text-slate-400' : 'text-stone-500'}`}>
+                                  Item: {rev.product_name}
+                                </span>
+                              ) : null}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </section>
                   </div>
                 )}
 
@@ -2666,35 +3207,119 @@ export const MiniAppStorefront: React.FC<StorefrontProps> = ({
                       </div>
                     </div>
 
-                    {paymentMethods.length > 0 && (
-                      <div>
-                        <label className="mb-1 block font-bold text-slate-700">Select Payment Method</label>
-                        <select
-                          value={selectedPaymentMethodId}
-                          onChange={(e) => setSelectedPaymentMethodId(e.target.value)}
-                          className="w-full rounded-xl border border-stone-200 bg-[#FAF8F5] px-3 py-2 font-semibold"
-                        >
-                          {paymentMethods.map((pm: any) => (
-                            <option key={pm.id} value={pm.id}>
-                              {pm.method_name} — {pm.account_name} ({pm.account_number})
-                            </option>
-                          ))}
-                        </select>
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between">
+                        <label className="block text-xs font-bold text-slate-800">
+                          Choose Payment Account
+                        </label>
+                        <span className="text-[10px] text-stone-500 font-medium">
+                          Transfer directly & confirm
+                        </span>
                       </div>
-                    )}
+
+                      {paymentMethods.length === 0 ? (
+                        <div className="rounded-xl border border-stone-200 bg-[#FAF8F5] p-3 text-xs text-stone-600">
+                          Direct Cash on Delivery / Store Pickup
+                        </div>
+                      ) : (
+                        <div className="space-y-2">
+                          <div className="grid grid-cols-1 gap-2">
+                            {paymentMethods.map((pm: any) => {
+                              const isSelected = selectedPaymentMethodId === pm.id;
+                              return (
+                                <button
+                                  key={pm.id}
+                                  type="button"
+                                  onClick={() => setSelectedPaymentMethodId(pm.id)}
+                                  className={`w-full text-left p-3 rounded-2xl border transition-all flex items-center justify-between gap-3 ${
+                                    isSelected
+                                      ? 'border-indigo-600 bg-indigo-50/70 dark:bg-indigo-950/40 ring-2 ring-indigo-500/20 shadow-sm'
+                                      : 'border-stone-200 bg-[#FAF8F5] hover:border-stone-300'
+                                  }`}
+                                >
+                                  <div className="flex items-center gap-2.5 min-w-0">
+                                    <div
+                                      className={`w-8 h-8 rounded-xl flex items-center justify-center font-bold text-xs shrink-0 ${
+                                        isSelected
+                                          ? 'bg-indigo-600 text-white'
+                                          : 'bg-stone-200 text-stone-700'
+                                      }`}
+                                    >
+                                      {pm.method_name.slice(0, 2).toUpperCase()}
+                                    </div>
+                                    <div className="min-w-0">
+                                      <div className="font-bold text-xs text-slate-900 truncate">
+                                        {pm.method_name}
+                                      </div>
+                                      <div className="text-[11px] text-stone-500 truncate">
+                                        {pm.account_name}
+                                      </div>
+                                    </div>
+                                  </div>
+                                  <div className="text-right shrink-0">
+                                    <span className="font-mono text-xs font-bold text-slate-800">
+                                      {pm.account_number.slice(0, 4)}...{pm.account_number.slice(-4)}
+                                    </span>
+                                  </div>
+                                </button>
+                              );
+                            })}
+                          </div>
+
+                          {/* Selected Payment Method Interactive Detail Box with 1-Click Copy */}
+                          {(() => {
+                            const activeMethod = paymentMethods.find((m: any) => m.id === selectedPaymentMethodId) || paymentMethods[0];
+                            if (!activeMethod) return null;
+                            return (
+                              <div className="rounded-2xl border border-indigo-200 bg-white p-3.5 space-y-2.5 shadow-xs">
+                                <div className="flex items-center justify-between text-xs">
+                                  <span className="font-extrabold text-indigo-950">
+                                    Send Payment to: {activeMethod.method_name}
+                                  </span>
+                                  <span className="text-[10px] px-2 py-0.5 rounded-md bg-indigo-50 text-indigo-700 font-bold">
+                                    Owner Verified
+                                  </span>
+                                </div>
+                                <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-200/80 flex items-center justify-between gap-2">
+                                  <div className="min-w-0">
+                                    <div className="text-[10px] uppercase font-bold text-slate-400">Account Holder</div>
+                                    <div className="font-bold text-xs text-slate-900 truncate">{activeMethod.account_name}</div>
+                                    <div className="text-[10px] uppercase font-bold text-slate-400 mt-1">Account / Phone Number</div>
+                                    <div className="font-mono font-extrabold text-sm text-indigo-700 select-all tracking-wide">
+                                      {activeMethod.account_number}
+                                    </div>
+                                  </div>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleCopyPaymentText('Account Number', activeMethod.account_number)}
+                                    className="btn-3d-white px-3 py-2 rounded-xl text-xs font-bold text-indigo-700 shrink-0 inline-flex items-center gap-1.5"
+                                  >
+                                    <Copy className="w-3.5 h-3.5" />
+                                    <span>{copyFeedback.includes('Account Number') ? 'Copied!' : 'Copy Number'}</span>
+                                  </button>
+                                </div>
+                                <p className="text-[11px] leading-4 text-stone-500">
+                                  After transferring, click <strong>&quot;I Have Transferred & Paid&quot;</strong> below. The store owner will instantly receive your payment request with receipt verification.
+                                </p>
+                              </div>
+                            );
+                          })()}
+                        </div>
+                      )}
+                    </div>
 
                     <div className="flex items-center justify-between border-t border-stone-100 pt-3 text-sm font-extrabold">
-                      <span>Total Due</span>
-                      <span>{formatMoney(cartSubtotal)}</span>
+                      <span>Total Amount to Pay</span>
+                      <span className="text-base text-indigo-700">{formatMoney(cartSubtotal)}</span>
                     </div>
 
                     <button
                       type="submit"
                       disabled={submittingOrder}
-                      className="w-full rounded-xl py-3.5 text-xs font-extrabold text-white shadow-md transition hover:brightness-110"
+                      className="w-full rounded-2xl py-3.5 text-xs font-extrabold text-white shadow-md transition hover:brightness-110 active:translate-y-0.5"
                       style={{ backgroundColor: primaryColor }}
                     >
-                      {submittingOrder ? 'Placing Order...' : `Complete Order (${formatMoney(cartSubtotal)})`}
+                      {submittingOrder ? 'Submitting Payment Request...' : `I Have Transferred & Paid (${formatMoney(cartSubtotal)}) →`}
                     </button>
                   </form>
                 </>

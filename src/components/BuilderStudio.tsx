@@ -5,11 +5,14 @@ import {
   Wrench,
   ArrowUp,
   ArrowDown,
+  ArrowLeft,
+  ArrowRight,
   Eye,
   EyeOff,
   RotateCcw,
   Save,
   CheckCircle2,
+  CheckCheck,
   Plus,
   Trash2,
   Palette,
@@ -24,9 +27,22 @@ import {
   ShoppingBag,
   Coffee,
   Sparkle,
+  ExternalLink,
+  FileText,
 } from 'lucide-react';
 import { BUSINESS_CATEGORIES } from '../i18n/translations';
 import { MiniAppStorefront } from './MiniAppStorefront';
+
+export type BuilderWizardStep = 'taste' | 'background' | 'typography' | 'seating' | 'sections' | 'review';
+
+export const BUILDER_WIZARD_STEPS: Array<{ id: BuilderWizardStep; label: string; number: number; subtitle: string }> = [
+  { id: 'taste', number: 1, label: 'Taste & Styles', subtitle: 'Aesthetic presets' },
+  { id: 'background', number: 2, label: 'Atmosphere & Textures', subtitle: 'Colors & textures' },
+  { id: 'typography', number: 3, label: 'Typography', subtitle: 'Fonts & headings' },
+  { id: 'seating', number: 4, label: 'Product Seating', subtitle: 'Card style & grid' },
+  { id: 'sections', number: 5, label: 'Page Sections', subtitle: 'Order & visual mockup' },
+  { id: 'review', number: 6, label: 'Review & Publish', subtitle: 'Save & live verification' },
+];
 
 interface BuilderStudioProps {
   business: any;
@@ -233,6 +249,9 @@ export const BuilderStudio: React.FC<BuilderStudioProps> = ({
   const [buttonStyle, setButtonStyle] = useState<'3d' | 'pill' | 'sharp'>(parsedLatestTheme.buttonStyle || '3d');
   const [showStockBadges, setShowStockBadges] = useState<boolean>(parsedLatestTheme.showStockBadges !== false);
   const [showStarRatings, setShowStarRatings] = useState<boolean>(parsedLatestTheme.showStarRatings !== false);
+
+  // 6-Step Guided Wizard State for Store Edition
+  const [wizardStep, setWizardStep] = useState<BuilderWizardStep>('taste');
 
   const [versionNote, setVersionNote] = useState('');
   const [saving, setSaving] = useState(false);
@@ -728,8 +747,63 @@ export const BuilderStudio: React.FC<BuilderStudioProps> = ({
           {/* METHOD B: SELF-SERVICE VISUAL BUILDER */}
           {mode === 'visual' && (
             <div className="space-y-6">
-              {/* 1. TASTE & AESTHETIC PRESET SELECTOR (1-Click Full Storefront Re-theming) */}
-              <div className="card-3d p-5 sm:p-6 space-y-4">
+              {/* Wizard Step Progress Indicator */}
+              <div className="card-3d rounded-2xl bg-white dark:bg-slate-900 p-3 sm:p-4 border border-slate-200/90 dark:border-slate-800">
+                <div className="flex items-center justify-between gap-2 mb-3 px-1">
+                  <div>
+                    <span className="text-[10px] font-extrabold uppercase tracking-widest text-indigo-600 dark:text-indigo-400">
+                      Step-by-Step Store Builder Wizard
+                    </span>
+                    <h3 className="text-sm font-display font-extrabold text-slate-950 dark:text-white">
+                      {BUILDER_WIZARD_STEPS.find((s) => s.id === wizardStep)?.number}. {BUILDER_WIZARD_STEPS.find((s) => s.id === wizardStep)?.label}
+                    </h3>
+                  </div>
+                  <span className="text-xs font-mono font-bold text-slate-500">
+                    Step {BUILDER_WIZARD_STEPS.findIndex((s) => s.id === wizardStep) + 1} of 6
+                  </span>
+                </div>
+
+                {/* Step tabs (scrollable horizontally on mobile) */}
+                <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none">
+                  {BUILDER_WIZARD_STEPS.map((step, idx) => {
+                    const currentIdx = BUILDER_WIZARD_STEPS.findIndex((s) => s.id === wizardStep);
+                    const isCurrent = step.id === wizardStep;
+                    const isPassed = idx < currentIdx;
+                    return (
+                      <button
+                        key={step.id}
+                        type="button"
+                        onClick={() => setWizardStep(step.id)}
+                        className={`group flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-bold transition shrink-0 ${
+                          isCurrent
+                            ? 'bg-indigo-600 text-white shadow-sm ring-2 ring-indigo-500/20'
+                            : isPassed
+                            ? 'bg-emerald-50 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300 hover:bg-emerald-100'
+                            : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400 hover:bg-slate-200'
+                        }`}
+                      >
+                        <span
+                          className={`flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-bold ${
+                            isCurrent
+                              ? 'bg-white text-indigo-700'
+                              : isPassed
+                              ? 'bg-emerald-600 text-white'
+                              : 'bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-300'
+                          }`}
+                        >
+                          {isPassed ? <Check className="w-3 h-3" /> : step.number}
+                        </span>
+                        <span className="truncate">{step.label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* STEP 1: TASTE & STYLE PRESETS */}
+              {wizardStep === 'taste' && (
+                <div className="space-y-5">
+                  <div className="card-3d p-5 sm:p-6 space-y-4">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                   <div>
                     <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-indigo-600 dark:text-indigo-400">
@@ -789,6 +863,26 @@ export const BuilderStudio: React.FC<BuilderStudioProps> = ({
                 </div>
               </div>
 
+              {/* Wizard Step 1 Navigation Footer */}
+              <div className="card-3d p-4 bg-white dark:bg-slate-900 flex items-center justify-between gap-3">
+                <span className="text-xs text-slate-500">
+                  Step 1 of 6 · Taste preset selected
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setWizardStep('background')}
+                  className="btn-3d-primary px-5 py-2.5 rounded-xl text-xs font-bold text-white flex items-center gap-1.5"
+                >
+                  <span>Next: Atmosphere & Textures</span>
+                  <ArrowRight className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* STEP 2: BACKGROUND, ATMOSPHERE & TEXTURES */}
+          {wizardStep === 'background' && (
+            <div className="space-y-5">
               {/* 2. BACKGROUND & SURFACE CUSTOMIZER (Fully Editable) */}
               <div className="card-3d p-5 sm:p-6 space-y-5">
                 <div className="flex items-center justify-between">
@@ -964,6 +1058,31 @@ export const BuilderStudio: React.FC<BuilderStudioProps> = ({
                 </div>
               </div>
 
+              {/* Wizard Step 2 Navigation Footer */}
+              <div className="card-3d p-4 bg-white dark:bg-slate-900 flex items-center justify-between gap-3">
+                <button
+                  type="button"
+                  onClick={() => setWizardStep('taste')}
+                  className="btn-3d-white px-4 py-2.5 rounded-xl text-xs font-bold flex items-center gap-1.5"
+                >
+                  <ArrowLeft className="w-4 h-4" />
+                  <span>Back: Taste & Styles</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setWizardStep('typography')}
+                  className="btn-3d-primary px-5 py-2.5 rounded-xl text-xs font-bold text-white flex items-center gap-1.5"
+                >
+                  <span>Next: Typography & Headings</span>
+                  <ArrowRight className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* STEP 3: TYPOGRAPHY & HEADING TRANSFORM */}
+          {wizardStep === 'typography' && (
+            <div className="space-y-5">
               {/* 3. TYPOGRAPHY & FONT CUSTOMIZER (Fully Editable) */}
               <div className="card-3d p-5 sm:p-6 space-y-4">
                 <div className="flex items-center justify-between">
@@ -1031,6 +1150,31 @@ export const BuilderStudio: React.FC<BuilderStudioProps> = ({
                 </div>
               </div>
 
+              {/* Wizard Step 3 Navigation Footer */}
+              <div className="card-3d p-4 bg-white dark:bg-slate-900 flex items-center justify-between gap-3">
+                <button
+                  type="button"
+                  onClick={() => setWizardStep('background')}
+                  className="btn-3d-white px-4 py-2.5 rounded-xl text-xs font-bold flex items-center gap-1.5"
+                >
+                  <ArrowLeft className="w-4 h-4" />
+                  <span>Back: Atmosphere</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setWizardStep('seating')}
+                  className="btn-3d-primary px-5 py-2.5 rounded-xl text-xs font-bold text-white flex items-center gap-1.5"
+                >
+                  <span>Next: Product Seating & Cards</span>
+                  <ArrowRight className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* STEP 4: PRODUCT SEATING & CARD STYLER */}
+          {wizardStep === 'seating' && (
+            <div className="space-y-5">
               {/* 4. PRODUCT SEATING & CARD STYLER ("How products are seated") */}
               <div className="card-3d p-5 sm:p-6 space-y-5">
                 <div>
@@ -1236,6 +1380,31 @@ export const BuilderStudio: React.FC<BuilderStudioProps> = ({
                 </div>
               </div>
 
+              {/* Wizard Step 4 Navigation Footer */}
+              <div className="card-3d p-4 bg-white dark:bg-slate-900 flex items-center justify-between gap-3">
+                <button
+                  type="button"
+                  onClick={() => setWizardStep('typography')}
+                  className="btn-3d-white px-4 py-2.5 rounded-xl text-xs font-bold flex items-center gap-1.5"
+                >
+                  <ArrowLeft className="w-4 h-4" />
+                  <span>Back: Typography</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setWizardStep('sections')}
+                  className="btn-3d-primary px-5 py-2.5 rounded-xl text-xs font-bold text-white flex items-center gap-1.5"
+                >
+                  <span>Next: Page Sections & Mockup</span>
+                  <ArrowRight className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* STEP 5: PAGE SECTIONS & LAYOUT ORDER + WIREFRAME MOCKUP */}
+          {wizardStep === 'sections' && (
+            <div className="space-y-5">
               {/* Ready-Made 9 Category Templates */}
               <div className="card-3d p-5 sm:p-6 space-y-3">
                 <div className="flex items-center justify-between">
@@ -1358,44 +1527,197 @@ export const BuilderStudio: React.FC<BuilderStudioProps> = ({
                 </div>
 
                 {/* Save Draft / Publish Controls */}
-                <div className="pt-3 border-t border-slate-200 dark:border-slate-800 flex flex-col sm:flex-row items-center gap-2.5">
+              </div>
+
+              {/* Live Mini Wireframe Layout Mockup */}
+              <div className="card-3d p-4 sm:p-5 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/90 dark:border-slate-800 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <span className="text-[10px] font-extrabold uppercase tracking-widest text-indigo-600 dark:text-indigo-400">
+                      Live Storefront Wireframe Mockup
+                    </span>
+                    <h4 className="text-xs font-bold text-slate-800 dark:text-slate-200">
+                      Visual Section Stacking ({sections.filter((s) => s.visible !== false).length} visible blocks)
+                    </h4>
+                  </div>
+                  <span className="text-[10px] font-mono text-emerald-600 dark:text-emerald-400 font-bold">
+                    Auto-Synchronized
+                  </span>
+                </div>
+
+                <div
+                  className="mx-auto max-w-[320px] rounded-[28px] p-4 shadow-lg border-4 border-slate-800 space-y-2 transition-all"
+                  style={{ backgroundColor }}
+                >
+                  <div className="h-3 w-20 bg-slate-800 rounded-full mx-auto mb-2" />
+                  <div className="p-2.5 rounded-xl bg-white/95 dark:bg-slate-900/95 shadow-xs flex items-center justify-between">
+                    <span className="text-xs font-extrabold truncate" style={{ fontFamily }}>
+                      {business.name}
+                    </span>
+                    <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: primaryColor }} />
+                  </div>
+
+                  <div className="space-y-1.5 max-h-60 overflow-y-auto pr-1">
+                    {sections
+                      .filter((s) => s.visible !== false)
+                      .map((s, idx) => (
+                        <div
+                          key={s.id || idx}
+                          className="p-2.5 rounded-xl border text-left shadow-xs transition-all"
+                          style={{
+                            borderColor: `${accentColor}30`,
+                            backgroundColor: cardBackgroundStyle === 'dark_surface' ? '#18181b' : '#ffffff',
+                            borderRadius: cardRadius === '0px' ? '0px' : '10px',
+                          }}
+                        >
+                          <div className="flex items-center justify-between">
+                            <span className="text-[9px] font-extrabold uppercase tracking-wider" style={{ color: primaryColor }}>
+                              {s.type.replace(/_/g, ' ')}
+                            </span>
+                            <span className="text-[9px] font-mono text-slate-400">#{idx + 1}</span>
+                          </div>
+                          <div className="text-[11px] font-bold text-slate-900 dark:text-slate-100 truncate mt-0.5" style={{ fontFamily, textTransform: headingTransform }}>
+                            {s.title || 'Section Headline'}
+                          </div>
+                          <div className="h-1 w-10 rounded-full mt-1.5" style={{ backgroundColor: primaryColor }} />
+                        </div>
+                      ))}
+                  </div>
+                  <div className="h-1 w-16 bg-slate-400 rounded-full mx-auto mt-2" />
+                </div>
+              </div>
+
+              {/* Wizard Step 5 Navigation Footer */}
+              <div className="card-3d p-4 bg-white dark:bg-slate-900 flex items-center justify-between gap-3">
+                <button
+                  type="button"
+                  onClick={() => setWizardStep('seating')}
+                  className="btn-3d-white px-4 py-2.5 rounded-xl text-xs font-bold flex items-center gap-1.5"
+                >
+                  <ArrowLeft className="w-4 h-4" />
+                  <span>Back: Product Seating</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setWizardStep('review')}
+                  className="btn-3d-primary px-5 py-2.5 rounded-xl text-xs font-bold text-white flex items-center gap-1.5"
+                >
+                  <span>Next: Review & Publish Live</span>
+                  <ArrowRight className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* STEP 6: REVIEW SUMMARY, SAVE DRAFT & PUBLISH LIVE */}
+          {wizardStep === 'review' && (
+            <div className="space-y-5">
+              <div className="card-3d p-5 sm:p-6 bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 rounded-2xl shadow-sm space-y-5">
+                <div>
+                  <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-emerald-600 dark:text-emerald-400">
+                    Step 6 · Review & Final Verification
+                  </div>
+                  <h3 className="text-base font-display font-bold text-slate-900 dark:text-white">
+                    Review Your Store Aesthetics & Launch Live
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Confirm your customized taste preset, typography, colors, and section order before publishing live to Telegram Mini App & Web.
+                  </p>
+                </div>
+
+                {/* Summary Matrix Cards */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+                  <div className="p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950">
+                    <div className="text-[10px] uppercase font-bold text-slate-400">Industry Taste</div>
+                    <div className="mt-1 font-extrabold text-slate-900 dark:text-white truncate">
+                      {TASTE_PRESETS.find((t) => t.id === tastePreset)?.name.split('&')[0] || 'Custom'}
+                    </div>
+                  </div>
+                  <div className="p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950">
+                    <div className="text-[10px] uppercase font-bold text-slate-400">Typography</div>
+                    <div className="mt-1 font-extrabold text-slate-900 dark:text-white truncate" style={{ fontFamily }}>
+                      {fontFamily}
+                    </div>
+                  </div>
+                  <div className="p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950">
+                    <div className="text-[10px] uppercase font-bold text-slate-400">Atmosphere</div>
+                    <div className="mt-1 font-extrabold text-slate-900 dark:text-white flex items-center gap-1.5">
+                      <span className="h-3 w-3 rounded-full border" style={{ backgroundColor }} />
+                      <span className="capitalize">{backgroundType.replace(/_/g, ' ')}</span>
+                    </div>
+                  </div>
+                  <div className="p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950">
+                    <div className="text-[10px] uppercase font-bold text-slate-400">Active Sections</div>
+                    <div className="mt-1 font-extrabold text-indigo-600 dark:text-indigo-400">
+                      {sections.filter((s) => s.visible !== false).length} of {sections.length} blocks
+                    </div>
+                  </div>
+                </div>
+
+                {/* Version Release Note */}
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
+                    Release Note (Optional)
+                  </label>
                   <input
                     type="text"
                     value={versionNote}
                     onChange={(e) => setVersionNote(e.target.value)}
-                    placeholder="Version release note (e.g., Added weekend promotion section)"
-                    className="flex-1 w-full px-3 py-2 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800"
+                    placeholder="e.g. Published updated autumn catalog & bespoke jewelry pedestal layout"
+                    className="w-full px-3.5 py-2.5 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800"
                   />
-                  <div className="flex items-center gap-2 shrink-0">
-                    <button
-                      type="button"
-                      disabled={saving || restoringVersionId !== ''}
-                      onClick={() => handleSaveVersion('draft')}
-                      className="px-3.5 py-2 rounded-lg border border-slate-300 dark:border-slate-700 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100 whitespace-nowrap"
-                    >
-                      {saving ? 'Saving...' : 'Save Draft'}
-                    </button>
-                    <button
-                      type="button"
-                      disabled={saving || restoringVersionId !== ''}
-                      onClick={() => handleSaveVersion('published')}
-                      className="px-4 py-2 rounded-lg bg-sky-600 hover:bg-sky-500 text-white text-xs font-semibold flex items-center gap-1.5 whitespace-nowrap"
-                    >
-                      <Save className="w-3.5 h-3.5" />
-                      {saving ? 'Publishing...' : `Publish live (v${(versions[0]?.version_number || 1) + 1})`}
-                    </button>
-                  </div>
+                </div>
+
+                {/* Two Clear Primary Action Buttons: Save Draft vs Publish Live */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
+                  <button
+                    type="button"
+                    disabled={saving || restoringVersionId !== ''}
+                    onClick={() => handleSaveVersion('draft')}
+                    className="btn-3d-white py-3.5 rounded-xl text-xs font-extrabold text-slate-800 dark:text-slate-200 flex items-center justify-center gap-2"
+                  >
+                    <FileText className="w-4 h-4 text-indigo-600" />
+                    <span>{saving ? 'Saving Draft...' : 'Save as Draft Version'}</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    disabled={saving || restoringVersionId !== ''}
+                    onClick={() => handleSaveVersion('published')}
+                    className="btn-3d-emerald py-3.5 rounded-xl text-xs font-extrabold text-white flex items-center justify-center gap-2"
+                  >
+                    <Save className="w-4 h-4" />
+                    <span>
+                      {saving
+                        ? 'Publishing Live...'
+                        : `Publish Live to Telegram & Web (v${(versions[0]?.version_number || 1) + 1})`}
+                    </span>
+                  </button>
+                </div>
+
+                {/* Dedicated Storefront Preview Shortcut */}
+                <div className="pt-2 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between text-xs">
+                  <span className="text-slate-500">
+                    Want to test customer purchasing with full cart & payment?
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setBuilderWorkspaceTab('preview')}
+                    className="font-bold text-indigo-600 dark:text-indigo-400 hover:underline inline-flex items-center gap-1"
+                  >
+                    Open Full Dedicated Preview →
+                  </button>
                 </div>
               </div>
 
-              {/* Version History & One-Click Restore */}
-              <div className="p-5 sm:p-6 bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 rounded-2xl shadow-sm space-y-3">
+              {/* Version History & One-Click Rollback */}
+              <div className="card-3d p-5 sm:p-6 bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 rounded-2xl shadow-sm space-y-3">
                 <h3 className="text-sm font-display font-semibold text-slate-900 dark:text-white">
                   Version History & Rollback ({versions.length} Revisions)
                 </h3>
                 <div className="divide-y divide-slate-100 dark:divide-slate-800 text-xs">
                   {versions.length === 0 && (
-                    <p className="py-5 text-center text-xs text-slate-500">No saved versions yet. Save a draft to create your first revision.</p>
+                    <p className="py-4 text-center text-xs text-slate-500">No previous versions recorded yet.</p>
                   )}
                   {versions.map((v) => (
                     <div key={v.id} className="py-2.5 flex items-center justify-between gap-4">
@@ -1406,8 +1728,8 @@ export const BuilderStudio: React.FC<BuilderStudioProps> = ({
                         <span className="mx-2 text-slate-400">·</span>
                         <span className="font-medium text-slate-700 dark:text-slate-300">{v.note}</span>
                         <span className="mx-2 text-slate-400">·</span>
-                        <span className="text-slate-500">
-                          {v.status.toUpperCase()} by {v.created_by}
+                        <span className="text-slate-500 capitalize">
+                          {v.status} by {v.created_by}
                         </span>
                       </div>
                       <button
@@ -1421,8 +1743,25 @@ export const BuilderStudio: React.FC<BuilderStudioProps> = ({
                   ))}
                 </div>
               </div>
+
+              {/* Wizard Step 6 Navigation Footer */}
+              <div className="card-3d p-4 bg-white dark:bg-slate-900 flex items-center justify-between gap-3">
+                <button
+                  type="button"
+                  onClick={() => setWizardStep('sections')}
+                  className="btn-3d-white px-4 py-2.5 rounded-xl text-xs font-bold flex items-center gap-1.5"
+                >
+                  <ArrowLeft className="w-4 h-4" />
+                  <span>Back: Page Sections</span>
+                </button>
+                <span className="text-xs text-emerald-600 font-bold">
+                  Ready to Publish Live
+                </span>
+              </div>
             </div>
           )}
+        </div>
+      )}
 
           {/* METHOD C: AI-POWERED MINI APP BUILDER */}
           {mode === 'ai' && (
