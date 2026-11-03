@@ -5194,7 +5194,8 @@ app.post('/api/storefront/:slug/support', (req: Request, res: Response) => {
 });
 
 async function startServer() {
-  const PORT = 3000;
+  const configuredPort = Number(process.env.PORT || 3000);
+  const PORT = Number.isInteger(configuredPort) && configuredPort > 0 && configuredPort <= 65535 ? configuredPort : 3000;
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({
       server: { middlewareMode: true },
