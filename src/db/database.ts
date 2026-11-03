@@ -1,11 +1,14 @@
 import Database from 'better-sqlite3';
 import crypto from 'crypto';
+import fs from 'fs';
 import path from 'path';
 
 
 const dbPath = path.resolve(
   process.env.TELEBIZ_DATABASE_PATH || path.resolve(process.cwd(), 'telebiz_store.db')
 );
+
+fs.mkdirSync(path.dirname(dbPath), { recursive: true });
 
 function openDatabaseWithRecovery(targetPath: string): Database.Database {
   const instance = new Database(targetPath);
