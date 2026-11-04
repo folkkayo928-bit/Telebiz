@@ -594,7 +594,7 @@ app.get('/api/auth/check-account', authRateLimit, (req: Request, res: Response) 
 
   if (checkType === 'google' || checkType === 'email') {
     const cleanEmail = rawIdentifier.toLowerCase();
-    const validFormat = /^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(cleanEmail);
+    const validFormat = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail);
     if (!validFormat) {
       res.json({
         exists: false,
