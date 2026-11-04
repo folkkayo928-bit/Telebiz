@@ -3030,41 +3030,62 @@ app.post('/api/businesses/:id/media/upload', (req: Request, res: Response) => {
     return;
   }
 
-  const { dataUrl, width, height, originalSize } = req.body;
-  if (!dataUrl || typeof dataUrl !== 'string' || !dataUrl.startsWith('data:image/')) {
-    res.status(400).json({ error: 'Valid compressed image data URL is required.' });
+  const { dataUrl, width, height, originalSize } = req.body || {};
+  if (!dataUrl || typeof dataUrl !== 'string' || dataUrl.length > 12 * 1024 * 1024) {
+    res.status(400).json({ error: 'A compressed image under the upload limit is required.' });
     return;
   }
 
-  const match = dataUrl.match(/^data:(image\/[a-zA-Z0-9+.-]+);base64,(.+)$/);
+  const match = dataUrl.match(/^data:(image\/(?:jpeg|png|webp));base64,([A-Za-z0-9+/]+={0,2})$/i);
   if (!match) {
-    res.status(400).json({ error: 'Malformed image payload.' });
+    res.status(400).json({ error: 'Only valid JPEG, PNG, or WebP image uploads are supported.' });
     return;
   }
 
-  const mimeType = match[1];
+  const mimeType = match[1].toLowerCase();
   const base64Data = match[2];
   const buffer = Buffer.from(base64Data, 'base64');
   const byteSize = buffer.byteLength;
-
-  if (byteSize > 8 * 1024 * 1024) {
-    res.status(413).json({ error: 'Image exceeds 8MB limit after compression.' });
+  if (byteSize === 0 || byteSize > 8 * 1024 * 1024 || buffer.toString('base64').replace(/=+$/, '') !== base64Data.replace(/=+$/, '')) {
+    res.status(byteSize > 8 * 1024 * 1024 ? 413 : 400).json({
+      error: byteSize > 8 * 1024 * 1024 ? 'Image exceeds 8MB limit after compression.' : 'Image data is invalid.',
+    });
     return;
   }
 
-  // Content-Addressable SHA-256 hash so identical photos are deduplicated on disk
+  // Verify the actual file signature; do not trust a client-supplied MIME type.
+  const isPng = mimeType === 'image/png' && buffer.length >= 8 && buffer.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+  const isJpeg = mimeType === 'image/jpeg' && buffer.length >= 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff;
+  const isWebp = mimeType === 'image/webp' && buffer.length >= 12 && buffer.toString('ascii', 0, 4) === 'RIFF' && buffer.toString('ascii', 8, 12) === 'WEBP';
+  if (!isPng && !isJpeg && !isWebp) {
+    res.status(400).json({ error: 'Image content does not match its declared file type.' });
+    return;
+  }
+
+  const imageWidth = Number(width);
+  const imageHeight = Number(height);
+  if (!Number.isInteger(imageWidth) || !Number.isInteger(imageHeight) ||
+      imageWidth < 1 || imageHeight < 1 || imageWidth > 20000 || imageHeight > 20000) {
+    res.status(400).json({ error: 'Image dimensions are invalid.' });
+    return;
+  }
+
+  const parsedOriginalSize = Number(originalSize ?? byteSize);
+  const origBytes = Number.isFinite(parsedOriginalSize) && parsedOriginalSize >= byteSize && parsedOriginalSize <= 100 * 1024 * 1024
+    ? parsedOriginalSize
+    : byteSize;
+
   const sha256Hash = crypto.createHash('sha256').update(buffer).digest('hex');
-  const ext = mimeType.includes('webp') ? 'webp' : mimeType.includes('png') ? 'png' : 'jpg';
+  const ext = isWebp ? 'webp' : isPng ? 'png' : 'jpg';
   const fileName = `img_${sha256Hash.slice(0, 24)}.${ext}`;
   const filePath = path.join(uploadsDir, fileName);
   const publicUrl = `/uploads/media/${fileName}`;
 
   if (!fs.existsSync(filePath)) {
-    fs.writeFileSync(filePath, buffer);
+    fs.writeFileSync(filePath, buffer, { flag: 'wx' });
   }
 
-  const origBytes = Number(originalSize || byteSize);
-  const ratio = origBytes > 0 ? Number((byteSize / origBytes).toFixed(2)) : 1.0;
+  const ratio = Number((byteSize / origBytes).toFixed(2));
   const mediaId = 'med_' + crypto.randomBytes(5).toString('hex');
 
   db.prepare(`
@@ -3080,8 +3101,8 @@ app.post('/api/businesses/:id/media/upload', (req: Request, res: Response) => {
     filePath,
     publicUrl,
     mimeType,
-    Number(width || 800),
-    Number(height || 800),
+    imageWidth,
+    imageHeight,
     byteSize,
     origBytes,
     ratio,
