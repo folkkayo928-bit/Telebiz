@@ -243,6 +243,8 @@ export function initDatabase() {
       delivery_address TEXT DEFAULT '',
       assigned_employee_id TEXT,
       payment_status TEXT NOT NULL DEFAULT 'unpaid', -- 'unpaid' | 'pending_verification' | 'paid' | 'failed' | 'refunded'
+      stock_reserved_at TEXT DEFAULT '',
+      stock_restored_at TEXT DEFAULT '',
       payment_method TEXT NOT NULL DEFAULT 'telebirr', -- 'telegram_stars' | 'telebirr' | 'cbe_birr' | 'card' | 'cash_on_delivery'
       created_at TEXT NOT NULL
     );
@@ -496,6 +498,10 @@ export function initDatabase() {
   safeAlter(`ALTER TABLE customers ADD COLUMN owner_uid TEXT DEFAULT ''`);
   safeAlter(`ALTER TABLE customers ADD COLUMN device_fingerprint TEXT DEFAULT ''`);
   safeAlter(`ALTER TABLE customers ADD COLUMN status TEXT DEFAULT 'active'`);
+
+  // Inventory reservation markers are additive and preserve all existing order rows.
+  safeAlter(`ALTER TABLE orders ADD COLUMN stock_reserved_at TEXT DEFAULT ''`);
+  safeAlter(`ALTER TABLE orders ADD COLUMN stock_restored_at TEXT DEFAULT ''`);
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS telegram_auth_sessions (
