@@ -63,6 +63,7 @@ import { translations, LANGUAGE_LABELS, LanguageCode, BUSINESS_CATEGORIES } from
 import { MiniAppStorefront } from './components/MiniAppStorefront';
 import { BuilderStudio } from './components/BuilderStudio';
 import { SuperAdminConsole } from './components/SuperAdminConsole';
+import { EMPLOYEE_PERMISSIONS, defaultEmployeePermissions } from './lib/employeeAccess';
 
 export interface StylizedNotificationButton {
   label: string;
@@ -196,7 +197,8 @@ export default function App() {
   const [empName, setEmpName] = useState('');
   const [empEmail, setEmpEmail] = useState('');
   const [empRole, setEmpRole] = useState('sales');
-  const [empPerms, setEmpPerms] = useState<string[]>(['orders.manage', 'support.reply']);
+  const [empPerms, setEmpPerms] = useState<string[]>(defaultEmployeePermissions('sales'));
+  const [employeeInviteToken, setEmployeeInviteToken] = useState('');
 
   const [branchName, setBranchName] = useState('');
   const [branchAddress, setBranchAddress] = useState('');
@@ -631,6 +633,41 @@ export default function App() {
   useEffect(() => {
     loadAccountAndBusinesses();
   }, [loadAccountAndBusinesses]);
+
+  // A private invitation link can be opened before or after sign-in. Accept it
+  // only after the invited email account is authenticated.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const inviteToken = params.get('employee_invite');
+    if (!inviteToken || !authToken) return;
+    let cancelled = false;
+    fetch('/api/employee-invitations/accept', {
+      method: 'POST',
+      headers: headersWithAuth(authToken),
+      body: JSON.stringify({ invite_token: inviteToken }),
+    })
+      .then(async (res) => {
+        const data = await res.json().catch(() => ({}));
+        if (cancelled) return;
+        if (res.ok && data.accepted) {
+          setStatusBanner(`You joined ${data.businessName} as ${data.role}.`);
+          await loadAccountAndBusinesses(authToken, data.businessId);
+        } else {
+          setStatusBanner(data.error || 'Employee invitation could not be accepted.');
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setStatusBanner('Could not verify the employee invitation. Please try again.');
+      })
+      .finally(() => {
+        if (!cancelled) {
+          params.delete('employee_invite');
+          const query = params.toString();
+          window.history.replaceState({}, '', window.location.pathname + (query ? '?' + query : '') + window.location.hash);
+        }
+      });
+    return () => { cancelled = true; };
+  }, [authToken, headersWithAuth, loadAccountAndBusinesses]);
 
   useEffect(() => {
     if (selectedBusinessId && businesses.some((b: any) => b.id === selectedBusinessId)) {
@@ -1950,11 +1987,15 @@ export default function App() {
         permissions: empPerms,
       }),
     });
+    const data = await res.json().catch(() => ({}));
     if (res.ok) {
       setEmpName('');
       setEmpEmail('');
+      setEmployeeInviteToken(data.inviteToken || '');
       loadTenantWorkspace(selectedBusinessId);
-      setStatusBanner(`Invited ${empName} as ${empRole}.`);
+      setStatusBanner(`Invitation created for ${data.inviteEmail || empEmail}. Share the private invite link with the employee.`);
+    } else {
+      setStatusBanner(data.error || 'Employee invitation could not be created.');
     }
   };
 
@@ -5399,7 +5440,10 @@ export default function App() {
                     />
                     <select
                       value={empRole}
-                      onChange={(e) => setEmpRole(e.target.value)}
+                      onChange={(e) => {
+                        setEmpRole(e.target.value);
+                        setEmpPerms(defaultEmployeePermissions(e.target.value));
+                      }}
                       className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800"
                     >
                       <option value="admin">Administrator</option>
@@ -5409,12 +5453,52 @@ export default function App() {
                       <option value="product_manager">Product Manager</option>
                       <option value="analyst">Analyst</option>
                     </select>
+                    <div className="rounded-xl border border-slate-200 dark:border-slate-700 p-3 space-y-2">
+                      <div className="font-semibold text-slate-700 dark:text-slate-200">Access permissions</div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        {EMPLOYEE_PERMISSIONS.map((permission) => (
+                          <label key={permission} className="flex items-center gap-2 text-[11px] text-slate-600 dark:text-slate-300">
+                            <input
+                              type="checkbox"
+                              checked={empPerms.includes('all') || empPerms.includes(permission)}
+                              onChange={(e) => setEmpPerms((current) => {
+                                const selected = current.includes('all') ? [...EMPLOYEE_PERMISSIONS] : current;
+                                return e.target.checked
+                                  ? Array.from(new Set([...selected, permission]))
+                                  : selected.filter((item) => item !== permission);
+                              })}
+                            />
+                            {permission === 'orders.manage' ? 'Orders & manual payments' :
+                             permission === 'products.manage' ? 'Products & categories' :
+                             permission === 'bookings.manage' ? 'Bookings & services' :
+                             permission === 'support.reply' ? 'Customer support' :
+                             permission === 'analytics.view' ? 'Analytics' : 'Store builder'}
+                          </label>
+                        ))}
+                      </div>
+                    </div>
                     <button
                       type="submit"
                       className="w-full py-2 rounded-lg bg-sky-600 hover:bg-sky-500 text-white font-semibold"
                     >
                       Send Invitation & Assign Permissions
                     </button>
+                    {employeeInviteToken && (
+                      <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 space-y-2 dark:border-emerald-900 dark:bg-emerald-950/30">
+                        <div className="font-semibold text-emerald-900 dark:text-emerald-200">Invitation link — expires in 7 days</div>
+                        <div className="break-all rounded-lg bg-white p-2 text-[10px] text-slate-700 dark:bg-slate-900 dark:text-slate-200">
+                          {window.location.origin}/?employee_invite={employeeInviteToken}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => navigator.clipboard?.writeText(`${window.location.origin}/?employee_invite=${employeeInviteToken}`)}
+                          className="rounded-lg bg-emerald-700 px-3 py-2 text-[11px] font-semibold text-white"
+                        >
+                          Copy private invite link
+                        </button>
+                        <p className="text-[10px] text-emerald-800 dark:text-emerald-300">Share this link privately. The employee must sign in with the exact invited email address.</p>
+                      </div>
+                    )}
                   </form>
                 </div>
 

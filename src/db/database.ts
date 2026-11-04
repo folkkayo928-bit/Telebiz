@@ -476,6 +476,8 @@ export function initDatabase() {
   safeAlter(`ALTER TABLE users ADD COLUMN auth_provider TEXT DEFAULT 'email'`);
   safeAlter(`ALTER TABLE users ADD COLUMN account_status TEXT DEFAULT 'active'`);
   safeAlter(`ALTER TABLE users ADD COLUMN last_selected_business_id TEXT DEFAULT ''`);
+  safeAlter(`ALTER TABLE employees ADD COLUMN invite_token_hash TEXT DEFAULT ''`);
+  safeAlter(`ALTER TABLE employees ADD COLUMN invite_expires_at TEXT DEFAULT ''`);
 
   safeAlter(`ALTER TABLE businesses ADD COLUMN font_family TEXT DEFAULT 'Plus Jakarta Sans'`);
   safeAlter(`ALTER TABLE businesses ADD COLUMN categories_json TEXT DEFAULT '[]'`);
