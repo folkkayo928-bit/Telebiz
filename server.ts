@@ -19,7 +19,7 @@ import {
 dotenv.config();
 initDatabase();
 
-const uploadsDir = path.resolve(process.cwd(), 'uploads', 'media');
+const uploadsDir = path.resolve(process.env.UPLOADS_DIR || path.resolve(process.cwd(), 'uploads', 'media'));
 if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir, { recursive: true });
 }
