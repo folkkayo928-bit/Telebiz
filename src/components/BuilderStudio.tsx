@@ -226,8 +226,8 @@ export const BuilderStudio: React.FC<BuilderStudioProps> = ({
 
   // Comprehensive Editable Theme & Taste States
   const [tastePreset, setTastePreset] = useState<string>(parsedLatestTheme.tastePreset || 'arabian_heritage');
-  const [primaryColor, setPrimaryColor] = useState(business.primary_color || parsedLatestTheme.primaryColor || '#0F382A');
-  const [accentColor, setAccentColor] = useState(business.accent_color || parsedLatestTheme.accentColor || '#C69C6D');
+  const [primaryColor, setPrimaryColor] = useState(parsedLatestTheme.primaryColor || business.primary_color || '#0F382A');
+  const [accentColor, setAccentColor] = useState(parsedLatestTheme.accentColor || business.accent_color || '#C69C6D');
   
   // Background Customizer States
   const [backgroundType, setBackgroundType] = useState<string>(parsedLatestTheme.backgroundType || 'warm_sand');
@@ -236,7 +236,7 @@ export const BuilderStudio: React.FC<BuilderStudioProps> = ({
   const [pageDarkness, setPageDarkness] = useState<'light' | 'dark' | 'auto'>(parsedLatestTheme.pageDarkness || 'light');
 
   // Font & Typography States
-  const [fontFamily, setFontFamily] = useState(business.font_family || parsedLatestTheme.fontFamily || 'Playfair Display');
+  const [fontFamily, setFontFamily] = useState(parsedLatestTheme.fontFamily || business.font_family || 'Playfair Display');
   const [headingTransform, setHeadingTransform] = useState<'none' | 'uppercase' | 'capitalize'>(parsedLatestTheme.headingTransform || 'capitalize');
 
   // Product Seating & Layout States ("How products are seated")
@@ -288,13 +288,13 @@ export const BuilderStudio: React.FC<BuilderStudioProps> = ({
       }
     }
     setTastePreset(themeObj.tastePreset || 'arabian_heritage');
-    setPrimaryColor(business.primary_color || themeObj.primaryColor || '#0F382A');
-    setAccentColor(business.accent_color || themeObj.accentColor || '#C69C6D');
+    setPrimaryColor(themeObj.primaryColor || business.primary_color || '#0F382A');
+    setAccentColor(themeObj.accentColor || business.accent_color || '#C69C6D');
     setBackgroundType(themeObj.backgroundType || 'warm_sand');
     setBackgroundColor(themeObj.backgroundColor || '#FAF7F0');
     setBackgroundPattern(themeObj.backgroundPattern || 'islamic_geometry');
     setPageDarkness(themeObj.pageDarkness || 'light');
-    setFontFamily(business.font_family || themeObj.fontFamily || 'Playfair Display');
+    setFontFamily(themeObj.fontFamily || business.font_family || 'Playfair Display');
     setHeadingTransform(themeObj.headingTransform || 'capitalize');
     setProductCardStyle(themeObj.productCardStyle || 'arabian_heritage');
     setProductGridColumns(themeObj.productGridColumns || '2_cols');

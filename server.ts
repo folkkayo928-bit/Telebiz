@@ -6,6 +6,7 @@ import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import { GoogleGenAI, Type } from '@google/genai';
+import { normalizeStoreTheme, validateBuilderPayload } from './src/lib/storeTheme.ts';
 import {
   db,
   initDatabase,
@@ -2817,101 +2818,49 @@ app.patch('/api/businesses/:id/notifications/read', (req: Request, res: Response
 
 app.post('/api/businesses/:id/builder/save', (req: Request, res: Response) => {
   const access = verifyTenantAccess(req.user, req.params.id, 'builder.edit');
-  if (!access.allowed) {
-    res.status(403).json({ error: access.error });
-    return;
-  }
-
-  const { layout, theme, pages, status, note } = req.body;
-  const latest = db.prepare('SELECT MAX(version_number) as maxVer FROM mini_app_versions WHERE business_id = ?').get(req.params.id) as { maxVer: number | null };
-  const nextVer = (latest?.maxVer || 0) + 1;
-  const verId = 'ver_' + crypto.randomBytes(4).toString('hex');
-  const now = new Date().toISOString();
-
-  db.prepare(`
-    INSERT INTO mini_app_versions (id, business_id, version_number, layout_json, theme_json, pages_json, status, created_by, note, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(
-    verId,
-    req.params.id,
-    nextVer,
-    JSON.stringify(layout || []),
-    JSON.stringify(theme || {}),
-    JSON.stringify(pages || []),
-    status || 'published',
-    req.user!.name,
-    note || `Saved version v${nextVer}`,
-    now
-  );
-
-  db.prepare(`
-    UPDATE businesses
-    SET mini_app_version = ?,
-        mini_app_published = CASE WHEN ? = 'published' THEN 1 ELSE mini_app_published END,
-        primary_color = ?,
-        accent_color = ?,
-        font_family = ?,
-        background_color = ?,
-        page_darkness = ?,
-        background_pattern = ?,
-        template_id = ?
-    WHERE id = ?
-  `).run(
-    nextVer,
-    status || 'published',
-    theme?.primaryColor || access.business.primary_color,
-    theme?.accentColor || access.business.accent_color,
-    theme?.fontFamily || access.business.font_family || 'Plus Jakarta Sans',
-    theme?.backgroundColor || access.business.background_color || '#F8FAFC',
-    theme?.pageDarkness || access.business.page_darkness || 'light',
-    theme?.backgroundPattern || access.business.background_pattern || 'subtle_grid',
-    theme?.tastePreset || access.business.template_id || 'clean_modern',
-    req.params.id
-  );
-
-  db.prepare('UPDATE users SET last_selected_business_id = ? WHERE id = ?').run(req.params.id, req.user!.id);
-
+  if (!access.allowed) return res.status(403).json({ error: access.error });
+  const { layout, theme, pages, status, note } = req.body || {};
+  if (status !== 'draft' && status !== 'published') return res.status(400).json({ error: 'Version status must be draft or published.' });
+  const validationError = validateBuilderPayload(layout, pages, theme);
+  if (validationError) return res.status(400).json({ error: validationError });
+  const normalizedTheme = normalizeStoreTheme(theme, access.business);
+  const cleanNote = String(note || 'Saved version').trim().slice(0, 160);
+  const saveVersion = db.transaction(() => {
+    const latest = db.prepare('SELECT MAX(version_number) as maxVer FROM mini_app_versions WHERE business_id = ?').get(req.params.id) as { maxVer: number | null };
+    const nextVer = (latest?.maxVer || 0) + 1;
+    const verId = 'ver_' + crypto.randomBytes(8).toString('hex');
+    db.prepare('INSERT INTO mini_app_versions (id, business_id, version_number, layout_json, theme_json, pages_json, status, created_by, note, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(verId, req.params.id, nextVer, JSON.stringify(layout), JSON.stringify(normalizedTheme), JSON.stringify(pages), status, req.user!.name, cleanNote, new Date().toISOString());
+    if (status === 'published') {
+      db.prepare('UPDATE businesses SET mini_app_version = ?, mini_app_published = 1, primary_color = ?, accent_color = ?, font_family = ?, background_color = ?, page_darkness = ?, background_pattern = ?, template_id = ? WHERE id = ?').run(nextVer, String(normalizedTheme.primaryColor), String(normalizedTheme.accentColor), String(normalizedTheme.fontFamily), String(normalizedTheme.backgroundColor), String(normalizedTheme.pageDarkness), String(normalizedTheme.backgroundPattern), String(normalizedTheme.tastePreset), req.params.id);
+    }
+    db.prepare('UPDATE users SET last_selected_business_id = ? WHERE id = ?').run(req.params.id, req.user!.id);
+    return nextVer;
+  });
+  const versionNumber = saveVersion();
   const versions = db.prepare('SELECT * FROM mini_app_versions WHERE business_id = ? ORDER BY version_number DESC').all(req.params.id);
-  res.json({ versionNumber: nextVer, versions });
+  return res.json({ versionNumber, versions, published: status === 'published' });
 });
 
 app.post('/api/businesses/:id/builder/restore/:versionId', (req: Request, res: Response) => {
   const access = verifyTenantAccess(req.user, req.params.id, 'builder.edit');
-  if (!access.allowed) {
-    res.status(403).json({ error: access.error });
-    return;
-  }
-
+  if (!access.allowed) return res.status(403).json({ error: access.error });
   const targetVer = db.prepare('SELECT * FROM mini_app_versions WHERE id = ? AND business_id = ?').get(req.params.versionId, req.params.id) as any;
-  if (!targetVer) {
-    res.status(404).json({ error: 'Version not found' });
-    return;
-  }
-
-  const latest = db.prepare('SELECT MAX(version_number) as maxVer FROM mini_app_versions WHERE business_id = ?').get(req.params.id) as { maxVer: number | null };
-  const nextVer = (latest?.maxVer || 0) + 1;
-  const verId = 'ver_' + crypto.randomBytes(4).toString('hex');
-
-  db.prepare(`
-    INSERT INTO mini_app_versions (id, business_id, version_number, layout_json, theme_json, pages_json, status, created_by, note, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, 'published', ?, ?, ?)
-  `).run(
-    verId,
-    req.params.id,
-    nextVer,
-    targetVer.layout_json,
-    targetVer.theme_json,
-    targetVer.pages_json,
-    req.user!.name,
-    `Restored from v${targetVer.version_number}`,
-    new Date().toISOString()
-  );
-
-  db.prepare('UPDATE businesses SET mini_app_version = ? WHERE id = ?').run(nextVer, req.params.id);
+  if (!targetVer) return res.status(404).json({ error: 'Version not found' });
+  let savedTheme: unknown;
+  try { savedTheme = JSON.parse(targetVer.theme_json || '{}'); } catch { return res.status(409).json({ error: 'Saved theme data is invalid and cannot be restored.' }); }
+  const normalizedTheme = normalizeStoreTheme(savedTheme, access.business);
+  const restoreVersion = db.transaction(() => {
+    const latest = db.prepare('SELECT MAX(version_number) as maxVer FROM mini_app_versions WHERE business_id = ?').get(req.params.id) as { maxVer: number | null };
+    const nextVer = (latest?.maxVer || 0) + 1;
+    const verId = 'ver_' + crypto.randomBytes(8).toString('hex');
+    db.prepare("INSERT INTO mini_app_versions (id, business_id, version_number, layout_json, theme_json, pages_json, status, created_by, note, created_at) VALUES (?, ?, ?, ?, ?, ?, 'published', ?, ?, ?)").run(verId, req.params.id, nextVer, targetVer.layout_json, JSON.stringify(normalizedTheme), targetVer.pages_json, req.user!.name, 'Restored from v' + targetVer.version_number, new Date().toISOString());
+    db.prepare('UPDATE businesses SET mini_app_version = ?, mini_app_published = 1, primary_color = ?, accent_color = ?, font_family = ?, background_color = ?, page_darkness = ?, background_pattern = ?, template_id = ? WHERE id = ?').run(nextVer, String(normalizedTheme.primaryColor), String(normalizedTheme.accentColor), String(normalizedTheme.fontFamily), String(normalizedTheme.backgroundColor), String(normalizedTheme.pageDarkness), String(normalizedTheme.backgroundPattern), String(normalizedTheme.tastePreset), req.params.id);
+    return nextVer;
+  });
+  const restoredTo = restoreVersion();
   const versions = db.prepare('SELECT * FROM mini_app_versions WHERE business_id = ? ORDER BY version_number DESC').all(req.params.id);
-  res.json({ restoredTo: nextVer, versions });
+  return res.json({ restoredTo, versions, published: true });
 });
-
 // ============================================================================
 // 4. AI-POWERED MINI APP BUILDER (SERVER-SIDE @google/genai)
 // ============================================================================
@@ -4584,7 +4533,7 @@ app.get('/api/storefront/:slug', (req: Request, res: Response) => {
     return;
   }
 
-  const latestVersion = db.prepare('SELECT * FROM mini_app_versions WHERE business_id = ? ORDER BY version_number DESC LIMIT 1').get(business.id) as any;
+  const latestVersion = db.prepare("SELECT * FROM mini_app_versions WHERE business_id = ? AND status = 'published' ORDER BY version_number DESC LIMIT 1").get(business.id) as any;
   const products = db.prepare('SELECT * FROM products WHERE business_id = ? AND available = 1 ORDER BY featured DESC, created_at DESC').all(business.id);
   const services = db.prepare('SELECT * FROM services_listings WHERE business_id = ? AND available = 1').all(business.id);
   const branches = db.prepare('SELECT * FROM business_branches WHERE business_id = ?').all(business.id);

@@ -776,9 +776,9 @@ export const MiniAppStorefront: React.FC<StorefrontProps> = ({
   const wishlistedProducts = products.filter((p: any) => wishlistedIds.includes(p.id));
   const cartCount = cart.reduce((sum, item) => sum + item.qty, 0);
   const cartSubtotal = cart.reduce((sum, item) => sum + item.price * item.qty, 0);
-  const primaryColor = livePrimary || overrideTheme?.primaryColor || business.primary_color || '#0F172A';
-  const accentColor = liveAccent || overrideTheme?.accentColor || business.accent_color || '#6366F1';
-  const storeFontFamily = liveFont || overrideTheme?.fontFamily || business.font_family || versionTheme?.fontFamily || 'Plus Jakarta Sans';
+  const primaryColor = livePrimary || overrideTheme?.primaryColor || versionTheme?.primaryColor || business.primary_color || '#0F172A';
+  const accentColor = liveAccent || overrideTheme?.accentColor || versionTheme?.accentColor || business.accent_color || '#6366F1';
+  const storeFontFamily = liveFont || overrideTheme?.fontFamily || versionTheme?.fontFamily || business.font_family || 'Plus Jakarta Sans';
 
   // Dynamic Taste, Atmosphere, Typography & Product Seating Resolution
   const tastePreset = overrideTheme?.tastePreset || versionTheme?.tastePreset || (business.category === 'jewelry' ? 'jewelry_luxury' : business.category === 'streetwear_baggy' || business.category === 'clothing' ? 'streetwear_baggy' : business.category === 'coffee_shop' || business.category === 'gourmet_food' ? 'gourmet_food' : business.category === 'arabian_heritage' ? 'arabian_heritage' : 'clean_modern');

@@ -28,6 +28,7 @@
   },
   "exclude": [
     "dist",
-    "src/db/database.test.ts"
+    "src/db/database.test.ts",
+    "src/lib/storeTheme.test.ts"
   ]
 }
