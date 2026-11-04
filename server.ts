@@ -25,6 +25,10 @@ if (!fs.existsSync(uploadsDir)) {
 }
 
 const app = express();
+// Render and other reverse-proxy deployments must trust only the configured
+// number of proxy hops so req.ip identifies the client rather than the proxy.
+const configuredProxyHops = Number.parseInt(process.env.TRUST_PROXY_HOPS || '1', 10);
+app.set('trust proxy', Number.isInteger(configuredProxyHops) && configuredProxyHops >= 0 ? configuredProxyHops : 1);
 
 // Public liveness/readiness probe for Render and external uptime monitors.
 // It deliberately returns no environment variables, filesystem paths, or secrets.
@@ -72,9 +76,24 @@ function getGenAIClient() {
 
 // Simple rate limiter per IP
 const rateLimitMap = new Map<string, { count: number; resetAt: number }>();
+let lastRateLimitCleanup = 0;
 app.use('/api', (req: Request, res: Response, next: NextFunction) => {
   const ip = req.ip || 'local';
   const now = Date.now();
+
+  // Expire stale IP buckets and cap retained keys so random IP traffic cannot
+  // grow this in-memory limiter without bound.
+  if (now - lastRateLimitCleanup >= 60_000) {
+    for (const [key, bucket] of rateLimitMap.entries()) {
+      if (bucket.resetAt <= now) rateLimitMap.delete(key);
+    }
+    lastRateLimitCleanup = now;
+  }
+  if (!rateLimitMap.has(ip) && rateLimitMap.size >= 100_000) {
+    const oldestKey = rateLimitMap.keys().next().value;
+    if (oldestKey !== undefined) rateLimitMap.delete(oldestKey);
+  }
+
   const entry = rateLimitMap.get(ip);
   if (!entry || entry.resetAt < now) {
     rateLimitMap.set(ip, { count: 1, resetAt: now + 60_000 });
