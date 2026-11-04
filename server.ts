@@ -2831,7 +2831,7 @@ app.post('/api/businesses/:id/builder/save', (req: Request, res: Response) => {
     const verId = 'ver_' + crypto.randomBytes(8).toString('hex');
     db.prepare('INSERT INTO mini_app_versions (id, business_id, version_number, layout_json, theme_json, pages_json, status, created_by, note, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(verId, req.params.id, nextVer, JSON.stringify(layout), JSON.stringify(normalizedTheme), JSON.stringify(pages), status, req.user!.name, cleanNote, new Date().toISOString());
     if (status === 'published') {
-      db.prepare('UPDATE businesses SET mini_app_version = ?, mini_app_published = 1, primary_color = ?, accent_color = ?, font_family = ?, background_color = ?, page_darkness = ?, background_pattern = ?, template_id = ? WHERE id = ?').run(nextVer, normalizedTheme.primaryColor, normalizedTheme.accentColor, normalizedTheme.fontFamily, normalizedTheme.backgroundColor, normalizedTheme.pageDarkness, normalizedTheme.backgroundPattern, normalizedTheme.tastePreset, req.params.id);
+      db.prepare('UPDATE businesses SET mini_app_version = ?, mini_app_published = 1, primary_color = ?, accent_color = ?, font_family = ?, background_color = ?, page_darkness = ?, background_pattern = ?, template_id = ? WHERE id = ?').run(nextVer, String(normalizedTheme.primaryColor), String(normalizedTheme.accentColor), String(normalizedTheme.fontFamily), String(normalizedTheme.backgroundColor), String(normalizedTheme.pageDarkness), String(normalizedTheme.backgroundPattern), String(normalizedTheme.tastePreset), req.params.id);
     }
     db.prepare('UPDATE users SET last_selected_business_id = ? WHERE id = ?').run(req.params.id, req.user!.id);
     return nextVer;
@@ -2854,7 +2854,7 @@ app.post('/api/businesses/:id/builder/restore/:versionId', (req: Request, res: R
     const nextVer = (latest?.maxVer || 0) + 1;
     const verId = 'ver_' + crypto.randomBytes(8).toString('hex');
     db.prepare("INSERT INTO mini_app_versions (id, business_id, version_number, layout_json, theme_json, pages_json, status, created_by, note, created_at) VALUES (?, ?, ?, ?, ?, ?, 'published', ?, ?, ?)").run(verId, req.params.id, nextVer, targetVer.layout_json, JSON.stringify(normalizedTheme), targetVer.pages_json, req.user!.name, 'Restored from v' + targetVer.version_number, new Date().toISOString());
-    db.prepare('UPDATE businesses SET mini_app_version = ?, mini_app_published = 1, primary_color = ?, accent_color = ?, font_family = ?, background_color = ?, page_darkness = ?, background_pattern = ?, template_id = ? WHERE id = ?').run(nextVer, normalizedTheme.primaryColor, normalizedTheme.accentColor, normalizedTheme.fontFamily, normalizedTheme.backgroundColor, normalizedTheme.pageDarkness, normalizedTheme.backgroundPattern, normalizedTheme.tastePreset, req.params.id);
+    db.prepare('UPDATE businesses SET mini_app_version = ?, mini_app_published = 1, primary_color = ?, accent_color = ?, font_family = ?, background_color = ?, page_darkness = ?, background_pattern = ?, template_id = ? WHERE id = ?').run(nextVer, String(normalizedTheme.primaryColor), String(normalizedTheme.accentColor), String(normalizedTheme.fontFamily), String(normalizedTheme.backgroundColor), String(normalizedTheme.pageDarkness), String(normalizedTheme.backgroundPattern), String(normalizedTheme.tastePreset), req.params.id);
     return nextVer;
   });
   const restoredTo = restoreVersion();
