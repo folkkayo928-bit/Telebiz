@@ -3772,7 +3772,7 @@ app.post('/api/businesses/:id/employees', (req: Request, res: Response) => {
   const name = String(req.body?.name || '').trim();
   const email = String(req.body?.email || '').trim().toLowerCase();
   const role = String(req.body?.role || '').trim();
-  if (name.length < 2 || name.length > 120 || !/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email) || !(EMPLOYEE_ROLES as readonly string[]).includes(role)) return res.status(400).json({ error: 'Enter a valid employee name, email and supported role.' });
+  if (name.length < 2 || name.length > 120 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || !(EMPLOYEE_ROLES as readonly string[]).includes(role)) return res.status(400).json({ error: 'Enter a valid employee name, email and supported role.' });
   const defaults = defaultEmployeePermissions(role);
   const permissions = req.body?.permissions === undefined ? defaults : normalizeEmployeePermissions(req.body.permissions, access.role === 'owner' || access.role === 'super_admin');
   if (!permissions) return res.status(400).json({ error: 'One or more employee permissions are invalid.' });
@@ -3803,10 +3803,13 @@ app.post('/api/employee-invitations/accept', (req: Request, res: Response) => {
   if (!invite) return res.status(404).json({ error: 'This employee invitation is invalid, expired or already used.' });
   if (String(invite.email).toLowerCase() !== String(req.user.email || '').toLowerCase()) return res.status(403).json({ error: 'Sign in using the exact email address this invitation was sent to.' });
   const updateInvite = db.transaction(() => {
-    db.prepare("UPDATE employees SET user_id = ?, status = 'active', invite_token_hash = '', invite_expires_at = '' WHERE id = ? AND business_id = ? AND status = 'invited'").run(req.user!.id, invite.id, invite.business_id);
+    const result = db.prepare("UPDATE employees SET user_id = ?, status = 'active', invite_token_hash = '', invite_expires_at = '' WHERE id = ? AND business_id = ? AND status = 'invited' AND invite_token_hash = ? AND invite_expires_at > ?")
+      .run(req.user!.id, invite.id, invite.business_id, inviteHash, new Date().toISOString());
+    if (result.changes !== 1) return false;
     recordAuditLog({ actorUserId: req.user!.id, actorName: req.user!.name, actorRole: invite.role, businessId: invite.business_id, action: 'ACCEPT_EMPLOYEE_INVITATION', targetType: 'employee', targetId: invite.id, newValue: invite.business_name + ' (' + invite.role + ')' });
+    return true;
   });
-  updateInvite();
+  if (!updateInvite()) return res.status(409).json({ error: 'This invitation was already accepted, revoked or expired.' });
   return res.json({ accepted: true, businessId: invite.business_id, businessName: invite.business_name, role: invite.role });
 });
 
