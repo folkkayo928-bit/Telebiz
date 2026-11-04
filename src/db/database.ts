@@ -4,9 +4,14 @@ import fs from 'fs';
 import path from 'path';
 
 
-const dbPath = path.resolve(
-  process.env.TELEBIZ_DATABASE_PATH || path.resolve(process.cwd(), 'telebiz_store.db')
-);
+import os from 'os';
+
+const defaultDbFile =
+  process.env.NODE_ENV === 'test' || process.env.VITEST
+    ? path.join(os.tmpdir(), `telebiz_test_${process.pid}_${Date.now()}.db`)
+    : path.resolve(process.cwd(), 'telebiz_store.db');
+
+const dbPath = path.resolve(process.env.TELEBIZ_DATABASE_PATH || defaultDbFile);
 
 fs.mkdirSync(path.dirname(dbPath), { recursive: true });
 
@@ -502,6 +507,32 @@ export function initDatabase() {
   // Inventory reservation markers are additive and preserve all existing order rows.
   safeAlter(`ALTER TABLE orders ADD COLUMN stock_reserved_at TEXT DEFAULT ''`);
   safeAlter(`ALTER TABLE orders ADD COLUMN stock_restored_at TEXT DEFAULT ''`);
+  safeAlter(`ALTER TABLE orders ADD COLUMN rejection_reason TEXT DEFAULT ''`);
+
+  safeAlter(`ALTER TABLE payments ADD COLUMN customer_tx_ref TEXT DEFAULT ''`);
+  safeAlter(`ALTER TABLE payments ADD COLUMN receipt_url TEXT DEFAULT ''`);
+  safeAlter(`ALTER TABLE payments ADD COLUMN customer_note TEXT DEFAULT ''`);
+  safeAlter(`ALTER TABLE payments ADD COLUMN rejection_reason TEXT DEFAULT ''`);
+  safeAlter(`ALTER TABLE payments ADD COLUMN submitted_at TEXT DEFAULT ''`);
+  safeAlter(`ALTER TABLE payments ADD COLUMN metadata_json TEXT DEFAULT '{}'`);
+
+  safeAlter(`ALTER TABLE business_payment_methods ADD COLUMN provider_type TEXT DEFAULT 'bank_transfer'`);
+  safeAlter(`ALTER TABLE business_payment_methods ADD COLUMN instructions TEXT DEFAULT ''`);
+  safeAlter(`ALTER TABLE business_payment_methods ADD COLUMN qr_image_url TEXT DEFAULT ''`);
+
+  safeAlter(`ALTER TABLE payment_instruction_snapshots ADD COLUMN provider_type TEXT DEFAULT 'bank_transfer'`);
+  safeAlter(`ALTER TABLE payment_instruction_snapshots ADD COLUMN instructions TEXT DEFAULT ''`);
+  safeAlter(`ALTER TABLE payment_instruction_snapshots ADD COLUMN qr_image_url TEXT DEFAULT ''`);
+
+  safeAlter(`ALTER TABLE bookings ADD COLUMN rejection_reason TEXT DEFAULT ''`);
+  safeAlter(`ALTER TABLE bookings ADD COLUMN cancelled_at TEXT DEFAULT ''`);
+
+  safeAlter(`ALTER TABLE employees ADD COLUMN invite_token TEXT DEFAULT ''`);
+  safeAlter(`ALTER TABLE employees ADD COLUMN invite_expires_at TEXT DEFAULT ''`);
+  safeAlter(`ALTER TABLE employees ADD COLUMN accepted_at TEXT DEFAULT ''`);
+
+  safeAlter(`ALTER TABLE businesses ADD COLUMN encrypted_telegram_bot_token TEXT DEFAULT ''`);
+  safeAlter(`ALTER TABLE businesses ADD COLUMN telegram_webhook_secret TEXT DEFAULT ''`);
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS telegram_auth_sessions (
@@ -548,6 +579,10 @@ export function initDatabase() {
 
     CREATE INDEX IF NOT EXISTS idx_store_reviews_biz ON store_reviews(business_id, created_at DESC);
   `);
+
+  safeAlter(`ALTER TABLE store_reviews ADD COLUMN owner_reply TEXT DEFAULT ''`);
+  safeAlter(`ALTER TABLE store_reviews ADD COLUMN replied_at TEXT DEFAULT ''`);
+  safeAlter(`ALTER TABLE store_reviews ADD COLUMN is_hidden INTEGER DEFAULT 0`);
 
   // High-Throughput Composite B-Tree Indexes for 1M+ Users, Photos & Orders
   db.exec(`

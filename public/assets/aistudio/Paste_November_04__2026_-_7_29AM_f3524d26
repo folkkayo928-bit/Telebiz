@@ -1,0 +1,892 @@
+TELEBIZ — COMPLETE PRODUCT FINISHING & PRODUCTION-READINESS TASK
+
+You are working on the existing Telebiz repository:
+
+GitHub: "folkkayo928-bit/Telebiz"
+
+Your task is to inspect, complete, secure, test, and polish the existing Telebiz platform until its implemented features are genuinely ready for real businesses and customers.
+
+This is a completion and hardening task, not a rebuild.
+
+1. Critical instructions
+
+1. Inspect the complete existing repository, database schema, migrations, API routes, frontend, authentication, tests, and GitHub Actions before changing anything.
+2. Do not assume a feature works just because a button, page, API route, or database table exists.
+3. Do not replace working functionality with a new implementation unnecessarily.
+4. Work additively and non-destructively. Do not reset, drop, truncate, or erase existing database tables, columns, migrations, accounts, business records, customer records, orders, payment records, or uploaded files.
+5. Preserve existing authentication, Telegram functionality, business data, customer data, and workflows. Make safe migrations only when needed.
+6. Do not introduce simulated functionality, fake records, fake balances, fake sales, fake analytics, fake payment confirmations, or placeholder success messages.
+7. Every action that claims to have succeeded must be confirmed by the backend and persisted correctly.
+8. Do not leave unfinished buttons, decorative controls, dead links, incomplete forms, or frontend-only operations.
+9. Do not unnecessarily change the product's identity or redesign everything. Improve the existing interface where usability requires it.
+10. Do not perform hosting setup or deployment. Do not configure Render, Netlify, DNS, domains, hosting plans, or production deployment. Focus on application functionality, backend integrity, security, and test readiness.
+11. Do not add a real payment-gateway integration as a substitute for our manual payment model. The intended store payment workflow is manual bank/mobile-money transfer followed by seller verification.
+12. Continue beyond the audit: implement the necessary fixes, add tests, run them, and provide evidence.
+
+2. First: complete repository audit
+
+Inspect the current main branch and all open pull requests before modifying the project.
+
+Check:
+
+- Existing implementation and incomplete features.
+- Database tables, relationships, indexes, and migrations.
+- All frontend pages and interactive components.
+- All API endpoints and their authorization.
+- Authentication and session management.
+- Business creation and store publishing.
+- Products, services, categories, inventory, orders, bookings, and payments.
+- Store owner and employee permissions.
+- Super-admin functions.
+- Telegram authentication, bots, Mini App integration, and notifications.
+- Subscription and addon management.
+- Analytics, support, campaigns, and media uploads.
+- Existing automated tests and CI failures.
+- Any unfinished TODOs, mock data, hard-coded responses, or functions that return success without completing the operation.
+
+Create an implementation checklist. Mark each feature as:
+
+- Working and tested.
+- Implemented but not adequately tested.
+- Partially implemented.
+- Missing.
+- Broken or insecure.
+
+Then fix the problems. Do not stop after producing the audit.
+
+3. Authentication and accounts
+
+Complete the full account system.
+
+Registration and login
+
+- Customers and business owners must be able to register and log in reliably.
+- Validate all registration fields on both frontend and backend.
+- Prevent duplicate accounts and normalize email/phone identifiers consistently.
+- Use secure password hashing.
+- Provide clear, accurate validation and error messages.
+- Ensure login creates a valid server-side session.
+- Ensure logout revokes the session.
+- Expired, revoked, blocked, or invalid sessions must not continue working.
+- Do not trust user identity or permissions supplied by the browser.
+
+Account security
+
+- Complete password recovery and password changes.
+- Verify email or other contact details through the configured verification process.
+- Add appropriate login and recovery rate limits.
+- Handle blocked and suspended accounts consistently.
+- Avoid exposing whether sensitive accounts exist through unnecessary error details.
+- Remove stale or invalid cached login state.
+- Ensure users cannot access another user's private account information.
+
+Social and Telegram login
+
+- Verify the existing Google OAuth configuration and complete the working flow.
+- Complete Telegram authentication for the supported Telegram Mini App flow.
+- Verify Telegram "initData" signatures and authentication dates on the server.
+- Never trust Telegram user details passed directly from the browser without validation.
+- Clearly distinguish supported login methods from methods that still require configuration.
+
+4. Business registration and store creation
+
+A person must be able to register as a business owner and create a real store.
+
+Complete:
+
+- Business registration and onboarding.
+- Business name, description, category, contact information, address, logo, and cover image.
+- Unique and valid store slug.
+- Store ownership and account association.
+- Store configuration and editable settings.
+- Business workspace creation.
+- Save, reload, and edit functionality.
+- Draft and published states.
+- Business suspension and reactivation rules.
+- Proper validation and helpful error messages.
+
+A successful store creation must create and persist all required records. Refreshing the browser or signing in again must not erase the store or its settings.
+
+Prevent duplicate or partially created businesses when requests fail or are repeated.
+
+5. Store builder and public storefront
+
+Finish the complete store builder.
+
+Business owners must be able to:
+
+- Select and customize a supported template.
+- Edit store name, logo, banner, colors, layout, descriptions, and contact details.
+- Add and arrange sections.
+- Save their changes.
+- Preview their storefront.
+- Publish and unpublish the storefront.
+- Edit the storefront later without losing existing data.
+- Select and change templates safely.
+- Upload and replace images.
+- Recover from failed saves with clear messages.
+
+All builder changes must persist in the backend, not merely in browser state.
+
+Public storefront
+
+A customer must be able to open a published store and:
+
+- See the correct store information.
+- Browse products and services.
+- View correct prices, images, descriptions, and availability.
+- Search and filter where supported.
+- View real reviews and ratings.
+- Contact the business.
+- Place an order or make a booking.
+- Select a payment method.
+- Track the actual status of an order or booking.
+
+Unpublished, suspended, or blocked stores must follow the intended visibility rules. Customers must not be able to order unavailable items or bypass business status restrictions.
+
+Do not display fake ratings, fake visitor numbers, or fabricated reviews.
+
+6. Products, services, categories, and inventory
+
+Complete the product and service management system.
+
+Products
+
+- Create, edit, view, publish, unpublish, and archive products.
+- Store product names, descriptions, images, prices, discounts, SKU or identifiers, categories, and stock information.
+- Validate prices and quantities.
+- Handle image uploads securely.
+- Prevent invalid or negative prices and stock values.
+- Ensure customers see current published information.
+
+Services
+
+- Create and edit service listings.
+- Support correct descriptions, prices, durations, images, and availability where applicable.
+- Connect services to the booking workflow.
+
+Categories
+
+- Create, edit, reorder, and remove categories safely.
+- Do not break products or services when a category is changed or archived.
+
+Inventory
+
+- Track stock accurately.
+- Prevent overselling under concurrent orders.
+- Make stock changes atomic with the relevant order transaction.
+- Define and implement a consistent stock-reservation policy.
+- Release reserved stock when an order is cancelled or expires.
+- Record inventory adjustments so owners can understand why stock changed.
+
+7. MANUAL PAYMENT SYSTEM — IMPORTANT BUSINESS REQUIREMENT
+
+This platform uses manual transfers. Do not build this around mandatory payment-gateway integration.
+
+A. Store owner's payment-method management
+
+Each business owner must be able to add, edit, activate, deactivate, reorder, and remove their payment methods safely.
+
+A payment method can contain fields such as:
+
+- Payment method name.
+- Bank or mobile-money provider.
+- Account holder name.
+- Account number or wallet number.
+- Branch or other required transfer details.
+- Currency.
+- Transfer instructions.
+- Optional QR code or payment image.
+- Whether the method is currently active.
+
+The owner must be able to add multiple methods.
+
+Validate the fields and display only active methods to customers.
+
+Do not expose private configuration or administrative data through public APIs. Public storefronts should display only the payment instructions intentionally made public by the owner.
+
+B. Customer checkout
+
+When customers place an order:
+
+1. Show the order summary.
+2. Show the correct total, currency, and item quantities.
+3. Show the available payment methods belonging to that store.
+4. Let the customer select one method.
+5. Display the account holder and account details clearly.
+6. Provide copy buttons for account numbers and other relevant transfer details.
+7. Explain how much the customer needs to transfer.
+8. Create the order with a clear pending-payment status.
+9. Store a snapshot of the selected payment instructions so later edits to the owner's payment method do not silently alter an existing order's payment details.
+
+Do not display a successful payment message merely because the customer opened checkout or selected a method.
+
+C. Customer reports that payment was made
+
+After transferring money outside Telebiz, the customer must be able to select:
+
+"I have paid" / "Submit payment"
+
+The customer should then be able to provide:
+
+- Transaction/reference number.
+- Optional payment screenshot or receipt, where supported.
+- Additional note, if needed.
+
+Validate uploads and references. Protect uploaded receipts from unauthorized access.
+
+Submitting payment must change the order to a state such as "payment_submitted" or "awaiting_verification".
+
+It must NOT:
+
+- Automatically mark the order as paid.
+- Automatically verify a bank transfer.
+- Automatically release goods or services.
+- Give the customer authority to approve their own payment.
+
+Prevent duplicate submissions and repeated requests from creating duplicate payment records.
+
+D. Store owner's payment-verification dashboard
+
+Give business owners a clear payment-verification queue.
+
+For each submitted payment, show:
+
+- Order number.
+- Customer information needed to process the order.
+- Amount and currency.
+- Selected payment method.
+- Account details that were shown at checkout.
+- Transaction/reference number.
+- Uploaded receipt, if provided.
+- Submission time.
+- Current verification status.
+
+The owner or an employee with the specific payment-verification permission must be able to review the payment outside Telebiz against the money actually received.
+
+They can then:
+
+- Confirm payment received.
+- Reject the submission.
+- Request more information.
+
+When rejecting, require a reason and show that reason to the customer.
+
+Only an authorized owner or employee can confirm a manual transfer.
+
+E. Payment status and order status must be separate and consistent
+
+Implement a documented state machine. At minimum, support the appropriate equivalents of:
+
+Payment:
+
+- "pending"
+- "payment_submitted"
+- "verified"
+- "rejected"
+- "refunded", only when a refund has actually been confirmed and recorded
+
+Order:
+
+- "pending_payment"
+- "awaiting_verification"
+- "confirmed"
+- "processing"
+- "ready_for_pickup" or "out_for_delivery", where applicable
+- "completed" or "delivered"
+- "cancelled"
+
+Use only valid transitions. An order cannot be delivered simply because the customer submitted a receipt.
+
+When an owner confirms payment:
+
+- Verify the owner or employee's permission.
+- Persist the verification event.
+- Record who verified it and when.
+- Update the payment and related order consistently.
+- Notify the customer.
+- Allow the owner to begin order fulfillment.
+
+When a payment is rejected:
+
+- Record who rejected it and why.
+- Notify the customer.
+- Allow the customer to correct and resubmit where appropriate.
+
+All related database updates must be transactional and safe against duplicate requests.
+
+F. Store owner fulfills the order
+
+After verified payment, the owner must be able to:
+
+- Confirm the order.
+- Mark it as processing.
+- Mark it ready for pickup, where applicable.
+- Mark it out for delivery, where applicable.
+- Mark it delivered or completed.
+- Cancel it with a reason where permitted.
+
+The customer must see the real order progress.
+
+Only users with the appropriate permissions may perform these actions.
+
+For cash-on-delivery or other special payment arrangements, support them only when the store owner explicitly configures them. They must have their own clear payment-confirmation rules.
+
+8. Booking system
+
+Complete service bookings wherever this feature is exposed.
+
+Customers must be able to:
+
+- Select a service.
+- View available booking times.
+- Submit a booking.
+- See booking status.
+- Cancel or reschedule according to the store's rules.
+
+Owners must be able to:
+
+- View incoming bookings.
+- Accept or reject bookings.
+- Set availability.
+- Prevent conflicting bookings.
+- Update appointment status.
+- Communicate relevant changes to customers.
+
+Ensure bookings are not double-booked under simultaneous requests.
+
+Do not present a booking as confirmed unless the backend has actually confirmed it.
+
+9. Customer accounts and order history
+
+Customers must be able to:
+
+- View and edit permitted profile details.
+- See their orders.
+- See payment-submission and verification states.
+- View order details and status history.
+- Access their receipts and uploaded payment evidence securely.
+- View and manage bookings.
+- Contact the relevant store.
+
+Customers must only see their own private records and information they are authorized to access.
+
+10. Store owner dashboard
+
+Complete the owner dashboard so it reflects actual backend data.
+
+It should include:
+
+- Store overview.
+- Real order counts and statuses.
+- Real sales totals, clearly distinguishing submitted, verified, cancelled, and refunded amounts.
+- Pending payment-verification queue.
+- Products and inventory.
+- Services and bookings.
+- Customers.
+- Payment methods.
+- Store builder and publishing.
+- Reviews.
+- Support messages.
+- Employees and permissions.
+- Promotions and campaigns.
+- Expenses, where implemented.
+- Branches, where implemented.
+- Analytics.
+- Subscription and addon information.
+- Store settings.
+
+Every displayed metric must have a defined calculation using real data.
+
+Do not count unverified payment submissions as completed sales.
+
+Do not create fake activity to make dashboards look active.
+
+11. Employees and team permissions
+
+Finish the employee invitation and permission workflow.
+
+Include:
+
+- Owner invitation flow.
+- Secure, expiring invitation tokens.
+- Invitation acceptance.
+- Email/account matching.
+- Employee activation and removal.
+- Role and permission management.
+- Protection of owner-only actions.
+- Employee access limited to their assigned business.
+- Proper invitation expiry and revocation.
+
+Permissions must be checked on the server for every protected operation, not just hidden in the frontend.
+
+At minimum, distinguish permissions for:
+
+- Products and inventory.
+- Orders and fulfillment.
+- Payment verification.
+- Bookings.
+- Customers.
+- Support.
+- Marketing.
+- Analytics.
+- Store configuration.
+- Employee management.
+
+Inspect and complete the existing employee invitation pull request if it is still open. Do not duplicate already completed work.
+
+12. Super-admin console and platform controls
+
+The platform administrator needs genuine control over the platform.
+
+Complete the admin console with:
+
+- User management.
+- Business management.
+- Customer management.
+- Business status management.
+- Subscription and addon management.
+- Platform-level analytics.
+- Payment and order oversight where appropriate.
+- Abuse and fraud review.
+- Support and issue management.
+- Audit logs.
+- Relevant system diagnostics.
+
+The admin must be able to:
+
+- View businesses and their status.
+- Pause or suspend a business.
+- Reactivate a business.
+- Block accounts for legitimate reasons.
+- Manage applicable subscriptions and addons.
+- Inspect business activity and service usage.
+- Review relevant payment and order states.
+- View administrative action history.
+
+For destructive or sensitive actions, require confirmation and a reason.
+
+Never silently delete real customer or business records. Prefer suspension, archiving, or other reversible actions unless permanent deletion is explicitly required and safely handled.
+
+Super-admin access must be enforced by the backend. A normal account must never gain administrative access by changing browser data or API parameters.
+
+Record sensitive admin actions in an audit log with actor, target, action, reason, and timestamp.
+
+13. Platform subscriptions and addons
+
+Inspect and complete the platform's subscription system.
+
+Important: platform subscriptions are separate from a customer's payment to a store.
+
+If platform subscriptions use manual transfers:
+
+- Show the platform's configured payment instructions.
+- Allow a business owner to submit a payment reference and optional receipt.
+- Place the subscription request into pending verification.
+- Require an authorized platform administrator to verify the actual transfer.
+- Activate the paid subscription only after verification.
+- Record the amount, plan, period, reference, verifier, and timestamps.
+- Handle expiry and renewal correctly.
+
+Fix the existing critical issue where a subscription can reportedly become active and a payment can be marked verified without actual verification.
+
+Never generate a synthetic transaction reference and treat it as proof of payment.
+
+Never allow a user to activate their own paid subscription simply by sending a request to the API.
+
+Ensure plan limits and addon entitlements are actually enforced by backend logic.
+
+14. Telegram integration
+
+Telebiz is a Telegram-oriented business platform. Complete the Telegram functionality that the product promises.
+
+First identify exactly which Telegram features are implemented and which are incomplete.
+
+Complete and test, as applicable:
+
+- Telegram Mini App initialization.
+- Secure Telegram "initData" validation.
+- User identity association.
+- Business-to-Telegram account linking.
+- Correct Mini App storefront navigation.
+- Business bot connection and verification.
+- Secure per-business bot-token storage, encrypted on the server.
+- Webhook registration and verification.
+- Inbound Telegram update processing.
+- Outbound customer and owner notifications.
+- Order and booking notifications.
+- Support messages and business contact workflows.
+- Telegram deep links and relevant entry points.
+- Telegram diagnostics with real connection status.
+
+If business bots are supported, verify a token through Telegram's actual API before reporting that the bot is connected.
+
+Use a secure webhook secret and validate incoming updates.
+
+Do not store bot tokens in frontend code, public API responses, browser storage, or logs.
+
+Do not display "connected", "verified", or "webhook active" unless the connection has actually been verified.
+
+Clearly handle unsupported or unavailable Telegram features instead of returning fake success.
+
+15. Support, notifications, and communication
+
+Complete:
+
+- Customer-to-business support requests.
+- Business support inbox.
+- Owner and authorized employee replies.
+- Canned replies.
+- Conversation status and assignment where implemented.
+- Customer notifications.
+- Owner notifications.
+- Order and payment status notifications.
+- Booking notifications.
+- Telegram notifications where configured.
+
+Use real notification delivery or clearly report that delivery is not configured. Do not pretend a notification was sent if the sending operation failed.
+
+Prevent users from reading or replying to conversations they do not have access to.
+
+16. Promotions, campaigns, branches, and expenses
+
+Inspect all existing owner-dashboard features and finish every feature that is exposed.
+
+For promotions and campaigns:
+
+- Create, edit, activate, pause, and expire campaigns.
+- Validate discounts and dates.
+- Apply promotions only under their defined conditions.
+- Show accurate promotion prices and campaign status.
+- Prevent discounts from being applied more than intended.
+
+For branches:
+
+- Support correct business ownership and branch information.
+- Ensure products, orders, and bookings are associated with the correct branch where applicable.
+
+For expenses:
+
+- Persist real entries.
+- Track amount, currency, category, description, and date.
+- Restrict access to authorized business users.
+- Keep expense totals separate from sales and payment totals.
+
+17. Reviews and analytics
+
+Complete real review functionality:
+
+- Only eligible customers may submit reviews under the platform's rules.
+- Prevent repeated or unauthorized reviews.
+- Allow appropriate business responses and moderation.
+- Calculate ratings from actual reviews.
+- Do not seed fake ratings or customer feedback.
+
+Complete analytics using actual events and database records.
+
+Where appropriate, track:
+
+- Store visits.
+- Product views.
+- Clicks.
+- Checkout starts.
+- Orders.
+- Payment submissions.
+- Verified payments.
+- Completed sales.
+- Bookings.
+- Campaign performance.
+
+Define each metric clearly. Avoid counting repeated events as separate customers or purchases.
+
+Respect privacy and do not expose identifiable customer data unnecessarily.
+
+18. Media and file management
+
+Finish image and media handling.
+
+Requirements:
+
+- Keep the existing image optimization work.
+- Validate actual file types, signatures, and dimensions.
+- Enforce reasonable file-size and image-dimension limits.
+- Generate safe optimized versions and thumbnails where appropriate.
+- Avoid duplicate uploads where the existing system supports deduplication.
+- Prevent unauthorized file access.
+- Prevent path traversal and unsafe file handling.
+- Ensure upload failures do not leave broken database records.
+- Ensure deleting or replacing media does not unexpectedly break other businesses' content.
+
+Do not remove the existing media optimization system.
+
+19. Security and backend integrity
+
+Audit every API route.
+
+For every protected endpoint:
+
+- Verify authentication.
+- Verify account status.
+- Verify business ownership or employee membership.
+- Verify the required permission.
+- Validate all input on the server.
+- Prevent cross-business and cross-customer access.
+- Use safe database queries.
+- Return accurate error codes and messages.
+
+Check for:
+
+- Broken access control.
+- IDOR vulnerabilities.
+- SQL injection.
+- Stored and reflected XSS.
+- CSRF where applicable.
+- Unsafe file uploads.
+- Rate-limit bypasses.
+- Session weaknesses.
+- Sensitive information in logs.
+- Exposed secrets and API keys.
+- Insecure CORS configuration.
+- Unsafe public endpoints.
+- Race conditions.
+- Duplicate payment and order submissions.
+- Incorrect status transitions.
+- Missing database transactions.
+- Information leakage through error messages.
+
+All important operations must be protected against repeated requests and concurrency issues.
+
+Use environment variables or secure server-side secret management for credentials. Never expose service-role keys, bot tokens, database credentials, or encryption keys to frontend code.
+
+20. Database and data consistency
+
+Preserve the existing database and its user data.
+
+Inspect the current SQLite implementation and improve its reliability without destructive changes.
+
+Ensure:
+
+- Foreign-key relationships are valid.
+- Important queries have appropriate indexes.
+- Database writes use transactions where necessary.
+- Orders, payments, inventory, bookings, and subscriptions remain consistent.
+- Migrations are versioned, repeatable, and safe.
+- Migration failure does not corrupt or erase existing data.
+- Existing records remain compatible with new features.
+- Errors are handled without partially completing business operations.
+
+Do not migrate to another database as part of this task unless a specific, demonstrated blocker makes that necessary and a safe migration plan is approved separately.
+
+21. Frontend quality and usability
+
+Inspect every major user journey on mobile and desktop.
+
+Fix:
+
+- Broken layouts.
+- Inconsistent navigation.
+- Unresponsive buttons.
+- Forms without validation.
+- Missing loading states.
+- Missing empty states.
+- Missing error states.
+- Misleading success messages.
+- Broken image states.
+- Incorrect order and payment status displays.
+- Inaccessible controls.
+- Poorly handled long text and narrow screens.
+
+Keep the interface simple, modern, professional, and consistent.
+
+Make the customer experience especially clear during checkout and manual payment. Customers must understand exactly where to transfer money, how to report the transfer, and when the store has confirmed it.
+
+22. Testing requirements — do not skip
+
+Create or complete automated tests for the important workflows.
+
+Authentication tests
+
+- Registration.
+- Login.
+- Logout.
+- Expired and revoked sessions.
+- Password recovery.
+- Blocked account.
+- Unauthorized access.
+- Tenant isolation.
+
+Business tests
+
+- Create a business.
+- Edit business details.
+- Create and publish a store.
+- Save and reload builder changes.
+- Unpublish or suspend a store.
+- Verify public storefront access rules.
+
+Product and inventory tests
+
+- Create and edit products.
+- Product publication.
+- Stock validation.
+- Concurrent purchase attempts.
+- Stock restoration after cancellation.
+- Invalid product and price handling.
+
+Manual payment tests
+
+- Owner creates multiple payment methods.
+- Customer sees only active methods.
+- Customer selects a method.
+- Checkout stores the payment-method snapshot.
+- Customer submits a payment reference.
+- Customer uploads valid and invalid receipts.
+- Customer cannot mark payment verified.
+- Owner can verify a submitted transfer.
+- Unauthorized employee cannot verify without permission.
+- Rejected payment includes a reason.
+- Customer can see the real verification status.
+- Duplicate requests do not create duplicate payments.
+- Order cannot be fulfilled before payment verification, except for explicitly configured alternative payment arrangements.
+
+Order tests
+
+- Checkout.
+- Order creation.
+- Payment submission.
+- Verification.
+- Fulfillment.
+- Cancellation.
+- Inventory updates.
+- Invalid transitions.
+- Repeated requests.
+
+Booking tests
+
+- Booking creation.
+- Availability checks.
+- Double-booking prevention.
+- Owner acceptance and rejection.
+- Cancellation and rescheduling.
+
+Team and admin tests
+
+- Employee invitation and expiry.
+- Employee permission enforcement.
+- Cross-business access prevention.
+- Super-admin access restrictions.
+- Suspension and reactivation.
+- Admin audit history.
+
+Telegram tests
+
+- Invalid "initData" rejection.
+- Valid signed "initData".
+- Invalid bot tokens.
+- Webhook secret validation.
+- Inbound update processing.
+- Notification delivery failures.
+- No fake connected status.
+
+Subscription tests
+
+- Payment request submission.
+- Pending verification.
+- Admin verification.
+- Activation only after approval.
+- Expiry and renewal.
+- Plan and addon enforcement.
+- No self-approval or synthetic payment verification.
+
+Also add end-to-end tests for the complete customer-to-business journey.
+
+23. Build and code quality
+
+Run:
+
+- Dependency installation using the repository's lockfile.
+- Unit tests.
+- Integration tests.
+- End-to-end tests where available.
+- TypeScript checks.
+- Linting where configured.
+- Production frontend build.
+- Backend startup and API smoke tests.
+
+Fix all failures caused by your work.
+
+Ensure GitHub Actions checks pass on the final code.
+
+Do not claim a test passed unless it was actually executed and its result was observed.
+
+24. Definition of finished
+
+A feature is not finished merely because the frontend exists or an API endpoint returns HTTP 200.
+
+A feature is finished only when:
+
+1. The user can complete the actual workflow.
+2. The backend validates and authorizes it.
+3. The database stores the correct result.
+4. The result remains correct after refresh and a new login session.
+5. Unauthorized users cannot perform the operation.
+6. Errors and failed operations are handled correctly.
+7. Automated tests cover the important behavior.
+8. The UI displays the actual backend status.
+
+A complete order journey must work:
+
+Customer opens a store → chooses a product → checks out → selects the owner's manual payment method → copies account details → transfers money outside Telebiz → submits payment reference or receipt → owner verifies actual receipt → owner fulfills the order → customer sees the completed order.
+
+A complete business journey must work:
+
+User registers → creates a business → configures a store → adds products and payment methods → publishes the storefront → receives an order → verifies payment → fulfills the order → sees accurate records and analytics.
+
+A complete administration journey must work:
+
+Super-admin signs in → views businesses and users → checks platform activity → manages business status and subscriptions → performs authorized actions → sees an audit record.
+
+25. Final delivery report
+
+After completing the work, provide a clear report with:
+
+A. Completed
+
+List every feature actually implemented and tested.
+
+B. Still incomplete
+
+List every remaining issue, including any feature that needs third-party credentials, external configuration, or real-world verification.
+
+C. Security
+
+List the important vulnerabilities discovered and how they were addressed.
+
+D. Payment verification
+
+Explain the manual payment workflow and prove that customers cannot approve their own payments.
+
+E. Test evidence
+
+Provide actual test commands, results, test counts, build results, and GitHub Actions links.
+
+F. Database safety
+
+List migrations performed and confirm whether existing data and records were preserved. Identify any migration that still needs review.
+
+G. Code changes
+
+List the important files and areas changed, commit hashes, and pull request link.
+
+H. Readiness assessment
+
+Give each major module one of these statuses:
+
+- Ready and tested.
+- Implemented but needs external verification.
+- Incomplete.
+- Blocked.
+
+Finish with an honest overall verdict. Do not label Telebiz 100% ready if critical workflows remain untested, external integrations remain unconfigured, or security issues remain unresolved.
+
+Final instruction: Work on the existing Telebiz product. Preserve what already works, finish what is incomplete, remove fake behavior, secure the workflows, and provide evidence. Do not spend time on hosting or deployment in this assignment.

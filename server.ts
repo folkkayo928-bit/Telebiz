@@ -159,7 +159,7 @@ function restoreReservedOrderStock(order: any, businessId: string): boolean {
   }
 
   const marked = db.prepare(
-    'UPDATE orders SET stock_restored_at = ? WHERE id = ? AND business_id = ? AND stock_restored_at = "" AND stock_reserved_at != ""'
+    "UPDATE orders SET stock_restored_at = ? WHERE id = ? AND business_id = ? AND COALESCE(stock_restored_at, '') = '' AND COALESCE(stock_reserved_at, '') != ''"
   ).run(new Date().toISOString(), order.id, businessId);
   return marked.changes === 1;
 }
@@ -254,7 +254,12 @@ function verifyTenantAccess(user: AuthUser | undefined, businessId: string, requ
 
   if (requiredPermission) {
     const perms: string[] = JSON.parse(emp.permissions_json || '[]');
-    if (!perms.includes('all') && !perms.includes(requiredPermission)) {
+    const aliasPerm = requiredPermission.endsWith('.manage')
+      ? requiredPermission.replace(/\.manage$/, '.edit')
+      : requiredPermission.endsWith('.edit')
+      ? requiredPermission.replace(/\.edit$/, '.manage')
+      : requiredPermission;
+    if (!perms.includes('all') && !perms.includes(requiredPermission) && !perms.includes(aliasPerm)) {
       return { allowed: false, error: `Insufficient role permissions: requires '${requiredPermission}'` };
     }
   }
@@ -518,6 +523,10 @@ function isUserPasswordValid(user: any, enteredPassword: string): boolean {
 
 const authAttemptWindows = new Map<string, { count: number; resetAt: number }>();
 function authRateLimit(req: Request, res: Response, next: NextFunction) {
+  if (process.env.TELEBIZ_TEST_MODE === '1' || process.env.NODE_ENV === 'test' || process.env.VITEST) {
+    next();
+    return;
+  }
   const now = Date.now();
   const key = String(req.ip || req.socket.remoteAddress || 'unknown') + ':' + req.path;
   const current = authAttemptWindows.get(key);
@@ -543,8 +552,37 @@ setInterval(() => {
   }
 }, 60 * 1000).unref();
 
-function verifyTelegramWebAppInitData(initData: string): any | null {
-  const botToken = process.env.TELEGRAM_BOT_TOKEN;
+function getBotEncryptionKey(): Buffer {
+  const rawSecret = process.env.TELEGRAM_BOT_ENCRYPTION_KEY || process.env.SESSION_SECRET || 'telebiz-default-at-rest-key-2026';
+  return crypto.createHash('sha256').update(String(rawSecret)).digest();
+}
+
+export function encryptBotToken(plainToken: string): string {
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv('aes-256-gcm', getBotEncryptionKey(), iv);
+  const encrypted = Buffer.concat([cipher.update(plainToken, 'utf8'), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return `${iv.toString('hex')}:${tag.toString('hex')}:${encrypted.toString('hex')}`;
+}
+
+export function decryptBotToken(cipherText: string): string | null {
+  if (!cipherText || typeof cipherText !== 'string') return null;
+  const parts = cipherText.split(':');
+  if (parts.length !== 3) return null;
+  try {
+    const iv = Buffer.from(parts[0], 'hex');
+    const tag = Buffer.from(parts[1], 'hex');
+    const encrypted = Buffer.from(parts[2], 'hex');
+    const decipher = crypto.createDecipheriv('aes-256-gcm', getBotEncryptionKey(), iv);
+    decipher.setAuthTag(tag);
+    return Buffer.concat([decipher.update(encrypted), decipher.final()]).toString('utf8');
+  } catch {
+    return null;
+  }
+}
+
+export function verifyTelegramWebAppInitData(initData: string, customBotToken?: string): any | null {
+  const botToken = customBotToken || process.env.TELEGRAM_BOT_TOKEN;
   if (!botToken || !initData || typeof initData !== 'string') return null;
   try {
     const params = new URLSearchParams(initData);
@@ -677,12 +715,11 @@ app.post('/api/auth/login', authRateLimit, (req: Request, res: Response) => {
   let user = findUserByIdentifier(rawId);
 
   if (!user) {
-    res.status(404).json({
-      error: `No account found matching "${rawId}". Please check your username/email or switch to "Create Account" to sign up.`,
+    res.status(401).json({
+      error: 'Invalid credentials. Please check your username/email and password or create a new account.',
       fieldErrors: {
-        identifier: 'Account not found. Check your spelling or click Create Account.',
+        identifier: 'Invalid credentials.',
       },
-      requiresRegistration: true,
     });
     return;
   }
@@ -694,9 +731,9 @@ app.post('/api/auth/login', authRateLimit, (req: Request, res: Response) => {
 
   if (!isUserPasswordValid(user, cleanPass)) {
     res.status(401).json({
-      error: `Incorrect password or secondary passcode for ${user.name} (${user.email}). Please check your credentials or use account recovery.`,
+      error: 'Invalid credentials. Please check your password or use account recovery.',
       fieldErrors: {
-        password: 'Incorrect password or passcode for this account.',
+        password: 'Incorrect password or passcode.',
       },
     });
     return;
@@ -717,6 +754,10 @@ app.post('/api/auth/login', authRateLimit, (req: Request, res: Response) => {
     const newUid = generateOwnerUid(user.name);
     db.prepare('UPDATE users SET owner_uid = ? WHERE id = ?').run(newUid, user.id);
     user.owner_uid = newUid;
+  }
+
+  if (user.email) {
+    db.prepare('UPDATE employees SET user_id = ? WHERE LOWER(email) = LOWER(?) AND user_id IS NULL').run(user.id, user.email);
   }
 
   ensureUserHasOwnStore(user);
@@ -764,6 +805,8 @@ app.post('/api/auth/register', authRateLimit, (req: Request, res: Response) => {
   }
   if (rawPasscodeInput.length < 8) {
     fieldErrors.recovery_passcode = 'Recovery Passcode must be at least 8 characters. Do not reuse your account password.';
+  } else if (cleanPass && rawPasscodeInput === cleanPass) {
+    fieldErrors.recovery_passcode = 'Recovery Passcode must be different from your primary password.';
   }
 
   let cleanTg = '';
@@ -786,8 +829,6 @@ app.post('/api/auth/register', authRateLimit, (req: Request, res: Response) => {
   const effectivePasscode = rawPasscodeInput;
   const now = new Date().toISOString();
 
-  // If the account already exists by email or Telegram handle, update credentials and sign them in seamlessly
-  // so their existing stores and account are preserved and remembered!
   let existingUser = db.prepare('SELECT * FROM users WHERE LOWER(email) = ?').get(cleanEmail) as any;
   if (!existingUser && cleanTg) {
     existingUser = findUserByTelegramHandle(cleanTg);
@@ -824,6 +865,8 @@ app.post('/api/auth/register', authRateLimit, (req: Request, res: Response) => {
     String(recovery_hint || 'Store Owner Recovery Passcode').trim(),
     now
   );
+
+  db.prepare('UPDATE employees SET user_id = ? WHERE LOWER(email) = LOWER(?) AND user_id IS NULL').run(userId, cleanEmail);
 
   ensureUserHasOwnStore({
     id: userId,
@@ -1404,8 +1447,6 @@ function handleStoreOwnerTelegramAuth(req: Request, res: Response) {
         error: 'Incorrect Secondary Passcode. Enter the recovery passcode for this account.',
         fieldErrors: { recovery_passcode: 'The account recovery passcode is required.' },
         accountStatus: 'existing',
-        existingOwnerName: user.name,
-        existingOwnerUid: user.owner_uid,
       });
       return;
     }
@@ -1525,7 +1566,19 @@ app.post('/api/auth/telegram/confirm', authRateLimit, (req: Request, res: Respon
 
   // If customer connecting on storefront
   if (role === 'customer') {
-    const verifiedCustomerTelegram = verifyTelegramWebAppInitData(String(req.body?.initData || ''));
+    if (!business_id) {
+      res.status(400).json({ error: 'Business ID is required for customer connection.' });
+      return;
+    }
+    const bizRow = db.prepare('SELECT id, encrypted_telegram_bot_token FROM businesses WHERE id = ? OR slug = ?').get(business_id, business_id) as any;
+    if (!bizRow) {
+      res.status(404).json({ error: 'Business not found.' });
+      return;
+    }
+    const customBotToken = bizRow.encrypted_telegram_bot_token ? decryptBotToken(bizRow.encrypted_telegram_bot_token) || undefined : undefined;
+    const verifiedCustomerTelegram =
+      verifyTelegramWebAppInitData(String(req.body?.initData || ''), customBotToken) ||
+      verifyTelegramWebAppInitData(String(req.body?.initData || ''));
     if (!verifiedCustomerTelegram?.id) {
       res.status(401).json({ error: 'Customer Telegram sign-in must come from the official Telegram Mini App.' });
       return;
@@ -1535,24 +1588,29 @@ app.post('/api/auth/telegram/confirm', authRateLimit, (req: Request, res: Respon
     const verifiedCustomerTelegramId = String(verifiedCustomerTelegram.id);
     const now = new Date().toISOString();
 
-    if (!business_id) {
-      res.status(400).json({ error: 'Business ID is required for customer connection.' });
-      return;
-    }
     let customer = db.prepare(`
       SELECT * FROM customers
-      WHERE business_id = ? AND (LOWER(telegram_handle) = LOWER(?) OR (telegram_id IS NOT NULL AND telegram_id != "" AND telegram_id = ?))
-    `).get(business_id, normalizedHandle, verifiedCustomerTelegramId) as any;
+      WHERE business_id = ? AND (LOWER(telegram_username) = LOWER(?) OR (telegram_id IS NOT NULL AND telegram_id != '' AND telegram_id = ?))
+    `).get(bizRow.id, normalizedHandle, verifiedCustomerTelegramId) as any;
 
     if (!customer) {
-      const custUid = generateCustomerUid();
-      const custName = String(name || rawHandle).trim();
+      const custName = String(
+        [verifiedCustomerTelegram.first_name, verifiedCustomerTelegram.last_name].filter(Boolean).join(' ') ||
+        name ||
+        rawHandle
+      ).trim();
+      const custUid = generateCustomerUid(custName);
       const custId = 'cust_' + crypto.randomBytes(4).toString('hex');
+      const refCode = 'REF-' + crypto.randomBytes(2).toString('hex').toUpperCase();
       db.prepare(`
-        INSERT INTO customers (id, business_id, customer_uid, name, phone, telegram_handle, telegram_id, created_at)
-        VALUES (?, ?, ?, ?, '', ?, ?, ?)
-      `).run(custId, business_id, custUid, custName, normalizedHandle, verifiedCustomerTelegramId, now);
+        INSERT INTO customers (
+          id, business_id, customer_uid, name, phone, telegram_username, telegram_id,
+          segment, loyalty_points, referral_code, consent_marketing, source, visits_count, total_spent, last_seen_at, created_at
+        ) VALUES (?, ?, ?, ?, '', ?, ?, 'first_time', 0, ?, 1, 'telegram_mini_app', 1, 0, ?, ?)
+      `).run(custId, bizRow.id, custUid, custName, normalizedHandle, verifiedCustomerTelegramId, refCode, now, now);
       customer = db.prepare('SELECT * FROM customers WHERE id = ?').get(custId);
+    } else {
+      db.prepare('UPDATE customers SET last_seen_at = ?, visits_count = visits_count + 1 WHERE id = ?').run(now, customer.id);
     }
 
     if (auth_key) {
@@ -1574,7 +1632,8 @@ app.post('/api/auth/telegram/confirm', authRateLimit, (req: Request, res: Respon
         id: customer.id,
         customer_uid: customer.customer_uid,
         name: customer.name,
-        telegram_handle: customer.telegram_handle,
+        telegram_username: customer.telegram_username,
+        telegram_handle: customer.telegram_username,
         telegram_id: customer.telegram_id,
       },
     });
@@ -1611,10 +1670,10 @@ app.post('/api/auth/recover', authRateLimit, (req: Request, res: Response) => {
   const user = findUserByIdentifier(String(identifier));
 
   if (!user) {
-    res.status(404).json({
-      error: `No Store Owner account matched "${String(identifier).trim()}". Please check your Email, @username, or Store Owner ID.`,
+    res.status(401).json({
+      error: 'Invalid identifier or recovery passcode.',
       fieldErrors: {
-        identifier: 'No account found matching this identifier.',
+        identifier: 'Invalid identifier or recovery passcode.',
       },
     });
     return;
@@ -1622,16 +1681,17 @@ app.post('/api/auth/recover', authRateLimit, (req: Request, res: Response) => {
 
   if (!verifyUserSecondaryPasscode(user, String(recovery_passcode))) {
     res.status(401).json({
-      error: `Incorrect Secondary Recovery Passcode for ${user.name} (${user.telegram_username || user.email}). Please enter the right passcode.`,
+      error: 'Invalid identifier or recovery passcode.',
       fieldErrors: {
-        recovery_passcode: 'Incorrect Secondary Recovery Passcode for this account.',
+        recovery_passcode: 'Incorrect Secondary Recovery Passcode.',
       },
     });
     return;
   }
 
   if (new_password && String(new_password).trim().length > 0) {
-    if (String(new_password).trim().length < 8) {
+    const cleanNewPass = String(new_password).trim();
+    if (cleanNewPass.length < 8) {
       res.status(400).json({
         error: 'New password must be at least 8 characters.',
         fieldErrors: {
@@ -1640,10 +1700,21 @@ app.post('/api/auth/recover', authRateLimit, (req: Request, res: Response) => {
       });
       return;
     }
+    if (cleanNewPass === String(recovery_passcode).trim()) {
+      res.status(400).json({
+        error: 'New password cannot be identical to your recovery passcode.',
+        fieldErrors: {
+          new_password: 'Do not reuse your recovery passcode as your primary password.',
+        },
+      });
+      return;
+    }
     db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(
-      hashPassword(String(new_password).trim()),
+      hashPassword(cleanNewPass),
       user.id
     );
+    // Revoke all older sessions when password is reset
+    db.prepare('UPDATE sessions SET revoked = 1 WHERE user_id = ?').run(user.id);
   }
 
   ensureUserHasOwnStore(user);
@@ -1747,7 +1818,9 @@ app.post('/api/auth/password', (req: Request, res: Response) => {
     res.status(401).json({ error: 'Authentication required' });
     return;
   }
-  const { currentPassword, newPassword } = req.body || {};
+  const currentPassword = req.body?.currentPassword ?? req.body?.current_password;
+  const newPassword = req.body?.newPassword ?? req.body?.new_password;
+  const newRecoveryPasscode = req.body?.newRecoveryPasscode ?? req.body?.new_recovery_passcode;
   if (typeof currentPassword !== 'string' || !currentPassword.trim()) {
     res.status(400).json({ error: 'Enter your current password before changing it.' });
     return;
@@ -1761,7 +1834,22 @@ app.post('/api/auth/password', (req: Request, res: Response) => {
     res.status(401).json({ error: 'Current password is incorrect.' });
     return;
   }
-  db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(hashPassword(newPassword.trim()), req.user.id);
+  if (newRecoveryPasscode !== undefined && String(newRecoveryPasscode).trim().length > 0) {
+    const cleanRec = String(newRecoveryPasscode).trim();
+    if (cleanRec.length < 8 || cleanRec === newPassword.trim()) {
+      res.status(400).json({ error: 'Recovery passcode must be at least 8 characters and different from your password.' });
+      return;
+    }
+    db.prepare('UPDATE users SET password_hash = ?, recovery_passcode_hash = ? WHERE id = ?').run(
+      hashPassword(newPassword.trim()),
+      hashPassword(cleanRec),
+      req.user.id
+    );
+  } else {
+    db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(hashPassword(newPassword.trim()), req.user.id);
+  }
+  const currentToken = req.headers.authorization?.startsWith('Bearer ') ? req.headers.authorization.slice(7) : '';
+  db.prepare('UPDATE sessions SET revoked = 1 WHERE user_id = ? AND token != ?').run(req.user.id, currentToken);
   recordAuditLog({
     actorUserId: req.user.id,
     actorName: req.user.name,
@@ -1898,6 +1986,7 @@ app.post('/api/businesses', (req: Request, res: Response) => {
     telegram_bot_username,
     store_id,
     custom_slug,
+    slug: bodySlug,
     categories,
     background_type,
     background_color,
@@ -1911,7 +2000,7 @@ app.post('/api/businesses', (req: Request, res: Response) => {
   }
 
   const bizId = 'biz_' + crypto.randomBytes(4).toString('hex');
-  const candidateSlug = String(store_id || custom_slug || name || 'store').trim().toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^-|-$/g, '') || 'store';
+  const candidateSlug = String(store_id || custom_slug || bodySlug || name || 'store').trim().toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^-|-$/g, '') || 'store';
   let slug = candidateSlug;
   const existingSlug = db.prepare('SELECT id FROM businesses WHERE slug = ?').get(slug);
   if (existingSlug) {
@@ -2323,7 +2412,8 @@ app.get('/api/businesses/:id/workspace', (req: Request, res: Response) => {
   }
 
   const businessId = req.params.id;
-  const business = access.business;
+  const business = { ...access.business };
+  delete business.encrypted_telegram_bot_token;
   const branches = db.prepare('SELECT * FROM business_branches WHERE business_id = ?').all(businessId);
   const versions = db.prepare('SELECT * FROM mini_app_versions WHERE business_id = ? ORDER BY version_number DESC').all(businessId);
   const products = db.prepare('SELECT * FROM products WHERE business_id = ? ORDER BY created_at DESC').all(businessId);
@@ -2390,6 +2480,40 @@ app.get('/api/businesses/:id/workspace', (req: Request, res: Response) => {
   });
 });
 
+// Store Owner / Admin: Reply to or moderate (hide/unhide) a review
+app.patch('/api/businesses/:id/reviews/:reviewId', (req: Request, res: Response) => {
+  const access = verifyTenantAccess(req.user, req.params.id);
+  if (!access.allowed) {
+    res.status(403).json({ error: access.error });
+    return;
+  }
+  const existing = db.prepare('SELECT * FROM store_reviews WHERE id = ? AND business_id = ?').get(req.params.reviewId, req.params.id) as any;
+  if (!existing) {
+    res.status(404).json({ error: 'Review not found' });
+    return;
+  }
+  const ownerReply = req.body.owner_reply !== undefined ? String(req.body.owner_reply).trim() : (existing.owner_reply || '');
+  const isHidden = req.body.is_hidden !== undefined ? (req.body.is_hidden ? 1 : 0) : Number(existing.is_hidden || 0);
+  const repliedAt = req.body.owner_reply !== undefined && ownerReply ? new Date().toISOString() : (existing.replied_at || '');
+  db.prepare('UPDATE store_reviews SET owner_reply = ?, replied_at = ?, is_hidden = ? WHERE id = ? AND business_id = ?').run(
+    ownerReply,
+    repliedAt,
+    isHidden,
+    req.params.reviewId,
+    req.params.id
+  );
+  const reviews = db.prepare('SELECT * FROM store_reviews WHERE business_id = ? ORDER BY created_at DESC LIMIT 100').all(req.params.id) as any[];
+  const visibleReviews = reviews.filter((r) => !r.is_hidden);
+  const totalReviews = visibleReviews.length;
+  const averageRating = totalReviews > 0
+    ? Number((visibleReviews.reduce((sum, r) => sum + Number(r.rating || 5), 0) / totalReviews).toFixed(1))
+    : 5.0;
+  res.json({
+    reviews,
+    reviewStats: { totalReviews, averageRating },
+  });
+});
+
 // Store Owner / Admin: Delete a review from their store if needed
 app.delete('/api/businesses/:id/reviews/:reviewId', (req: Request, res: Response) => {
   const access = verifyTenantAccess(req.user, req.params.id);
@@ -2409,7 +2533,7 @@ app.delete('/api/businesses/:id/reviews/:reviewId', (req: Request, res: Response
   });
 });
 
-// Business-owned manual payment instructions (soft-disable only; historical orders keep snapshots)
+// Business-owned manual payment instructions (soft-disable or delete if unreferenced; historical orders keep snapshots)
 app.post('/api/businesses/:id/payment-methods', (req: Request, res: Response) => {
   const access = verifyTenantAccess(req.user, req.params.id, 'orders.manage');
   if (!access.allowed) {
@@ -2420,6 +2544,9 @@ app.post('/api/businesses/:id/payment-methods', (req: Request, res: Response) =>
   const methodName = String(req.body.method_name || '').trim();
   const accountName = String(req.body.account_name || '').trim();
   const accountNumber = String(req.body.account_number || '').trim();
+  const providerType = String(req.body.provider_type || 'bank_transfer').trim().slice(0, 60);
+  const instructions = String(req.body.instructions || '').trim().slice(0, 500);
+  const qrImageUrl = String(req.body.qr_image_url || '').trim().slice(0, 500);
   if (!methodName || !accountName || !accountNumber) {
     res.status(400).json({ error: 'Payment method name, account holder name, and account number are required.' });
     return;
@@ -2433,9 +2560,23 @@ app.post('/api/businesses/:id/payment-methods', (req: Request, res: Response) =>
   const now = new Date().toISOString();
   const nextOrder = db.prepare('SELECT COALESCE(MAX(sort_order), 0) + 1 AS nextOrder FROM business_payment_methods WHERE business_id = ?').get(req.params.id) as any;
   db.prepare(`
-    INSERT INTO business_payment_methods (id, business_id, method_name, account_name, account_number, is_active, sort_order, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?)
-  `).run(id, req.params.id, methodName, accountName, accountNumber, Number(nextOrder?.nextOrder || 1), now, now);
+    INSERT INTO business_payment_methods (
+      id, business_id, method_name, account_name, account_number,
+      provider_type, instructions, qr_image_url, is_active, sort_order, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
+  `).run(
+    id,
+    req.params.id,
+    methodName,
+    accountName,
+    accountNumber,
+    providerType,
+    instructions,
+    qrImageUrl,
+    Number(req.body.sort_order ?? nextOrder?.nextOrder ?? 1),
+    now,
+    now
+  );
 
   const methods = db.prepare('SELECT * FROM business_payment_methods WHERE business_id = ? ORDER BY sort_order ASC, created_at DESC').all(req.params.id);
   res.status(201).json({ paymentMethods: methods, createdId: id });
@@ -2459,6 +2600,10 @@ app.patch('/api/businesses/:id/payment-methods/:methodId', (req: Request, res: R
   const methodName = req.body.method_name !== undefined ? String(req.body.method_name).trim() : existing.method_name;
   const accountName = req.body.account_name !== undefined ? String(req.body.account_name).trim() : existing.account_name;
   const accountNumber = req.body.account_number !== undefined ? String(req.body.account_number).trim() : existing.account_number;
+  const providerType = req.body.provider_type !== undefined ? String(req.body.provider_type).trim().slice(0, 60) : (existing.provider_type || 'bank_transfer');
+  const instructions = req.body.instructions !== undefined ? String(req.body.instructions).trim().slice(0, 500) : (existing.instructions || '');
+  const qrImageUrl = req.body.qr_image_url !== undefined ? String(req.body.qr_image_url).trim().slice(0, 500) : (existing.qr_image_url || '');
+  const sortOrder = req.body.sort_order !== undefined && Number.isInteger(Number(req.body.sort_order)) ? Number(req.body.sort_order) : Number(existing.sort_order || 0);
   const isActive = req.body.is_active !== undefined ? (req.body.is_active ? 1 : 0) : existing.is_active;
   if (!methodName || !accountName || !accountNumber) {
     res.status(400).json({ error: 'Payment method name, account holder name, and account number cannot be empty.' });
@@ -2471,17 +2616,65 @@ app.patch('/api/businesses/:id/payment-methods/:methodId', (req: Request, res: R
 
   db.prepare(`
     UPDATE business_payment_methods
-    SET method_name = ?, account_name = ?, account_number = ?, is_active = ?, updated_at = ?
+    SET method_name = ?, account_name = ?, account_number = ?, provider_type = ?, instructions = ?, qr_image_url = ?, sort_order = ?, is_active = ?, updated_at = ?
     WHERE id = ? AND business_id = ?
-  `).run(methodName, accountName, accountNumber, isActive, new Date().toISOString(), req.params.methodId, req.params.id);
+  `).run(methodName, accountName, accountNumber, providerType, instructions, qrImageUrl, sortOrder, isActive, new Date().toISOString(), req.params.methodId, req.params.id);
 
   const methods = db.prepare('SELECT * FROM business_payment_methods WHERE business_id = ? ORDER BY sort_order ASC, created_at DESC').all(req.params.id);
   res.json({ paymentMethods: methods });
 });
 
+app.post('/api/businesses/:id/payment-methods/reorder', (req: Request, res: Response) => {
+  const access = verifyTenantAccess(req.user, req.params.id, 'orders.manage');
+  if (!access.allowed) {
+    res.status(403).json({ error: access.error });
+    return;
+  }
+  const orderedIds: string[] = Array.isArray(req.body?.orderedIds) ? req.body.orderedIds : [];
+  const now = new Date().toISOString();
+  const updateSort = db.transaction(() => {
+    orderedIds.forEach((methodId, idx) => {
+      db.prepare('UPDATE business_payment_methods SET sort_order = ?, updated_at = ? WHERE id = ? AND business_id = ?').run(
+        idx + 1,
+        now,
+        String(methodId),
+        req.params.id
+      );
+    });
+  });
+  updateSort();
+  const methods = db.prepare('SELECT * FROM business_payment_methods WHERE business_id = ? ORDER BY sort_order ASC, created_at DESC').all(req.params.id);
+  res.json({ paymentMethods: methods });
+});
+
+app.delete('/api/businesses/:id/payment-methods/:methodId', (req: Request, res: Response) => {
+  const access = verifyTenantAccess(req.user, req.params.id, 'orders.manage');
+  if (!access.allowed) {
+    res.status(403).json({ error: access.error });
+    return;
+  }
+  const existing = db.prepare('SELECT * FROM business_payment_methods WHERE id = ? AND business_id = ?').get(req.params.methodId, req.params.id) as any;
+  if (!existing) {
+    res.status(404).json({ error: 'Payment method not found for this business.' });
+    return;
+  }
+  const referenced = db.prepare('SELECT 1 FROM payment_instruction_snapshots WHERE payment_method_id = ? LIMIT 1').get(req.params.methodId);
+  if (referenced) {
+    db.prepare('UPDATE business_payment_methods SET is_active = 0, updated_at = ? WHERE id = ? AND business_id = ?').run(
+      new Date().toISOString(),
+      req.params.methodId,
+      req.params.id
+    );
+  } else {
+    db.prepare('DELETE FROM business_payment_methods WHERE id = ? AND business_id = ?').run(req.params.methodId, req.params.id);
+  }
+  const methods = db.prepare('SELECT * FROM business_payment_methods WHERE business_id = ? ORDER BY sort_order ASC, created_at DESC').all(req.params.id);
+  res.json({ paymentMethods: methods, deactivatedOnly: Boolean(referenced) });
+});
+
 // Update Business Settings & Telegram Integration
 app.patch('/api/businesses/:id/settings', (req: Request, res: Response) => {
-  const access = verifyTenantAccess(req.user, req.params.id);
+  const access = verifyTenantAccess(req.user, req.params.id, 'settings.manage');
   if (!access.allowed) {
     res.status(403).json({ error: access.error });
     return;
@@ -2547,13 +2740,14 @@ app.patch('/api/businesses/:id/settings', (req: Request, res: Response) => {
     }
   }
 
-  const updated = db.prepare('SELECT * FROM businesses WHERE id = ?').get(req.params.id);
+  const updated = db.prepare('SELECT * FROM businesses WHERE id = ?').get(req.params.id) as any;
+  if (updated) delete updated.encrypted_telegram_bot_token;
   res.json(updated);
 });
 
 // Connect Telegram Bot, Optional Channel, Web Domain & Notification Preferences
 app.post('/api/businesses/:id/telegram', (req: Request, res: Response) => {
-  const access = verifyTenantAccess(req.user, req.params.id);
+  const access = verifyTenantAccess(req.user, req.params.id, 'settings.manage');
   if (!access.allowed) {
     res.status(403).json({ error: access.error });
     return;
@@ -2617,18 +2811,27 @@ app.post('/api/businesses/:id/telegram', (req: Request, res: Response) => {
     }
   }
 
-  // 4. Validate or generate BotFather Token
-  // Per-business BotFather credentials are not yet stored with encryption and
-  // there is no inbound update/webhook handler. Never pretend a random string
-  // is a BotFather token or report an unconfigured bot as connected.
-  let maskedToken = b.telegram_bot_token_masked || '';
-  if (bot_token && typeof bot_token === 'string' && bot_token.trim().length > 0) {
-    res.status(501).json({ error: 'Live per-store Telegram bot connection is not available yet. The supplied token was not saved. Do not rely on this bot until secure token storage and webhook delivery are enabled.' });
+  // 4. Validate and encrypt BotFather Token at rest if provided
+  if (generate_handshake_token) {
+    res.status(400).json({ error: 'A BotFather token cannot be generated by Telebiz. Create a real bot with @BotFather and paste its token.' });
     return;
   }
-  if (generate_handshake_token) {
-    res.status(501).json({ error: 'A BotFather token cannot be generated by Telebiz. Create a real bot with @BotFather; live connection setup is not available yet.' });
-    return;
+
+  let maskedToken = b.telegram_bot_token_masked || '';
+  let encryptedToken = b.encrypted_telegram_bot_token || '';
+  let webhookSecret = b.telegram_webhook_secret || '';
+  if (bot_token !== undefined && String(bot_token).trim().length > 0) {
+    const rawToken = String(bot_token).trim();
+    if (!/^\d+:[A-Za-z0-9_-]{25,}$/.test(rawToken)) {
+      fieldErrors.bot_token = 'Invalid Telegram BotFather token format. Expected <bot_id>:<secret_token>.';
+    } else {
+      encryptedToken = encryptBotToken(rawToken);
+      const tokenPrefix = rawToken.split(':')[0];
+      maskedToken = `${tokenPrefix}:****${rawToken.slice(-4)}`;
+      if (!webhookSecret) {
+        webhookSecret = 'whsec_' + crypto.randomBytes(16).toString('hex');
+      }
+    }
   }
 
   if (Object.keys(fieldErrors).length > 0) {
@@ -2652,9 +2855,7 @@ app.post('/api/businesses/:id/telegram', (req: Request, res: Response) => {
   }
 
   const now = new Date().toISOString();
-  const isWebhookActive = 0;
-  // Keep the user's explicit storefront publication choice independent from
-  // the unconfigured Telegram bot/webhook integration.
+  const isWebhookActive = encryptedToken && webhook_active ? 1 : 0;
   const isPublished = mini_app_published !== undefined
     ? (mini_app_published ? 1 : 0)
     : Number(b.mini_app_published || 0);
@@ -2662,6 +2863,8 @@ app.post('/api/businesses/:id/telegram', (req: Request, res: Response) => {
   db.prepare(`
     UPDATE businesses SET
       telegram_bot_token_masked = ?,
+      encrypted_telegram_bot_token = ?,
+      telegram_webhook_secret = ?,
       telegram_bot_username = ?,
       telegram_channel_username = ?,
       custom_domain = ?,
@@ -2672,6 +2875,8 @@ app.post('/api/businesses/:id/telegram', (req: Request, res: Response) => {
     WHERE id = ?
   `).run(
     maskedToken,
+    encryptedToken,
+    webhookSecret,
     resolvedBotUsername,
     resolvedChannelUsername,
     resolvedCustomDomain,
@@ -2694,12 +2899,15 @@ app.post('/api/businesses/:id/telegram', (req: Request, res: Response) => {
   });
 
   const updated = db.prepare('SELECT * FROM businesses WHERE id = ?').get(req.params.id) as any;
+  if (updated) delete updated.encrypted_telegram_bot_token;
   const createdNotification = recordBusinessNotification({
     businessId: req.params.id,
     type: 'telegram',
     tone: 'telegram',
-    title: 'Telegram integration setup pending',
-    message: `Store Telegram details were saved, but no bot webhook or Telegram Mini App connection has been verified. Storefront URL: ${resolvedCustomDomain || `telebiz.os/s/${updated.slug}`}.`,
+    title: encryptedToken ? 'Telegram Bot & Storefront Configured' : 'Telegram Storefront Details Saved',
+    message: encryptedToken
+      ? `Encrypted BotFather token (${maskedToken}) and webhook endpoint configured for ${resolvedBotUsername}. Storefront URL: ${resolvedCustomDomain || `telebiz.os/s/${updated.slug}`}.`
+      : `Store Telegram details were saved (${resolvedBotUsername}). Add a @BotFather token to enable encrypted bot webhook delivery. Storefront URL: ${resolvedCustomDomain || `telebiz.os/s/${updated.slug}`}.`,
     channel: 'telegram_and_web',
     forceWithoutButtons: !include_buttons_in_notification,
     buttons: [
@@ -2716,24 +2924,63 @@ app.post('/api/businesses/:id/telegram', (req: Request, res: Response) => {
 });
 
 // Live Connection & Handshake Diagnostic for Telegram Bot, Mini App & Web Domain
-app.post('/api/businesses/:id/telegram/test-connection', (req: Request, res: Response) => {
-  const access = verifyTenantAccess(req.user, req.params.id);
+app.post('/api/businesses/:id/telegram/test-connection', async (req: Request, res: Response) => {
+  const access = verifyTenantAccess(req.user, req.params.id, 'settings.manage');
   if (!access.allowed) {
     res.status(403).json({ error: access.error });
     return;
   }
 
-  // Fail closed until encrypted per-business BotFather token storage and a
-  // real Telegram webhook receiver are implemented and deployed.
-  res.status(501).json({
-    connected: false,
+  const b = access.business;
+  const plainToken = b.encrypted_telegram_bot_token ? decryptBotToken(b.encrypted_telegram_bot_token) : null;
+  if (!plainToken) {
+    res.status(400).json({
+      connected: false,
+      diagnostics: {
+        botVerified: false,
+        webhookActive: false,
+        miniAppPublished: Boolean(b.mini_app_published),
+        channelSynced: Boolean(b.telegram_channel_username),
+      },
+      error: 'No encrypted BotFather token is configured for this business yet. Save a valid @BotFather token first.',
+    });
+    return;
+  }
+
+  let botVerified = false;
+  let botInfo: any = null;
+  let apiError = '';
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 3500);
+    const tgRes = await fetch(`https://api.telegram.org/bot${plainToken}/getMe`, { signal: controller.signal });
+    clearTimeout(timer);
+    const tgData = await tgRes.json();
+    if (tgRes.ok && tgData?.ok && tgData?.result) {
+      botVerified = true;
+      botInfo = tgData.result;
+    } else {
+      apiError = tgData?.description || 'Telegram API rejected the configured bot token.';
+    }
+  } catch {
+    apiError = 'Could not reach api.telegram.org to verify the token online, but the token is encrypted and stored for webhook validation.';
+  }
+
+  res.json({
+    connected: botVerified,
     diagnostics: {
-      botVerified: false,
-      webhookActive: false,
-      miniAppPublished: false,
-      channelSynced: false,
+      botVerified,
+      tokenStoredEncrypted: true,
+      maskedToken: b.telegram_bot_token_masked,
+      webhookEndpoint: `/api/telegram/webhook/${b.id}`,
+      webhookActive: Boolean(b.telegram_webhook_active),
+      miniAppPublished: Boolean(b.mini_app_published),
+      channelSynced: Boolean(b.telegram_channel_username),
+      botInfo,
     },
-    error: 'Live Telegram bot diagnostics are not available yet. No handshake was performed and no connection status was changed.',
+    message: botVerified
+      ? `Verified live Telegram bot @${botInfo.username}.`
+      : apiError,
   });
 });
 
@@ -2843,6 +3090,15 @@ app.post('/api/businesses/:id/builder/save', (req: Request, res: Response) => {
   const versionNumber = saveVersion();
   const versions = db.prepare('SELECT * FROM mini_app_versions WHERE business_id = ? ORDER BY version_number DESC').all(req.params.id);
   return res.json({ versionNumber, versions, published: status === 'published' });
+});
+
+app.post('/api/businesses/:id/builder/publish', (req: Request, res: Response) => {
+  const access = verifyTenantAccess(req.user, req.params.id, 'builder.edit');
+  if (!access.allowed) return res.status(403).json({ error: access.error });
+  db.prepare('UPDATE businesses SET mini_app_published = 1 WHERE id = ?').run(req.params.id);
+  db.prepare("UPDATE mini_app_versions SET status = 'published' WHERE business_id = ? AND version_number = (SELECT MAX(version_number) FROM mini_app_versions WHERE business_id = ?)").run(req.params.id, req.params.id);
+  const updated = db.prepare('SELECT * FROM businesses WHERE id = ?').get(req.params.id);
+  return res.json({ published: true, business: updated });
 });
 
 app.post('/api/businesses/:id/builder/restore/:versionId', (req: Request, res: Response) => {
@@ -3078,11 +3334,44 @@ app.post('/api/businesses/:id/media/upload', (req: Request, res: Response) => {
   });
 });
 
+app.get('/api/businesses/:id/media', (req: Request, res: Response) => {
+  const access = verifyTenantAccess(req.user, req.params.id);
+  if (!access.allowed) {
+    res.status(403).json({ error: access.error });
+    return;
+  }
+  const assets = db.prepare('SELECT id, business_id, public_url, mime_type, width, height, byte_size, original_size, created_at FROM media_assets WHERE business_id = ? ORDER BY created_at DESC').all(req.params.id);
+  res.json(assets);
+});
+
+app.delete('/api/businesses/:id/media/:mediaId', (req: Request, res: Response) => {
+  const access = verifyTenantAccess(req.user, req.params.id, 'products.manage');
+  if (!access.allowed) {
+    res.status(403).json({ error: access.error });
+    return;
+  }
+  const asset = db.prepare('SELECT * FROM media_assets WHERE id = ? AND business_id = ?').get(req.params.mediaId, req.params.id) as any;
+  if (!asset) {
+    res.status(404).json({ error: 'Media asset not found in this business.' });
+    return;
+  }
+  db.prepare('DELETE FROM media_assets WHERE id = ? AND business_id = ?').run(req.params.mediaId, req.params.id);
+  res.json({ deleted: true, id: req.params.mediaId });
+});
+
 app.post('/api/businesses/:id/products', (req: Request, res: Response) => {
   const access = verifyTenantAccess(req.user, req.params.id, 'products.manage');
   if (!access.allowed) {
     res.status(403).json({ error: access.error });
     return;
+  }
+
+  if (access.business.plan_id === 'free') {
+    const productCount = (db.prepare('SELECT COUNT(*) as cnt FROM products WHERE business_id = ?').get(req.params.id) as { cnt: number }).cnt;
+    if (productCount >= 25) {
+      res.status(403).json({ error: 'Free plan is limited to 25 products. Upgrade to Growth or Enterprise to add more products.' });
+      return;
+    }
   }
 
   const {
@@ -3265,6 +3554,21 @@ app.patch('/api/businesses/:id/products/:productId', (req: Request, res: Respons
     req.params.id
   );
 
+  if (stock !== undefined && Number(existing.stock) !== finalStock) {
+    recordAuditLog({
+      actorUserId: req.user!.id,
+      actorName: req.user!.name,
+      actorRole: access.role || 'owner',
+      businessId: req.params.id,
+      action: 'ADJUST_PRODUCT_STOCK',
+      targetType: 'product',
+      targetId: req.params.productId,
+      previousValue: String(existing.stock),
+      newValue: String(finalStock),
+      reason: 'Manual stock adjustment',
+    });
+  }
+
   const products = db.prepare('SELECT * FROM products WHERE business_id = ? ORDER BY created_at DESC').all(req.params.id);
   res.json(products);
 });
@@ -3287,7 +3591,7 @@ app.post('/api/businesses/:id/categories', (req: Request, res: Response) => {
     res.status(403).json({ error: access.error });
     return;
   }
-  const categoryName = String(req.body.name || '').trim();
+  const categoryName = String(req.body.name || req.body.category_name || '').trim();
   if (!categoryName) {
     res.status(400).json({ error: 'Category name is required.' });
     return;
@@ -3311,8 +3615,8 @@ app.patch('/api/businesses/:id/categories', (req: Request, res: Response) => {
     res.status(403).json({ error: access.error });
     return;
   }
-  const oldName = String(req.body.oldName || '').trim();
-  const newName = String(req.body.newName || '').trim();
+  const oldName = String(req.body.oldName || req.body.old_name || '').trim();
+  const newName = String(req.body.newName || req.body.new_name || '').trim();
   if (!oldName || !newName) {
     res.status(400).json({ error: 'Both current category name and new category name are required.' });
     return;
@@ -3339,8 +3643,8 @@ app.delete('/api/businesses/:id/categories', (req: Request, res: Response) => {
     res.status(403).json({ error: access.error });
     return;
   }
-  const targetName = String(req.body.name || '').trim();
-  const fallbackCategory = String(req.body.reassignTo || 'General').trim();
+  const targetName = String(req.body.name || req.body.category_name || req.query.name || '').trim();
+  const fallbackCategory = String(req.body.reassignTo || req.body.fallback_category || 'General').trim();
   if (!targetName) {
     res.status(400).json({ error: 'Category name is required.' });
     return;
@@ -3368,9 +3672,15 @@ app.post('/api/businesses/:id/services', (req: Request, res: Response) => {
     return;
   }
 
-  const { name, description, duration_mins, price, capacity, available_slots } = req.body;
-  if (!name || price === undefined) {
-    res.status(400).json({ error: 'Service name and price are required' });
+  const { name, description, duration_mins, duration_min, price, capacity, max_guests, available_slots } = req.body;
+  if (!name || price === undefined || Number(price) < 0 || !Number.isFinite(Number(price))) {
+    res.status(400).json({ error: 'Valid service name and non-negative price are required' });
+    return;
+  }
+  const parsedDuration = Number(duration_mins ?? duration_min ?? 60);
+  const parsedCapacity = Number(capacity ?? max_guests ?? 1);
+  if (!Number.isInteger(parsedDuration) || parsedDuration < 5 || !Number.isInteger(parsedCapacity) || parsedCapacity < 1) {
+    res.status(400).json({ error: 'Service duration (at least 5 mins) and capacity (at least 1) must be valid integers.' });
     return;
   }
 
@@ -3381,11 +3691,11 @@ app.post('/api/businesses/:id/services', (req: Request, res: Response) => {
   `).run(
     srvId,
     req.params.id,
-    name,
+    String(name).trim(),
     description || '',
-    Number(duration_mins || 60),
+    parsedDuration,
     Number(price),
-    Number(capacity || 1),
+    parsedCapacity,
     JSON.stringify(available_slots || ['09:00', '11:00', '14:00', '16:30']),
     new Date().toISOString()
   );
@@ -3408,6 +3718,14 @@ app.patch('/api/businesses/:id/orders/:orderId', (req: Request, res: Response) =
   if (assigned_employee_id !== undefined && assigned_employee_id !== null && assigned_employee_id !== '') {
     const employee = db.prepare("SELECT id FROM employees WHERE id = ? AND business_id = ? AND status = 'active'").get(assigned_employee_id, req.params.id);
     if (!employee) return res.status(400).json({ error: 'The assigned employee must belong to this business and be active.' });
+  }
+  const isCashOnDelivery = String(order.payment_method || '').toLowerCase().includes('cash');
+  const fulfillmentStates = ['confirmed', 'preparing', 'out_for_delivery', 'completed'];
+  if (status !== undefined && fulfillmentStates.includes(status) && order.payment_status !== 'paid' && !isCashOnDelivery) {
+    return res.status(409).json({ error: 'Order payment must be verified before advancing order fulfillment.' });
+  }
+  if (delivery_status !== undefined && delivery_status !== 'awaiting_dispatch' && order.payment_status !== 'paid' && !isCashOnDelivery) {
+    return res.status(409).json({ error: 'Order payment must be verified before dispatching delivery.' });
   }
   if (status === 'cancelled' && order.payment_status === 'paid') return res.status(409).json({ error: 'This order is already paid. Record a manual refund before changing it to refunded.' });
   if (status === 'refunded' && order.payment_status !== 'paid') return res.status(409).json({ error: 'Only paid orders can be refunded. Reject an unpaid payment request instead.' });
@@ -3435,16 +3753,30 @@ app.patch('/api/businesses/:id/orders/:orderId', (req: Request, res: Response) =
 
 // Manual payment verification: business staff confirm receipt against the real bank/provider record.
 app.post('/api/businesses/:id/payments/:paymentId/verify', (req: Request, res: Response) => {
-  const access = verifyTenantAccess(req.user, req.params.id, 'orders.manage');
+  let access = verifyTenantAccess(req.user, req.params.id, 'orders.manage');
+  if (!access.allowed) {
+    access = verifyTenantAccess(req.user, req.params.id, 'payments.verify');
+  }
   if (!access.allowed) return res.status(403).json({ error: access.error });
-  const { provider_tx_id, action } = req.body || {};
+  const { provider_tx_id, action: rawAction, reason, rejection_reason, cancel_order } = req.body || {};
+  const action = rawAction === 'reject' ? 'fail' : rawAction;
   if (!['verify', 'fail', 'refund'].includes(action)) return res.status(400).json({ error: 'Unsupported payment action.' });
   const payment = db.prepare('SELECT * FROM payments WHERE id = ? AND business_id = ?').get(req.params.paymentId, req.params.id) as any;
   if (!payment) return res.status(404).json({ error: 'Payment record not found' });
   const transitionError = paymentActionError(payment.status, action);
   if (transitionError) return res.status(409).json({ error: transitionError });
   const ordersNow = () => db.prepare('SELECT * FROM orders WHERE business_id = ? ORDER BY created_at DESC').all(req.params.id);
-  const paymentsNow = () => db.prepare('SELECT * FROM payments WHERE business_id = ? ORDER BY created_at DESC').all(req.params.id);
+  const paymentsNow = () => db.prepare(`
+    SELECT p.*,
+      snap.payment_method_id,
+      snap.method_name AS payment_method_name,
+      snap.account_name AS payment_account_name,
+      snap.account_number AS payment_account_number
+    FROM payments p
+    LEFT JOIN payment_instruction_snapshots snap ON snap.payment_id = p.id
+    WHERE p.business_id = ?
+    ORDER BY p.created_at DESC
+  `).all(req.params.id);
   if ((action === 'verify' && payment.status === 'verified') || (action === 'fail' && payment.status === 'failed') || (action === 'refund' && payment.status === 'refunded')) {
     return res.json({ payments: paymentsNow(), orders: ordersNow(), alreadyProcessed: true });
   }
@@ -3459,28 +3791,59 @@ app.post('/api/businesses/:id/payments/:paymentId/verify', (req: Request, res: R
   if (action === 'verify' && (linkedOrder?.status === 'cancelled' || linkedOrder?.status === 'refunded' || linkedBooking?.status === 'cancelled' || linkedBooking?.status === 'refunded')) return res.status(409).json({ error: 'A cancelled or refunded order/booking cannot be paid.' });
   let transactionReference = '';
   if (action === 'verify') {
-    transactionReference = String(provider_tx_id || '').trim();
+    const rawTxRef = req.body?.provider_tx_id || req.body?.transaction_reference || payment.customer_tx_ref || '';
+    transactionReference = String(rawTxRef).trim();
     if (transactionReference.length < 3 || transactionReference.length > 160) return res.status(400).json({ error: 'Enter a valid transaction reference (3–160 characters) after confirming receipt.' });
     const duplicate = db.prepare("SELECT id FROM payments WHERE business_id = ? AND provider_tx_id = ? AND status = 'verified' AND id <> ?").get(req.params.id, transactionReference, payment.id);
     if (duplicate) return res.status(409).json({ error: 'This transaction reference has already been used for another verified payment.' });
   }
+  const resolvedRejectionReason = String(rejection_reason || reason || 'Payment transfer could not be verified by seller.').trim();
+  const shouldCancelOrderOnFail = cancel_order === undefined ? true : Boolean(cancel_order);
   const now = new Date().toISOString();
   const updatePayment = db.transaction(() => {
     if (action === 'fail') {
-      db.prepare("UPDATE payments SET status = 'failed' WHERE id = ? AND business_id = ?").run(payment.id, req.params.id);
+      db.prepare("UPDATE payments SET status = 'failed', rejection_reason = ? WHERE id = ? AND business_id = ?").run(resolvedRejectionReason, payment.id, req.params.id);
       if (linkedOrder) {
-        restoreReservedOrderStock(linkedOrder, req.params.id);
-        db.prepare("UPDATE orders SET payment_status = 'failed', status = 'cancelled' WHERE id = ? AND business_id = ? AND payment_status <> 'paid'").run(linkedOrder.id, req.params.id);
+        if (shouldCancelOrderOnFail) {
+          restoreReservedOrderStock(linkedOrder, req.params.id);
+          db.prepare("UPDATE orders SET payment_status = 'failed', status = 'cancelled', rejection_reason = ? WHERE id = ? AND business_id = ? AND payment_status <> 'paid'").run(resolvedRejectionReason, linkedOrder.id, req.params.id);
+        } else {
+          db.prepare("UPDATE orders SET payment_status = 'failed', rejection_reason = ? WHERE id = ? AND business_id = ? AND payment_status <> 'paid'").run(resolvedRejectionReason, linkedOrder.id, req.params.id);
+        }
       }
-      if (linkedBooking) db.prepare("UPDATE bookings SET payment_status = 'failed', status = 'cancelled' WHERE id = ? AND business_id = ? AND payment_status <> 'paid'").run(linkedBooking.id, req.params.id);
+      if (linkedBooking) db.prepare("UPDATE bookings SET payment_status = 'failed', status = 'cancelled', rejection_reason = ? WHERE id = ? AND business_id = ? AND payment_status <> 'paid'").run(resolvedRejectionReason, linkedBooking.id, req.params.id);
+      recordAuditLog({
+        actorUserId: req.user!.id,
+        actorName: req.user!.name,
+        actorRole: access.role || 'owner',
+        businessId: req.params.id,
+        action: 'REJECT_MANUAL_PAYMENT',
+        targetType: 'payment',
+        targetId: payment.id,
+        previousValue: payment.status,
+        newValue: 'failed',
+        reason: resolvedRejectionReason,
+      });
     } else if (action === 'refund') {
       db.prepare("UPDATE payments SET status = 'refunded' WHERE id = ? AND business_id = ?").run(payment.id, req.params.id);
       if (linkedOrder) db.prepare("UPDATE orders SET payment_status = 'refunded', status = 'refunded' WHERE id = ? AND business_id = ?").run(linkedOrder.id, req.params.id);
       if (linkedBooking) db.prepare("UPDATE bookings SET payment_status = 'refunded', status = 'refunded' WHERE id = ? AND business_id = ?").run(linkedBooking.id, req.params.id);
+      recordAuditLog({
+        actorUserId: req.user!.id,
+        actorName: req.user!.name,
+        actorRole: access.role || 'owner',
+        businessId: req.params.id,
+        action: 'REFUND_MANUAL_PAYMENT',
+        targetType: 'payment',
+        targetId: payment.id,
+        previousValue: payment.status,
+        newValue: 'refunded',
+        reason: resolvedRejectionReason,
+      });
     } else {
-      db.prepare('UPDATE payments SET status = ?, provider_tx_id = ?, verified_at = ?, verified_by = ? WHERE id = ? AND business_id = ?').run('verified', transactionReference, now, req.user!.name, payment.id, req.params.id);
+      db.prepare("UPDATE payments SET status = ?, provider_tx_id = ?, verified_at = ?, verified_by = ?, rejection_reason = '' WHERE id = ? AND business_id = ?").run('verified', transactionReference, now, req.user!.name, payment.id, req.params.id);
       if (linkedOrder) {
-        db.prepare("UPDATE orders SET payment_status = 'paid', status = CASE WHEN status = 'pending' THEN 'confirmed' ELSE status END WHERE id = ? AND business_id = ?").run(linkedOrder.id, req.params.id);
+        db.prepare("UPDATE orders SET payment_status = 'paid', rejection_reason = '', status = CASE WHEN status = 'pending' THEN 'confirmed' ELSE status END WHERE id = ? AND business_id = ?").run(linkedOrder.id, req.params.id);
         if (linkedOrder.customer_id) {
           const pointsEarned = Math.floor(Number(linkedOrder.total) / 25);
           db.prepare('UPDATE customers SET total_spent = total_spent + ?, loyalty_points = loyalty_points + ? WHERE id = ? AND business_id = ?').run(linkedOrder.total, pointsEarned, linkedOrder.customer_id, req.params.id);
@@ -3492,6 +3855,18 @@ app.post('/api/businesses/:id/payments/:paymentId/verify', (req: Request, res: R
         insertEvent.run('ev_' + crypto.randomBytes(4).toString('hex'), req.params.id, linkedOrder.customer_id || null, 'sess_ver_' + payment.id, 'purchase_complete', eventSource, deviceType, now);
       }
       if (linkedBooking) db.prepare("UPDATE bookings SET payment_status = 'paid', status = 'confirmed' WHERE id = ? AND business_id = ?").run(linkedBooking.id, req.params.id);
+      recordAuditLog({
+        actorUserId: req.user!.id,
+        actorName: req.user!.name,
+        actorRole: access.role || 'owner',
+        businessId: req.params.id,
+        action: 'VERIFY_MANUAL_PAYMENT',
+        targetType: 'payment',
+        targetId: payment.id,
+        previousValue: payment.status,
+        newValue: `verified (${transactionReference})`,
+        reason: 'Manual payment verified by business staff',
+      });
     }
   });
   updatePayment();
@@ -3506,20 +3881,30 @@ app.patch('/api/businesses/:id/bookings/:bookingId', (req: Request, res: Respons
     return;
   }
 
-  const { status, payment_status, assigned_employee_id } = req.body;
+  const { status, payment_status, assigned_employee_id, booking_date, booking_time, rejection_reason } = req.body;
   const booking = db.prepare('SELECT * FROM bookings WHERE id = ? AND business_id = ?').get(req.params.bookingId, req.params.id) as any;
   if (!booking) {
     res.status(404).json({ error: 'Booking not found' });
     return;
   }
 
+  const allowedBookingStatuses = ['requested', 'confirmed', 'completed', 'cancelled', 'rejected', 'no_show'];
+  if (status !== undefined && !allowedBookingStatuses.includes(status)) {
+    res.status(400).json({ error: 'Invalid booking status.' });
+    return;
+  }
+
   db.prepare(`
-    UPDATE bookings SET status = ?, payment_status = ?, assigned_employee_id = ?
+    UPDATE bookings SET status = ?, payment_status = ?, assigned_employee_id = ?, booking_date = ?, booking_time = ?, rejection_reason = ?, cancelled_at = ?
     WHERE id = ? AND business_id = ?
   `).run(
     status ?? booking.status,
     payment_status ?? booking.payment_status,
     assigned_employee_id !== undefined ? assigned_employee_id : booking.assigned_employee_id,
+    booking_date ?? booking.booking_date,
+    booking_time ?? booking.booking_time,
+    rejection_reason !== undefined ? String(rejection_reason) : (booking.rejection_reason || ''),
+    status === 'cancelled' || status === 'rejected' ? new Date().toISOString() : (booking.cancelled_at || ''),
     booking.id,
     req.params.id
   );
@@ -3640,10 +4025,10 @@ app.get('/api/businesses/:id/analytics', (req: Request, res: Response) => {
   const paidOrders = orders.filter((o) => o.payment_status === 'paid');
   const totalRevenue = paidOrders.reduce((acc, o) => acc + Number(o.total), 0);
 
-  const now = new Date('2026-11-01T23:59:59Z');
-  const todayStr = '2026-11-01';
+  const now = new Date();
+  const todayStr = now.toISOString().slice(0, 10);
   const todayRevenue = paidOrders
-    .filter((o) => o.created_at.startsWith(todayStr))
+    .filter((o) => String(o.created_at || '').startsWith(todayStr))
     .reduce((acc, o) => acc + Number(o.total), 0);
 
   const sevenDaysAgo = new Date(now.getTime() - 7 * 86400000).toISOString();
@@ -3765,26 +4150,38 @@ app.post('/api/businesses/:id/employees', (req: Request, res: Response) => {
     return;
   }
 
-  const { name, email, role, permissions, branch_id, shift } = req.body;
+  const { name, email, role: rawRole, role_title, permissions, branch_id, shift } = req.body;
+  const role = rawRole || role_title;
   if (!name || !email || !role) {
     res.status(400).json({ error: 'Employee name, email, and role are required' });
     return;
   }
 
+  const cleanEmail = String(email).trim().toLowerCase();
+  const existingAccount = db.prepare('SELECT id FROM users WHERE LOWER(email) = ?').get(cleanEmail) as { id: string } | undefined;
   const empId = 'emp_' + crypto.randomBytes(4).toString('hex');
+  const inviteToken = 'inv_' + crypto.randomBytes(16).toString('hex');
+  const inviteExpiresAt = new Date(Date.now() + 7 * 86400000).toISOString();
+  const now = new Date().toISOString();
+
   db.prepare(`
-    INSERT INTO employees (id, business_id, user_id, name, email, role, permissions_json, branch_id, schedule_json, status, created_at)
-    VALUES (?, ?, null, ?, ?, ?, ?, ?, ?, 'invited', ?)
+    INSERT INTO employees (
+      id, business_id, user_id, name, email, role, permissions_json,
+      branch_id, schedule_json, status, invite_token, invite_expires_at, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'invited', ?, ?, ?)
   `).run(
     empId,
     req.params.id,
-    name,
-    email,
+    existingAccount?.id || null,
+    String(name).trim(),
+    cleanEmail,
     role,
     JSON.stringify(permissions || ['orders.view', 'support.reply']),
     branch_id || null,
     JSON.stringify({ shift: shift || 'Mon-Fri 08:30-17:30' }),
-    new Date().toISOString()
+    inviteToken,
+    inviteExpiresAt,
+    now
   );
 
   recordAuditLog({
@@ -3795,11 +4192,61 @@ app.post('/api/businesses/:id/employees', (req: Request, res: Response) => {
     action: 'INVITE_EMPLOYEE',
     targetType: 'employee',
     targetId: empId,
-    newValue: `${name} (${email}) as ${role}`,
+    newValue: `${name} (${cleanEmail}) as ${role}`,
   });
 
   const employees = db.prepare('SELECT * FROM employees WHERE business_id = ? ORDER BY created_at ASC').all(req.params.id);
   res.status(201).json(employees);
+});
+
+app.post('/api/employees/accept-invite', (req: Request, res: Response) => {
+  if (!req.user) {
+    res.status(401).json({ error: 'Authentication required to accept an employee invitation.' });
+    return;
+  }
+  const { invite_token } = req.body || {};
+  if (!invite_token || typeof invite_token !== 'string') {
+    res.status(400).json({ error: 'A valid invitation token is required.' });
+    return;
+  }
+  const emp = db.prepare('SELECT * FROM employees WHERE invite_token = ?').get(invite_token.trim()) as any;
+  if (!emp) {
+    res.status(404).json({ error: 'Invitation not found or invalid.' });
+    return;
+  }
+  if (emp.status === 'revoked') {
+    res.status(403).json({ error: 'This employee invitation has been revoked.' });
+    return;
+  }
+  if (emp.invite_expires_at && new Date(emp.invite_expires_at).getTime() < Date.now()) {
+    res.status(410).json({ error: 'This employee invitation has expired.' });
+    return;
+  }
+  if (String(emp.email || '').toLowerCase() !== String(req.user.email || '').toLowerCase()) {
+    res.status(403).json({ error: 'This invitation was issued to a different email address.' });
+    return;
+  }
+  const now = new Date().toISOString();
+  db.prepare(`
+    UPDATE employees
+    SET user_id = ?, status = 'active', accepted_at = ?, invite_token = ''
+    WHERE id = ?
+  `).run(req.user.id, now, emp.id);
+
+  recordAuditLog({
+    actorUserId: req.user.id,
+    actorName: req.user.name,
+    actorRole: emp.role,
+    businessId: emp.business_id,
+    action: 'ACCEPT_EMPLOYEE_INVITE',
+    targetType: 'employee',
+    targetId: emp.id,
+    previousValue: 'invited',
+    newValue: 'active',
+  });
+
+  const updatedEmp = db.prepare('SELECT * FROM employees WHERE id = ?').get(emp.id);
+  res.json({ accepted: true, employee: updatedEmp });
 });
 
 app.patch('/api/businesses/:id/employees/:empId', (req: Request, res: Response) => {
@@ -3839,24 +4286,62 @@ app.patch('/api/businesses/:id/employees/:empId', (req: Request, res: Response) 
   res.json(employees);
 });
 
-app.post('/api/businesses/:id/promotions', (req: Request, res: Response) => {
+app.delete('/api/businesses/:id/employees/:empId', (req: Request, res: Response) => {
   const access = verifyTenantAccess(req.user, req.params.id);
+  if (!access.allowed || (access.role !== 'owner' && access.role !== 'admin' && access.role !== 'super_admin')) {
+    res.status(403).json({ error: 'Only Business Owners or Administrators can remove employees.' });
+    return;
+  }
+  const emp = db.prepare('SELECT * FROM employees WHERE id = ? AND business_id = ?').get(req.params.empId, req.params.id) as any;
+  if (!emp) {
+    res.status(404).json({ error: 'Employee not found' });
+    return;
+  }
+  db.prepare('DELETE FROM employees WHERE id = ? AND business_id = ?').run(emp.id, req.params.id);
+  recordAuditLog({
+    actorUserId: req.user!.id,
+    actorName: req.user!.name,
+    actorRole: access.role!,
+    businessId: req.params.id,
+    action: 'DELETE_EMPLOYEE',
+    targetType: 'employee',
+    targetId: emp.id,
+    previousValue: `${emp.name} (${emp.email})`,
+    newValue: 'DELETED',
+  });
+  const employees = db.prepare('SELECT * FROM employees WHERE business_id = ? ORDER BY created_at ASC').all(req.params.id);
+  res.json(employees);
+});
+
+app.post('/api/businesses/:id/promotions', (req: Request, res: Response) => {
+  const access = verifyTenantAccess(req.user, req.params.id, 'marketing.manage');
   if (!access.allowed) {
     res.status(403).json({ error: access.error });
     return;
   }
 
-  const { code, name, discount_type, discount_value, min_order_amount, max_uses, expires_at } = req.body;
+  const { code, name, discount_type, discount_value, discount_percent, min_order_amount, max_uses, expires_at } = req.body;
+  const cleanCode = String(code || 'PROMO10').trim().toUpperCase();
+  const parsedDiscountValue = Number(discount_value ?? discount_percent ?? 10);
+  if (!cleanCode || !Number.isFinite(parsedDiscountValue) || parsedDiscountValue <= 0 || (discount_type === 'percentage' && parsedDiscountValue > 95)) {
+    res.status(400).json({ error: 'Valid promotion code and positive discount value are required.' });
+    return;
+  }
+  const existingCode = db.prepare('SELECT id FROM promotions WHERE business_id = ? AND UPPER(code) = ?').get(req.params.id, cleanCode);
+  if (existingCode) {
+    res.status(409).json({ error: 'A promotion with this code already exists for this business.' });
+    return;
+  }
   db.prepare(`
     INSERT INTO promotions (id, business_id, code, name, discount_type, discount_value, min_order_amount, usage_count, max_uses, active, expires_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, 1, ?)
   `).run(
     'prm_' + crypto.randomBytes(4).toString('hex'),
     req.params.id,
-    (code || 'PROMO10').toUpperCase(),
+    cleanCode,
     name || 'Promotional Offer',
-    discount_type || 'percentage',
-    Number(discount_value || 10),
+    discount_type === 'fixed' ? 'fixed' : 'percentage',
+    parsedDiscountValue,
     Number(min_order_amount || 0),
     Number(max_uses || 100),
     expires_at || new Date(Date.now() + 30 * 86400000).toISOString()
@@ -3867,7 +4352,7 @@ app.post('/api/businesses/:id/promotions', (req: Request, res: Response) => {
 });
 
 app.post('/api/businesses/:id/campaigns', (req: Request, res: Response) => {
-  const access = verifyTenantAccess(req.user, req.params.id);
+  const access = verifyTenantAccess(req.user, req.params.id, 'marketing.manage');
   if (!access.allowed) {
     res.status(403).json({ error: access.error });
     return;
@@ -3899,12 +4384,17 @@ app.post('/api/businesses/:id/campaigns', (req: Request, res: Response) => {
 });
 
 app.post('/api/businesses/:id/expenses', (req: Request, res: Response) => {
-  const access = verifyTenantAccess(req.user, req.params.id);
+  const access = verifyTenantAccess(req.user, req.params.id, 'settings.manage');
   if (!access.allowed) {
     res.status(403).json({ error: access.error });
     return;
   }
   const { category, title, amount, incurred_date, branch_id } = req.body;
+  const parsedAmount = Number(amount);
+  if (!title || !String(title).trim() || !Number.isFinite(parsedAmount) || parsedAmount < 0) {
+    res.status(400).json({ error: 'Valid expense title and non-negative amount are required.' });
+    return;
+  }
   db.prepare(`
     INSERT INTO expenses (id, business_id, branch_id, category, title, amount, currency, incurred_date, recorded_by, created_at)
     VALUES (?, ?, ?, ?, ?, ?, 'ETB', ?, ?, ?)
@@ -3913,8 +4403,8 @@ app.post('/api/businesses/:id/expenses', (req: Request, res: Response) => {
     req.params.id,
     branch_id || null,
     category || 'Operations',
-    title || 'Operating Expense',
-    Number(amount || 0),
+    String(title).trim(),
+    parsedAmount,
     incurred_date || new Date().toISOString().slice(0, 10),
     req.user!.name,
     new Date().toISOString()
@@ -3925,20 +4415,24 @@ app.post('/api/businesses/:id/expenses', (req: Request, res: Response) => {
 });
 
 app.post('/api/businesses/:id/branches', (req: Request, res: Response) => {
-  const access = verifyTenantAccess(req.user, req.params.id);
+  const access = verifyTenantAccess(req.user, req.params.id, 'settings.manage');
   if (!access.allowed) {
     res.status(403).json({ error: access.error });
     return;
   }
   const { name, address, phone, manager_name, working_hours } = req.body;
+  if (!name || !String(name).trim() || !address || !String(address).trim()) {
+    res.status(400).json({ error: 'Branch name and address are required.' });
+    return;
+  }
   db.prepare(`
     INSERT INTO business_branches (id, business_id, name, address, phone, manager_name, working_hours, is_main, status)
     VALUES (?, ?, ?, ?, ?, ?, ?, 0, 'open')
   `).run(
     'br_' + crypto.randomBytes(4).toString('hex'),
     req.params.id,
-    name,
-    address,
+    String(name).trim(),
+    String(address).trim(),
     phone || '',
     manager_name || req.user!.name,
     working_hours || '08:30 - 19:00'
@@ -3948,7 +4442,7 @@ app.post('/api/businesses/:id/branches', (req: Request, res: Response) => {
 });
 
 // ============================================================================
-// 9. SUBSCRIPTIONS & ADD-ON MARKETPLACE
+// 9. SUBSCRIPTIONS & ADD-ON MARKETPLACE (MANUAL PAYMENT VERIFICATION)
 // ============================================================================
 
 app.get('/api/addons', (_req: Request, res: Response) => {
@@ -3957,61 +4451,112 @@ app.get('/api/addons', (_req: Request, res: Response) => {
 });
 
 app.post('/api/businesses/:id/subscription', (req: Request, res: Response) => {
-  const access = verifyTenantAccess(req.user, req.params.id);
+  const access = verifyTenantAccess(req.user, req.params.id, 'settings.manage');
   if (!access.allowed) {
     res.status(403).json({ error: access.error });
     return;
   }
 
-  const { plan_id, billing_cycle, payment_method, reference_code } = req.body;
+  const { plan_id, billing_cycle, payment_method, reference_code, provider_tx_id } = req.body;
   const planPrices: Record<string, { monthly: number; yearly: number; aiLimit: number }> = {
     free: { monthly: 0, yearly: 0, aiLimit: 5 },
     growth: { monthly: 1450, yearly: 14500, aiLimit: 25 },
     enterprise: { monthly: 2400, yearly: 24000, aiLimit: 100 },
   };
 
-  const selected = planPrices[plan_id] || planPrices.growth;
-  const amount = billing_cycle === 'yearly' ? selected.yearly : selected.monthly;
-  const daysToAdd = billing_cycle === 'yearly' ? 365 : 30;
+  if (!plan_id || !planPrices[plan_id]) {
+    res.status(400).json({ error: 'Invalid subscription plan selected.' });
+    return;
+  }
+
+  const selected = planPrices[plan_id];
+  const resolvedCycle = billing_cycle === 'yearly' ? 'yearly' : 'monthly';
+  const amount = resolvedCycle === 'yearly' ? selected.yearly : selected.monthly;
+  const daysToAdd = resolvedCycle === 'yearly' ? 365 : 30;
   const newExpires = new Date(Date.now() + daysToAdd * 86400000).toISOString();
   const now = new Date().toISOString();
 
-  db.prepare(`
-    UPDATE businesses SET
-      plan_id = ?, billing_cycle = ?, subscription_status = 'active',
-      subscription_expires_at = ?, ai_generations_limit = ?
-    WHERE id = ?
-  `).run(plan_id, billing_cycle || 'monthly', newExpires, selected.aiLimit, req.params.id);
-
-  if (amount > 0) {
+  // Free plan requires no payment verification and activates immediately.
+  if (amount === 0) {
     db.prepare(`
-      INSERT INTO payments (id, scope, business_id, reference_code, order_id, booking_id, amount, currency, method, provider_tx_id, status, verified_at, verified_by, description, created_at)
-      VALUES (?, 'platform', ?, ?, null, null, ?, 'ETB', ?, ?, 'verified', ?, 'Platform Billing Engine', ?, ?)
-    `).run(
-      'pay_' + crypto.randomBytes(4).toString('hex'),
-      req.params.id,
-      reference_code || ('PLAT-SUB-' + crypto.randomBytes(3).toString('hex').toUpperCase()),
-      amount,
-      payment_method || 'telebirr',
-      'PLAT_TX_' + Date.now(),
-      now,
-      `Subscription renewal: ${plan_id.toUpperCase()} (${billing_cycle})`,
-      now
-    );
+      UPDATE businesses SET
+        plan_id = 'free', subscription_plan = 'free', billing_cycle = ?, subscription_status = 'active',
+        subscription_expires_at = ?, ai_generations_limit = ?
+      WHERE id = ?
+    `).run(resolvedCycle, newExpires, selected.aiLimit, req.params.id);
+    const updated = db.prepare('SELECT * FROM businesses WHERE id = ?').get(req.params.id);
+    res.json(updated);
+    return;
   }
 
-  const updated = db.prepare('SELECT * FROM businesses WHERE id = ?').get(req.params.id);
-  res.json(updated);
+  // Paid plans require a real manual transfer reference and enter pending_verification
+  // until a platform super_admin verifies the payment.
+  const submittedTxRef = String(provider_tx_id || reference_code || req.body?.transaction_reference || '').trim();
+  if (submittedTxRef.length < 3) {
+    res.status(400).json({
+      error: 'A valid bank/mobile money transfer reference (at least 3 characters) is required to request a paid subscription upgrade.',
+    });
+    return;
+  }
+
+  const duplicateTx = db.prepare("SELECT id FROM payments WHERE scope = 'platform' AND provider_tx_id = ? AND status = 'verified'").get(submittedTxRef);
+  if (duplicateTx) {
+    res.status(409).json({ error: 'This transfer reference has already been used for another verified platform payment.' });
+    return;
+  }
+
+  const paymentId = 'pay_' + crypto.randomBytes(4).toString('hex');
+  const refCode = 'PLAT-SUB-' + crypto.randomBytes(3).toString('hex').toUpperCase();
+  const metadataJson = JSON.stringify({
+    type: 'subscription',
+    plan_id,
+    billing_cycle: resolvedCycle,
+    ai_limit: selected.aiLimit,
+    days_to_add: daysToAdd,
+  });
+
+  db.prepare(`
+    INSERT INTO payments (
+      id, scope, business_id, reference_code, order_id, booking_id, amount, currency,
+      method, provider_tx_id, customer_tx_ref, status, verified_at, verified_by, description, metadata_json, submitted_at, created_at
+    ) VALUES (?, 'platform', ?, ?, null, null, ?, 'ETB', ?, ?, ?, 'pending_verification', null, null, ?, ?, ?, ?)
+  `).run(
+    paymentId,
+    req.params.id,
+    refCode,
+    amount,
+    payment_method || 'telebirr',
+    submittedTxRef,
+    submittedTxRef,
+    `Subscription upgrade request: ${plan_id.toUpperCase()} (${resolvedCycle})`,
+    metadataJson,
+    now,
+    now
+  );
+
+  const currentBiz = db.prepare('SELECT * FROM businesses WHERE id = ?').get(req.params.id) as any;
+  res.status(202).json({
+    ...currentBiz,
+    pendingSubscriptionPayment: {
+      paymentId,
+      referenceCode: refCode,
+      requestedPlan: plan_id,
+      billingCycle: resolvedCycle,
+      amount,
+      status: 'pending_verification',
+      submittedReference: submittedTxRef,
+    },
+  });
 });
 
 app.post('/api/businesses/:id/addons/toggle', (req: Request, res: Response) => {
-  const access = verifyTenantAccess(req.user, req.params.id);
+  const access = verifyTenantAccess(req.user, req.params.id, 'settings.manage');
   if (!access.allowed) {
     res.status(403).json({ error: access.error });
     return;
   }
 
-  const { addon_id, action, payment_method } = req.body; // action: 'activate' | 'disable'
+  const { addon_id, action, payment_method, reference_code, provider_tx_id } = req.body; // action: 'activate' | 'disable'
   const addon = db.prepare('SELECT * FROM addons WHERE id = ?').get(addon_id) as any;
   if (!addon) {
     res.status(404).json({ error: 'Add-on not found' });
@@ -4022,28 +4567,54 @@ app.post('/api/businesses/:id/addons/toggle', (req: Request, res: Response) => {
   if (action === 'disable') {
     db.prepare('DELETE FROM business_addons WHERE business_id = ? AND addon_id = ?').run(req.params.id, addon_id);
   } else {
-    const expires = new Date(Date.now() + 30 * 86400000).toISOString();
-    db.prepare(`
-      INSERT INTO business_addons (id, business_id, addon_id, status, pricing_override, expires_at, granted_by, created_at)
-      VALUES (?, ?, ?, 'active', null, ?, ?, ?)
-      ON CONFLICT(business_id, addon_id) DO UPDATE SET status = 'active', expires_at = excluded.expires_at
-    `).run('ba_' + crypto.randomBytes(4).toString('hex'), req.params.id, addon_id, expires, req.user!.name, now);
+    const price = Number(addon.monthly_price || 0);
+    if (price > 0) {
+      const submittedTxRef = String(provider_tx_id || reference_code || '').trim();
+      if (submittedTxRef.length < 3) {
+        res.status(400).json({
+          error: 'A valid manual transfer reference (at least 3 characters) is required to request activation of a paid add-on.',
+        });
+        return;
+      }
+      const expires = new Date(Date.now() + 30 * 86400000).toISOString();
+      db.prepare(`
+        INSERT INTO business_addons (id, business_id, addon_id, status, pricing_override, expires_at, granted_by, created_at)
+        VALUES (?, ?, ?, 'pending_verification', null, ?, ?, ?)
+        ON CONFLICT(business_id, addon_id) DO UPDATE SET status = 'pending_verification', expires_at = excluded.expires_at
+      `).run('ba_' + crypto.randomBytes(4).toString('hex'), req.params.id, addon_id, expires, req.user!.name, now);
 
-    // Record platform add-on revenue payment
-    db.prepare(`
-      INSERT INTO payments (id, scope, business_id, reference_code, order_id, booking_id, amount, currency, method, provider_tx_id, status, verified_at, verified_by, description, created_at)
-      VALUES (?, 'platform', ?, ?, null, null, ?, 'ETB', ?, ?, 'verified', ?, 'Platform Billing', ?, ?)
-    `).run(
-      'pay_' + crypto.randomBytes(4).toString('hex'),
-      req.params.id,
-      'PLAT-ADD-' + crypto.randomBytes(3).toString('hex').toUpperCase(),
-      addon.monthly_price,
-      payment_method || 'telebirr',
-      'ADD_TX_' + Date.now(),
-      now,
-      `Activated Add-on: ${addon.name}`,
-      now
-    );
+      const metadataJson = JSON.stringify({
+        type: 'addon',
+        addon_id,
+        addon_name: addon.name,
+      });
+
+      db.prepare(`
+        INSERT INTO payments (
+          id, scope, business_id, reference_code, order_id, booking_id, amount, currency,
+          method, provider_tx_id, customer_tx_ref, status, verified_at, verified_by, description, metadata_json, submitted_at, created_at
+        ) VALUES (?, 'platform', ?, ?, null, null, ?, 'ETB', ?, ?, ?, 'pending_verification', null, null, ?, ?, ?, ?)
+      `).run(
+        'pay_' + crypto.randomBytes(4).toString('hex'),
+        req.params.id,
+        'PLAT-ADD-' + crypto.randomBytes(3).toString('hex').toUpperCase(),
+        price,
+        payment_method || 'telebirr',
+        submittedTxRef,
+        submittedTxRef,
+        `Add-on activation request: ${addon.name}`,
+        metadataJson,
+        now,
+        now
+      );
+    } else {
+      const expires = new Date(Date.now() + 30 * 86400000).toISOString();
+      db.prepare(`
+        INSERT INTO business_addons (id, business_id, addon_id, status, pricing_override, expires_at, granted_by, created_at)
+        VALUES (?, ?, ?, 'active', null, ?, ?, ?)
+        ON CONFLICT(business_id, addon_id) DO UPDATE SET status = 'active', expires_at = excluded.expires_at
+      `).run('ba_' + crypto.randomBytes(4).toString('hex'), req.params.id, addon_id, expires, req.user!.name, now);
+    }
   }
 
   const activeAddons = db.prepare(`
@@ -4150,6 +4721,12 @@ app.get('/api/superadmin/overview', (req: Request, res: Response) => {
   }));
 
   const verifiedPlatformPayments = allPayments.filter((p) => p.scope === 'platform' && p.status === 'verified');
+  const pendingPlatformPayments = allPayments
+    .filter((p) => p.scope === 'platform' && (p.status === 'pending_verification' || p.status === 'initiated'))
+    .map((p) => {
+      const biz = businesses.find((b) => b.id === p.business_id);
+      return { ...p, business_name: biz?.name || p.business_id };
+    });
   const subscriptionRevenue = verifiedPlatformPayments
     .filter((p) => p.reference_code.startsWith('PLAT-SUB'))
     .reduce((sum, p) => sum + Number(p.amount), 0);
@@ -4180,7 +4757,112 @@ app.get('/api/superadmin/overview', (req: Request, res: Response) => {
     allEmployees,
     auditLogs,
     platformSupport: enrichedPlatformSupport,
+    pendingPlatformPayments,
   });
+});
+
+// Super Admin: Verify or Reject Pending Platform Subscription / Add-on Payments
+app.post('/api/superadmin/payments/:paymentId/verify', (req: Request, res: Response) => {
+  if (!req.user || req.user.platform_role !== 'super_admin') {
+    res.status(403).json({ error: 'Platform Super Admin authorization required.' });
+    return;
+  }
+  const payment = db.prepare("SELECT * FROM payments WHERE id = ? AND scope = 'platform'").get(req.params.paymentId) as any;
+  if (!payment) {
+    res.status(404).json({ error: 'Platform payment record not found.' });
+    return;
+  }
+  const { action: rawAction, provider_tx_id, reason } = req.body || {};
+  const action = rawAction === 'reject' ? 'fail' : rawAction;
+  if (!['verify', 'fail'].includes(action)) {
+    res.status(400).json({ error: 'Action must be verify or fail.' });
+    return;
+  }
+  const transitionErr = paymentActionError(payment.status, action);
+  if (transitionErr) {
+    res.status(409).json({ error: transitionErr });
+    return;
+  }
+
+  let metadata: any = {};
+  try {
+    metadata = JSON.parse(payment.metadata_json || '{}');
+  } catch {
+    metadata = {};
+  }
+
+  const now = new Date().toISOString();
+  if (action === 'fail') {
+    const rejectionReason = String(reason || 'Platform payment transfer could not be verified.').trim();
+    db.prepare("UPDATE payments SET status = 'failed', rejection_reason = ? WHERE id = ?").run(rejectionReason, payment.id);
+    if (metadata.type === 'addon' && metadata.addon_id) {
+      db.prepare("UPDATE business_addons SET status = 'disabled' WHERE business_id = ? AND addon_id = ? AND status = 'pending_verification'").run(
+        payment.business_id,
+        metadata.addon_id
+      );
+    }
+    recordAuditLog({
+      actorUserId: req.user.id,
+      actorName: req.user.name,
+      actorRole: 'super_admin',
+      businessId: payment.business_id,
+      action: 'REJECT_PLATFORM_PAYMENT',
+      targetType: 'payment',
+      targetId: payment.id,
+      previousValue: payment.status,
+      newValue: 'failed',
+      reason: rejectionReason,
+    });
+    res.json({ verified: false, status: 'failed', paymentId: payment.id });
+    return;
+  }
+
+  const txRef = String(provider_tx_id || payment.provider_tx_id || payment.customer_tx_ref || '').trim();
+  if (txRef.length < 3) {
+    res.status(400).json({ error: 'A valid transaction reference is required to verify platform payment.' });
+    return;
+  }
+
+  db.prepare("UPDATE payments SET status = 'verified', provider_tx_id = ?, verified_at = ?, verified_by = ? WHERE id = ?").run(
+    txRef,
+    now,
+    req.user.name,
+    payment.id
+  );
+
+  if (metadata.type === 'subscription' && metadata.plan_id) {
+    const days = Number(metadata.days_to_add || 30);
+    const expires = new Date(Date.now() + days * 86400000).toISOString();
+    const aiLimit = Number(metadata.ai_limit || 25);
+    db.prepare(`
+      UPDATE businesses
+      SET plan_id = ?, subscription_plan = ?, billing_cycle = ?, subscription_status = 'active',
+          subscription_expires_at = ?, ai_generations_limit = ?
+      WHERE id = ?
+    `).run(metadata.plan_id, metadata.plan_id, metadata.billing_cycle || 'monthly', expires, aiLimit, payment.business_id);
+  } else if (metadata.type === 'addon' && metadata.addon_id) {
+    const expires = new Date(Date.now() + 30 * 86400000).toISOString();
+    db.prepare(`
+      UPDATE business_addons
+      SET status = 'active', expires_at = ?
+      WHERE business_id = ? AND addon_id = ?
+    `).run(expires, payment.business_id, metadata.addon_id);
+  }
+
+  recordAuditLog({
+    actorUserId: req.user.id,
+    actorName: req.user.name,
+    actorRole: 'super_admin',
+    businessId: payment.business_id,
+    action: 'VERIFY_PLATFORM_PAYMENT',
+    targetType: 'payment',
+    targetId: payment.id,
+    previousValue: payment.status,
+    newValue: `verified (${txRef})`,
+    reason: String(reason || 'Verified platform subscription/addon transfer'),
+  });
+
+  res.json({ verified: true, status: 'verified', paymentId: payment.id });
 });
 
 // Super Admin: Manage Store Owners & Platform Users (Block, Unblock, Reset Password, Delete)
@@ -4271,19 +4953,55 @@ app.post('/api/superadmin/customers/:customerId/control', (req: Request, res: Re
     res.status(404).json({ error: 'Customer not found' });
     return;
   }
-  const { action } = req.body; // 'BLOCK_CUSTOMER' | 'UNBLOCK_CUSTOMER' | 'DELETE_CUSTOMER'
+  const { action, reason } = req.body; // 'BLOCK_CUSTOMER' | 'UNBLOCK_CUSTOMER' | 'DELETE_CUSTOMER'
   if (action === 'BLOCK_CUSTOMER') {
     db.prepare("UPDATE customers SET status = 'blocked' WHERE id = ?").run(customer.id);
+    recordAuditLog({
+      actorUserId: req.user.id,
+      actorName: req.user.name,
+      actorRole: 'super_admin',
+      businessId: customer.business_id,
+      action: 'BLOCK_CUSTOMER',
+      targetType: 'customer',
+      targetId: customer.id,
+      previousValue: customer.status || 'active',
+      newValue: 'blocked',
+      reason: reason || 'Customer blocked by Super Admin',
+    });
     res.json({ success: true, status: 'blocked' });
     return;
   }
   if (action === 'UNBLOCK_CUSTOMER') {
     db.prepare("UPDATE customers SET status = 'active' WHERE id = ?").run(customer.id);
+    recordAuditLog({
+      actorUserId: req.user.id,
+      actorName: req.user.name,
+      actorRole: 'super_admin',
+      businessId: customer.business_id,
+      action: 'UNBLOCK_CUSTOMER',
+      targetType: 'customer',
+      targetId: customer.id,
+      previousValue: customer.status || 'blocked',
+      newValue: 'active',
+      reason: reason || 'Customer unblocked by Super Admin',
+    });
     res.json({ success: true, status: 'active' });
     return;
   }
   if (action === 'DELETE_CUSTOMER') {
     db.prepare('DELETE FROM customers WHERE id = ?').run(customer.id);
+    recordAuditLog({
+      actorUserId: req.user.id,
+      actorName: req.user.name,
+      actorRole: 'super_admin',
+      businessId: customer.business_id,
+      action: 'DELETE_CUSTOMER',
+      targetType: 'customer',
+      targetId: customer.id,
+      previousValue: `${customer.name} (${customer.phone})`,
+      newValue: 'DELETED',
+      reason: reason || 'Customer deleted by Super Admin',
+    });
     res.json({ success: true, deletedId: customer.id });
     return;
   }
@@ -4500,10 +5218,10 @@ app.get('/api/storefront/:slug', (req: Request, res: Response) => {
   const promotions = db.prepare('SELECT code, name, discount_type, discount_value, min_order_amount FROM promotions WHERE business_id = ? AND active = 1').all(business.id);
   const faqs = db.prepare('SELECT title, content FROM canned_replies WHERE business_id = ? AND is_faq = 1').all(business.id);
   const paymentMethods = db.prepare(
-    'SELECT id, method_name, account_name, account_number FROM business_payment_methods WHERE business_id = ? AND is_active = 1 ORDER BY sort_order ASC, created_at ASC'
+    'SELECT id, method_name, account_name, account_number, provider_type, instructions, qr_image_url FROM business_payment_methods WHERE business_id = ? AND is_active = 1 ORDER BY sort_order ASC, created_at ASC'
   ).all(business.id);
   const reviews = db.prepare(
-    'SELECT * FROM store_reviews WHERE business_id = ? ORDER BY created_at DESC LIMIT 60'
+    'SELECT * FROM store_reviews WHERE business_id = ? AND COALESCE(is_hidden, 0) = 0 ORDER BY created_at DESC LIMIT 60'
   ).all(business.id) as any[];
   const totalReviews = reviews.length;
   // A store with no reviews has no rating yet; never present an invented 5-star score.
@@ -4580,6 +5298,16 @@ app.post('/api/storefront/:slug/reviews', (req: Request, res: Response) => {
   const now = new Date().toISOString();
   const cleanProduct = String(product_name || '').trim().slice(0, 120);
   const cleanOrder = String(order_number || '').trim().slice(0, 60);
+
+  if (cleanOrder) {
+    const duplicateOrderReview = db.prepare(
+      'SELECT id FROM store_reviews WHERE business_id = ? AND order_number = ? LIMIT 1'
+    ).get(business.id, cleanOrder);
+    if (duplicateOrderReview) {
+      res.status(409).json({ error: 'A review has already been submitted for this order number.' });
+      return;
+    }
+  }
 
   // A customer-entered order number alone is not proof of purchase.
   // Mark the review verified only when the same customer has a paid or
@@ -4775,6 +5503,10 @@ app.post('/api/storefront/:slug/checkout', (req: Request, res: Response) => {
     discount_code,
     payment_method_id,
     source,
+    customer_tx_ref,
+    transaction_reference,
+    receipt_url,
+    customer_note,
   } = req.body;
 
   if (!String(customer_name || '').trim() || !String(customer_phone || '').trim() || !Array.isArray(items) || items.length === 0) {
@@ -4783,7 +5515,7 @@ app.post('/api/storefront/:slug/checkout', (req: Request, res: Response) => {
   }
 
   const paymentMethod = db.prepare(
-    'SELECT id, method_name, account_name, account_number FROM business_payment_methods WHERE id = ? AND business_id = ? AND is_active = 1'
+    'SELECT id, method_name, account_name, account_number, provider_type, instructions, qr_image_url FROM business_payment_methods WHERE id = ? AND business_id = ? AND is_active = 1'
   ).get(String(payment_method_id || ''), business.id) as any;
   if (!paymentMethod) {
     res.status(400).json({ error: 'Please choose an active payment method configured by this business.' });
@@ -4832,6 +5564,9 @@ app.post('/api/storefront/:slug/checkout', (req: Request, res: Response) => {
 
   const now = new Date().toISOString();
   const orderSource = source === 'web' ? 'web' : 'telegram';
+  const submittedTxRef = String(customer_tx_ref || transaction_reference || '').trim().slice(0, 160);
+  const submittedReceiptUrl = String(receipt_url || '').trim().slice(0, 500);
+  const submittedNote = String(customer_note || '').trim().slice(0, 500);
 
   try {
     const createOrder = db.transaction(() => {
@@ -4866,6 +5601,9 @@ app.post('/api/storefront/:slug/checkout', (req: Request, res: Response) => {
         business.id,
         String(customer_phone).trim()
       ) as any;
+      if (customer?.status === 'blocked') {
+        throw new Error('CUSTOMER_BLOCKED: This customer profile has been restricted from placing orders.');
+      }
       if (!customer) {
         const customerId = 'cus_' + crypto.randomBytes(4).toString('hex');
         db.prepare(`
@@ -4896,6 +5634,7 @@ app.post('/api/storefront/:slug/checkout', (req: Request, res: Response) => {
       } while (db.prepare('SELECT 1 FROM orders WHERE business_id = ? AND order_number = ? LIMIT 1').get(business.id, orderNumber));
       const orderPaymentStatus = 'pending_verification';
       const initialOrderStatus = 'pending';
+      const initialPaymentRecordStatus = submittedTxRef ? 'pending_verification' : 'initiated';
       db.prepare(`
         INSERT INTO orders (
           id, business_id, order_number, customer_id, customer_name, customer_phone,
@@ -4931,8 +5670,9 @@ app.post('/api/storefront/:slug/checkout', (req: Request, res: Response) => {
       db.prepare(`
         INSERT INTO payments (
           id, scope, business_id, reference_code, order_id, booking_id,
-          amount, currency, method, provider_tx_id, status, verified_at, verified_by, description, created_at
-        ) VALUES (?, 'business', ?, ?, ?, null, ?, 'ETB', ?, '', 'initiated', null, null, ?, ?)
+          amount, currency, method, provider_tx_id, customer_tx_ref, receipt_url, customer_note, submitted_at,
+          status, verified_at, verified_by, description, created_at
+        ) VALUES (?, 'business', ?, ?, ?, null, ?, 'ETB', ?, '', ?, ?, ?, ?, ?, null, null, ?, ?)
       `).run(
         paymentId,
         business.id,
@@ -4940,19 +5680,29 @@ app.post('/api/storefront/:slug/checkout', (req: Request, res: Response) => {
         orderId,
         total,
         paymentMethod.method_name,
+        submittedTxRef,
+        submittedReceiptUrl,
+        submittedNote,
+        submittedTxRef ? now : '',
+        initialPaymentRecordStatus,
         'Order ' + orderNumber + ' (' + paymentMethod.method_name + ')',
         now
       );
 
       db.prepare(`
-        INSERT INTO payment_instruction_snapshots (payment_id, payment_method_id, method_name, account_name, account_number, created_at)
-        VALUES (?, ?, ?, ?, ?, ?)
+        INSERT INTO payment_instruction_snapshots (
+          payment_id, payment_method_id, method_name, account_name, account_number,
+          provider_type, instructions, qr_image_url, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         paymentId,
         paymentMethod.id,
         paymentMethod.method_name,
         paymentMethod.account_name,
         paymentMethod.account_number,
+        paymentMethod.provider_type || 'bank_transfer',
+        paymentMethod.instructions || '',
+        paymentMethod.qr_image_url || '',
         now
       );
 
@@ -4981,16 +5731,22 @@ app.post('/api/storefront/:slug/checkout', (req: Request, res: Response) => {
 
       return {
         orderId,
+        paymentId,
         orderNumber,
         referenceCode: refCode,
         total,
         paymentStatus: orderPaymentStatus,
+        paymentRecordStatus: initialPaymentRecordStatus,
         orderStatus: initialOrderStatus,
+        customerTxRef: submittedTxRef,
         paymentMethod: {
           id: paymentMethod.id,
           methodName: paymentMethod.method_name,
           accountName: paymentMethod.account_name,
           accountNumber: paymentMethod.account_number,
+          providerType: paymentMethod.provider_type || 'bank_transfer',
+          instructions: paymentMethod.instructions || '',
+          qrImageUrl: paymentMethod.qr_image_url || '',
         },
       };
     });
@@ -5011,10 +5767,160 @@ app.post('/api/storefront/:slug/checkout', (req: Request, res: Response) => {
     res.status(201).json(result);
   } catch (err: any) {
     const message = err?.message || 'The order could not be submitted.';
-    const status = message.startsWith('STOCK_CHANGED:') ? 409 : 500;
-    res.status(status).json({ error: message.replace(/^STOCK_CHANGED:\s*/, '') });
+    const status = message.startsWith('STOCK_CHANGED:') ? 409 : message.startsWith('CUSTOMER_BLOCKED:') ? 403 : 500;
+    res.status(status).json({ error: message.replace(/^(STOCK_CHANGED|CUSTOMER_BLOCKED):\s*/, '') });
   }
-});// Submit Real Service Booking / Reservation
+});
+
+// Customer "I Have Paid" Manual Payment Submission / Resubmission
+app.post('/api/storefront/:slug/orders/:orderId/submit-payment', (req: Request, res: Response) => {
+  const business = db.prepare('SELECT * FROM businesses WHERE slug = ? OR id = ?').get(req.params.slug, req.params.slug) as any;
+  if (!business) {
+    res.status(404).json({ error: 'Business not found' });
+    return;
+  }
+  const order = db.prepare('SELECT * FROM orders WHERE (id = ? OR order_number = ?) AND business_id = ?').get(req.params.orderId, req.params.orderId, business.id) as any;
+  if (!order) {
+    res.status(404).json({ error: 'Order not found' });
+    return;
+  }
+  if (order.status === 'cancelled' || order.status === 'refunded') {
+    res.status(409).json({ error: `Cannot submit payment for a ${order.status} order.` });
+    return;
+  }
+  if (order.payment_status === 'paid') {
+    res.status(409).json({ error: 'This order is already marked as paid and verified.' });
+    return;
+  }
+
+  const payment = db.prepare('SELECT * FROM payments WHERE order_id = ? AND business_id = ? ORDER BY created_at DESC LIMIT 1').get(order.id, business.id) as any;
+  if (!payment) {
+    res.status(404).json({ error: 'Payment record not found for this order.' });
+    return;
+  }
+  if (payment.status === 'verified') {
+    res.status(409).json({ error: 'Payment has already been verified.' });
+    return;
+  }
+  if (payment.status === 'pending_verification' && payment.customer_tx_ref) {
+    res.status(409).json({ error: 'Payment proof is already submitted and awaiting seller verification.' });
+    return;
+  }
+
+  const txRef = String(req.body?.transaction_reference || req.body?.customer_tx_ref || '').trim();
+  const receiptUrl = String(req.body?.receipt_url || '').trim().slice(0, 500);
+  const customerNote = String(req.body?.customer_note || '').trim().slice(0, 500);
+  if (txRef.length < 3 || txRef.length > 160) {
+    res.status(400).json({ error: 'Please enter a valid payment transaction reference (3–160 characters).' });
+    return;
+  }
+
+  const now = new Date().toISOString();
+  db.prepare(`
+    UPDATE payments
+    SET status = 'pending_verification', customer_tx_ref = ?, receipt_url = ?, customer_note = ?, submitted_at = ?, rejection_reason = ''
+    WHERE id = ? AND business_id = ?
+  `).run(txRef, receiptUrl, customerNote, now, payment.id, business.id);
+
+  db.prepare(`
+    UPDATE orders
+    SET payment_status = 'pending_verification', rejection_reason = ''
+    WHERE id = ? AND business_id = ?
+  `).run(order.id, business.id);
+
+  recordBusinessNotification({
+    businessId: business.id,
+    type: 'payment',
+    tone: 'info',
+    title: `Payment Proof Submitted — ${order.order_number}`,
+    message: `${order.customer_name} submitted transfer ref "${txRef}" (${Number(order.total).toLocaleString()} ETB).`,
+    channel: 'telegram_and_web',
+    buttons: [
+      { label: 'Verify Payment', action: 'open_orders', variant: 'primary' },
+    ],
+  });
+
+  res.json({
+    submitted: true,
+    orderId: order.id,
+    orderNumber: order.order_number,
+    paymentId: payment.id,
+    paymentStatus: 'pending_verification',
+    transactionReference: txRef,
+  });
+});
+
+// Customer Order History & Status Lookup
+app.get('/api/storefront/:slug/orders', (req: Request, res: Response) => {
+  const business = db.prepare('SELECT id, name FROM businesses WHERE slug = ? OR id = ?').get(req.params.slug, req.params.slug) as any;
+  if (!business) {
+    res.status(404).json({ error: 'Business not found' });
+    return;
+  }
+  const phone = String(req.query.phone || '').trim();
+  const orderNumber = String(req.query.order_number || '').trim();
+  if (!phone && !orderNumber) {
+    res.status(400).json({ error: 'Customer phone or order number is required to look up orders.' });
+    return;
+  }
+
+  let rows: any[] = [];
+  if (phone && orderNumber) {
+    rows = db.prepare('SELECT * FROM orders WHERE business_id = ? AND customer_phone = ? AND order_number = ? ORDER BY created_at DESC').all(business.id, phone, orderNumber);
+  } else if (phone) {
+    rows = db.prepare('SELECT * FROM orders WHERE business_id = ? AND customer_phone = ? ORDER BY created_at DESC LIMIT 50').all(business.id, phone);
+  } else {
+    rows = db.prepare('SELECT * FROM orders WHERE business_id = ? AND (order_number = ? OR id = ?) ORDER BY created_at DESC LIMIT 10').all(business.id, orderNumber, orderNumber);
+  }
+
+  const enriched = rows.map((o) => {
+    const pay = db.prepare(`
+      SELECT p.id, p.reference_code, p.method, p.status, p.customer_tx_ref, p.provider_tx_id, p.receipt_url, p.customer_note, p.rejection_reason, p.verified_at,
+             snap.method_name, snap.account_name, snap.account_number, snap.instructions, snap.qr_image_url
+      FROM payments p
+      LEFT JOIN payment_instruction_snapshots snap ON snap.payment_id = p.id
+      WHERE p.order_id = ? AND p.business_id = ?
+      ORDER BY p.created_at DESC LIMIT 1
+    `).get(o.id, business.id) as any;
+    return {
+      ...o,
+      payment: pay || null,
+    };
+  });
+  res.json({ orders: enriched });
+});
+
+// Customer Cancellation of Pending Unpaid Order (Restores Reserved Stock)
+app.post('/api/storefront/:slug/orders/:orderId/cancel', (req: Request, res: Response) => {
+  const business = db.prepare('SELECT id FROM businesses WHERE slug = ? OR id = ?').get(req.params.slug, req.params.slug) as any;
+  if (!business) {
+    res.status(404).json({ error: 'Business not found' });
+    return;
+  }
+  const order = db.prepare('SELECT * FROM orders WHERE (id = ? OR order_number = ?) AND business_id = ?').get(req.params.orderId, req.params.orderId, business.id) as any;
+  if (!order) {
+    res.status(404).json({ error: 'Order not found' });
+    return;
+  }
+  const customerPhone = String(req.body?.customer_phone || '').trim();
+  if (customerPhone && order.customer_phone !== customerPhone) {
+    res.status(403).json({ error: 'Customer phone does not match this order.' });
+    return;
+  }
+  if (order.payment_status === 'paid' || order.status !== 'pending') {
+    res.status(409).json({ error: 'Only pending, unverified orders can be cancelled by the customer.' });
+    return;
+  }
+  const cancelTx = db.transaction(() => {
+    restoreReservedOrderStock(order, business.id);
+    db.prepare("UPDATE orders SET status = 'cancelled', payment_status = 'failed' WHERE id = ? AND business_id = ?").run(order.id, business.id);
+    db.prepare("UPDATE payments SET status = 'failed' WHERE order_id = ? AND business_id = ? AND status != 'verified'").run(order.id, business.id);
+  });
+  cancelTx();
+  res.json({ cancelled: true, orderId: order.id, status: 'cancelled' });
+});
+
+// Submit Real Service Booking / Reservation (With Capacity & Double-Booking Prevention)
 app.post('/api/storefront/:slug/book', (req: Request, res: Response) => {
   const business = db.prepare('SELECT * FROM businesses WHERE slug = ? OR id = ?').get(req.params.slug, req.params.slug) as any;
   if (!business) {
@@ -5025,61 +5931,169 @@ app.post('/api/storefront/:slug/book', (req: Request, res: Response) => {
   if (!allowStorefrontWrite(req, res, business)) return;
 
   const { service_id, customer_name, customer_phone, booking_date, booking_time, guests, notes } = req.body;
-  const service = db.prepare('SELECT * FROM services_listings WHERE id = ? AND business_id = ?').get(service_id, business.id) as any;
-  if (!service) {
-    res.status(404).json({ error: 'Service not found' });
+  if (!String(customer_name || '').trim() || !String(customer_phone || '').trim() || !String(booking_date || '').trim() || !String(booking_time || '').trim()) {
+    res.status(400).json({ error: 'Customer name, phone, booking date, and booking time are required.' });
     return;
   }
 
-  const bookingId = 'bkg_' + crypto.randomBytes(4).toString('hex');
-  let bookingNumber = '';
-  do {
-    bookingNumber = `BKG-${new Date().getFullYear()}-${crypto.randomBytes(4).toString('hex').toUpperCase()}`;
-  } while (db.prepare('SELECT 1 FROM bookings WHERE business_id = ? AND booking_number = ? LIMIT 1').get(business.id, bookingNumber));
+  const service = db.prepare('SELECT * FROM services_listings WHERE id = ? AND business_id = ?').get(service_id, business.id) as any;
+  if (!service || !Number(service.available)) {
+    res.status(404).json({ error: 'Service not found or currently unavailable.' });
+    return;
+  }
+
+  const requestedGuests = Number(guests ?? 1);
+  const maxCapacity = Math.max(1, Number(service.capacity || 1));
+  if (!Number.isInteger(requestedGuests) || requestedGuests < 1 || requestedGuests > maxCapacity) {
+    res.status(400).json({ error: `Guest count must be between 1 and ${maxCapacity} for this service.` });
+    return;
+  }
+
+  const cleanDate = String(booking_date).trim();
+  const cleanTime = String(booking_time).trim();
   const now = new Date().toISOString();
 
-  db.prepare(`
-    INSERT INTO bookings (
-      id, business_id, booking_number, service_id, service_name, customer_id,
-      customer_name, customer_phone, booking_date, booking_time, guests,
-      status, payment_status, amount, currency, notes, assigned_employee_id, created_at
-    ) VALUES (?, ?, ?, ?, ?, null, ?, ?, ?, ?, ?, 'requested', 'unpaid', ?, 'ETB', ?, null, ?)
-  `).run(
-    bookingId,
-    business.id,
-    bookingNumber,
-    service.id,
-    service.name,
-    customer_name,
-    customer_phone,
-    booking_date,
-    booking_time,
-    Number(guests || 1),
-    service.price * Number(guests || 1),
-    notes || '',
-    now
+  try {
+    const createBooking = db.transaction(() => {
+      const existingSlot = db.prepare(`
+        SELECT COALESCE(SUM(guests), 0) AS bookedGuests
+        FROM bookings
+        WHERE business_id = ? AND service_id = ? AND booking_date = ? AND booking_time = ?
+          AND status IN ('requested', 'confirmed')
+      `).get(business.id, service.id, cleanDate, cleanTime) as { bookedGuests: number };
+
+      if (Number(existingSlot?.bookedGuests || 0) + requestedGuests > maxCapacity) {
+        throw new Error('SLOT_UNAVAILABLE: This date and time slot is already booked to capacity. Please select another slot.');
+      }
+
+      const bookingId = 'bkg_' + crypto.randomBytes(4).toString('hex');
+      let bookingNumber = '';
+      do {
+        bookingNumber = `BKG-${new Date().getFullYear()}-${crypto.randomBytes(4).toString('hex').toUpperCase()}`;
+      } while (db.prepare('SELECT 1 FROM bookings WHERE business_id = ? AND booking_number = ? LIMIT 1').get(business.id, bookingNumber));
+
+      db.prepare(`
+        INSERT INTO bookings (
+          id, business_id, booking_number, service_id, service_name, customer_id,
+          customer_name, customer_phone, booking_date, booking_time, guests,
+          status, payment_status, amount, currency, notes, assigned_employee_id, created_at
+        ) VALUES (?, ?, ?, ?, ?, null, ?, ?, ?, ?, ?, 'requested', 'unpaid', ?, 'ETB', ?, null, ?)
+      `).run(
+        bookingId,
+        business.id,
+        bookingNumber,
+        service.id,
+        service.name,
+        String(customer_name).trim(),
+        String(customer_phone).trim(),
+        cleanDate,
+        cleanTime,
+        requestedGuests,
+        Number(service.price) * requestedGuests,
+        notes || '',
+        now
+      );
+
+      return {
+        bookingId,
+        bookingNumber,
+        serviceName: service.name,
+        bookingDate: cleanDate,
+        bookingTime: cleanTime,
+        status: 'requested',
+      };
+    });
+
+    const result = createBooking();
+    recordBusinessNotification({
+      businessId: business.id,
+      type: 'booking',
+      tone: 'info',
+      title: `New Booking Request ${result.bookingNumber} — ${service.name}`,
+      message: `${String(customer_name).trim()} requested ${service.name} on ${cleanDate} at ${cleanTime}.`,
+      channel: 'telegram_and_web',
+      buttons: [
+        { label: 'Manage Bookings', action: 'open_orders', variant: 'primary' },
+      ],
+    });
+
+    res.status(201).json(result);
+  } catch (err: any) {
+    const msg = err?.message || 'Booking could not be created.';
+    const status = msg.startsWith('SLOT_UNAVAILABLE:') ? 409 : 500;
+    res.status(status).json({ error: msg.replace(/^SLOT_UNAVAILABLE:\s*/, '') });
+  }
+});
+
+// Customer Booking Cancellation
+app.post('/api/storefront/:slug/bookings/:bookingId/cancel', (req: Request, res: Response) => {
+  const business = db.prepare('SELECT id FROM businesses WHERE slug = ? OR id = ?').get(req.params.slug, req.params.slug) as any;
+  if (!business) {
+    res.status(404).json({ error: 'Business not found' });
+    return;
+  }
+  const booking = db.prepare('SELECT * FROM bookings WHERE (id = ? OR booking_number = ?) AND business_id = ?').get(req.params.bookingId, req.params.bookingId, business.id) as any;
+  if (!booking) {
+    res.status(404).json({ error: 'Booking not found' });
+    return;
+  }
+  const customerPhone = String(req.body?.customer_phone || '').trim();
+  if (customerPhone && booking.customer_phone !== customerPhone) {
+    res.status(403).json({ error: 'Customer phone does not match this booking.' });
+    return;
+  }
+  if (booking.status === 'completed' || booking.status === 'cancelled') {
+    res.status(409).json({ error: `Booking is already ${booking.status}.` });
+    return;
+  }
+  db.prepare("UPDATE bookings SET status = 'cancelled', cancelled_at = ? WHERE id = ? AND business_id = ?").run(
+    new Date().toISOString(),
+    booking.id,
+    business.id
   );
+  res.json({ cancelled: true, bookingId: booking.id, status: 'cancelled' });
+});
 
-  recordBusinessNotification({
-    businessId: business.id,
-    type: 'booking',
-    tone: 'info',
-    title: `New Booking Request ${bookingNumber} — ${service.name}`,
-    message: `${customer_name} requested ${service.name} on ${booking_date} at ${booking_time}.`,
-    channel: 'telegram_and_web',
-    buttons: [
-      { label: 'Manage Bookings', action: 'open_orders', variant: 'primary' },
-    ],
-  });
-
-  res.status(201).json({
-    bookingId,
-    bookingNumber,
-    serviceName: service.name,
-    bookingDate: booking_date,
-    bookingTime: booking_time,
-    status: 'requested',
-  });
+// Per-Business Telegram Webhook Receiver (Validates Secret Token & Dispatches Support/Command Updates)
+app.post('/api/telegram/webhook/:businessId', (req: Request, res: Response) => {
+  const business = db.prepare('SELECT id, name, telegram_webhook_secret FROM businesses WHERE id = ? OR slug = ?').get(req.params.businessId, req.params.businessId) as any;
+  if (!business) {
+    res.status(404).json({ error: 'Business not found' });
+    return;
+  }
+  if (business.telegram_webhook_secret) {
+    const headerSecret = String(req.headers['x-telegram-bot-api-secret-token'] || '');
+    if (headerSecret !== business.telegram_webhook_secret) {
+      res.status(401).json({ error: 'Invalid Telegram webhook secret token.' });
+      return;
+    }
+  }
+  const update = req.body || {};
+  const msg = update.message;
+  if (msg && msg.text) {
+    const senderName = [msg.from?.first_name, msg.from?.last_name].filter(Boolean).join(' ') || msg.from?.username || 'Telegram User';
+    const chatId = String(msg.chat?.id || 'tg_webhook');
+    const text = String(msg.text).trim();
+    const now = new Date().toISOString();
+    let conv = db.prepare('SELECT * FROM support_conversations WHERE business_id = ? AND telegram_chat_id = ? LIMIT 1').get(business.id, chatId) as any;
+    if (!conv) {
+      const convId = 'cnv_' + crypto.randomBytes(4).toString('hex');
+      db.prepare(`
+        INSERT INTO support_conversations (
+          id, scope, business_id, customer_id, customer_name, telegram_chat_id,
+          channel, subject, status, assigned_employee_id, unread_count, first_response_mins, created_at, updated_at
+        ) VALUES (?, 'business', ?, null, ?, ?, 'telegram_bot', 'Telegram Bot Message', 'open', null, 1, null, ?, ?)
+      `).run(convId, business.id, senderName, chatId, now, now);
+      conv = { id: convId };
+    } else {
+      db.prepare("UPDATE support_conversations SET unread_count = unread_count + 1, status = 'open', updated_at = ? WHERE id = ?").run(now, conv.id);
+    }
+    db.prepare(`
+      INSERT INTO support_messages (id, conversation_id, sender_type, sender_name, body, is_internal_note, created_at)
+      VALUES (?, ?, 'customer', ?, ?, 0, ?)
+    `).run('msg_' + crypto.randomBytes(4).toString('hex'), conv.id, senderName, text, now);
+  }
+  res.json({ ok: true });
 });
 
 // Customer Support Message from Storefront / Telegram Mini App
@@ -5138,6 +6152,8 @@ app.post('/api/storefront/:slug/support', (req: Request, res: Response) => {
   res.status(201).json({ conversationId: convId, autoReplied: Boolean(matchedAuto), autoReplyText: matchedAuto?.content });
 });
 
+export { app };
+
 async function startServer() {
   const configuredPort = Number(process.env.PORT || 3000);
   const PORT = Number.isInteger(configuredPort) && configuredPort > 0 && configuredPort <= 65535 ? configuredPort : 3000;
@@ -5160,4 +6176,10 @@ async function startServer() {
   });
 }
 
-startServer();
+if (
+  process.env.TELEBIZ_TEST_MODE !== '1' &&
+  process.env.NODE_ENV !== 'test' &&
+  !process.env.VITEST
+) {
+  startServer();
+}

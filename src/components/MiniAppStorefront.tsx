@@ -524,6 +524,13 @@ export const MiniAppStorefront: React.FC<StorefrontProps> = ({
   const [bookingError, setBookingError] = useState('');
   const [submittingBooking, setSubmittingBooking] = useState(false);
 
+  // Manual payment transfer proof state
+  const [customerTxRef, setCustomerTxRef] = useState('');
+  const [customerPaymentNote, setCustomerPaymentNote] = useState('');
+  const [submittingPaymentProof, setSubmittingPaymentProof] = useState(false);
+  const [paymentProofNotice, setPaymentProofNotice] = useState('');
+  const [paymentProofError, setPaymentProofError] = useState('');
+
   // Support state
   const [supportSubject, setSupportSubject] = useState('');
   const [supportMessage, setSupportMessage] = useState('');
@@ -984,6 +991,8 @@ export const MiniAppStorefront: React.FC<StorefrontProps> = ({
           items: cart,
           discount_code: discountCode,
           payment_method_id: selectedPaymentMethodId,
+          customer_tx_ref: customerTxRef.trim(),
+          customer_note: customerPaymentNote.trim(),
           source: channelSource,
         }),
       });
@@ -993,6 +1002,12 @@ export const MiniAppStorefront: React.FC<StorefrontProps> = ({
         return;
       }
       setOrderResult(json);
+      setPaymentProofNotice(
+        customerTxRef.trim()
+          ? `Transfer reference ${customerTxRef.trim()} submitted for seller verification.`
+          : ''
+      );
+      setPaymentProofError('');
       setCart([]);
       setCheckoutOpen(false);
       setDiscountCode('');
@@ -1002,6 +1017,48 @@ export const MiniAppStorefront: React.FC<StorefrontProps> = ({
       setOrderError('We could not reach the store. Please check your connection and try again.');
     } finally {
       setSubmittingOrder(false);
+    }
+  };
+
+  const handleSubmitPaymentProof = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!orderResult?.orderId) return;
+    if (!customerTxRef.trim()) {
+      setPaymentProofError('Please enter your transfer reference or transaction ID.');
+      return;
+    }
+    setPaymentProofError('');
+    setPaymentProofNotice('');
+    setSubmittingPaymentProof(true);
+    try {
+      const res = await fetch(`/api/storefront/${slug}/orders/${orderResult.orderId}/submit-payment`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          customer_tx_ref: customerTxRef.trim(),
+          customer_note: customerPaymentNote.trim(),
+        }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setPaymentProofError(json.error || 'Could not submit payment proof.');
+        return;
+      }
+      setOrderResult((prev: any) =>
+        prev
+          ? {
+              ...prev,
+              paymentStatus: json.paymentStatus || 'pending_verification',
+              customerTxRef: json.customerTxRef || customerTxRef.trim(),
+            }
+          : prev
+      );
+      setPaymentProofNotice('Payment proof submitted! The store owner has been notified to verify your transfer.');
+      if (onOrderCreated) onOrderCreated();
+    } catch {
+      setPaymentProofError('Network error while submitting payment proof.');
+    } finally {
+      setSubmittingPaymentProof(false);
     }
   };
 
@@ -2195,6 +2252,50 @@ export const MiniAppStorefront: React.FC<StorefrontProps> = ({
                   </div>
                 )}
 
+                {/* I Have Paid — Submit / Update Manual Transfer Reference */}
+                <form
+                  onSubmit={handleSubmitPaymentProof}
+                  className="mt-3 rounded-xl border border-emerald-200 bg-white p-3 text-xs space-y-2"
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-1">
+                    <span className="font-bold text-slate-900">
+                      Submit Transfer Proof (&quot;I Have Paid&quot;)
+                    </span>
+                    <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-900">
+                      Status: {String(orderResult.paymentStatus || 'pending_verification').replace(/_/g, ' ')}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+                    <input
+                      type="text"
+                      value={customerTxRef}
+                      onChange={(e) => setCustomerTxRef(e.target.value)}
+                      placeholder="Transfer Ref / FT / SMS ID *"
+                      className="rounded-lg border border-stone-200 bg-[#FAF8F5] px-3 py-2 font-mono text-xs text-slate-900"
+                    />
+                    <input
+                      type="text"
+                      value={customerPaymentNote}
+                      onChange={(e) => setCustomerPaymentNote(e.target.value)}
+                      placeholder="Sender name or note (optional)"
+                      className="rounded-lg border border-stone-200 bg-[#FAF8F5] px-3 py-2 text-xs text-slate-900"
+                    />
+                    <button
+                      type="submit"
+                      disabled={submittingPaymentProof}
+                      className="rounded-lg bg-emerald-700 px-3 py-2 text-xs font-extrabold text-white hover:bg-emerald-800 disabled:opacity-50"
+                    >
+                      {submittingPaymentProof ? 'Submitting...' : 'I Have Paid — Submit Ref'}
+                    </button>
+                  </div>
+                  {paymentProofNotice && (
+                    <div className="text-[11px] font-bold text-emerald-700">{paymentProofNotice}</div>
+                  )}
+                  {paymentProofError && (
+                    <div className="text-[11px] font-bold text-rose-700">{paymentProofError}</div>
+                  )}
+                </form>
+
                 {/* Post-Purchase 1-to-5 Star Quick Review Prompt */}
                 <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-amber-200 bg-amber-50/90 px-3.5 py-2.5 text-xs text-amber-950">
                   <div className="flex items-center gap-2">
@@ -3305,8 +3406,24 @@ export const MiniAppStorefront: React.FC<StorefrontProps> = ({
                                   </button>
                                 </div>
                                 <p className="text-[11px] leading-4 text-stone-500">
-                                  After transferring, click <strong>&quot;I Have Transferred & Paid&quot;</strong> below. The store owner will instantly receive your payment request with receipt verification.
+                                  After transferring, enter your transfer reference below and click <strong>&quot;I Have Transferred & Paid&quot;</strong>. The store owner will verify your payment before fulfillment.
                                 </p>
+                                <div className="grid grid-cols-1 gap-2 pt-1">
+                                  <input
+                                    type="text"
+                                    value={customerTxRef}
+                                    onChange={(e) => setCustomerTxRef(e.target.value)}
+                                    placeholder="Transfer Reference / Transaction ID (Optional at checkout)"
+                                    className="w-full rounded-xl border border-stone-200 bg-[#FAF8F5] px-3 py-2 font-mono text-xs text-slate-900"
+                                  />
+                                  <input
+                                    type="text"
+                                    value={customerPaymentNote}
+                                    onChange={(e) => setCustomerPaymentNote(e.target.value)}
+                                    placeholder="Payment note or sender account name (Optional)"
+                                    className="w-full rounded-xl border border-stone-200 bg-[#FAF8F5] px-3 py-2 text-xs text-slate-900"
+                                  />
+                                </div>
                               </div>
                             );
                           })()}

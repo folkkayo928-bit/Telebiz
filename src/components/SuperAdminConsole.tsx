@@ -192,6 +192,7 @@ export const SuperAdminConsole: React.FC<SuperAdminProps> = ({
     allEmployees = [],
     auditLogs = [],
     platformSupport = [],
+    pendingPlatformPayments = [],
   } = data;
 
   const availableCategories: string[] = Array.from(
@@ -351,6 +352,37 @@ export const SuperAdminConsole: React.FC<SuperAdminProps> = ({
     }
   };
 
+  const handleVerifyPlatformPayment = async (payment: any, action: 'verify' | 'reject') => {
+    setActionError('');
+    setActionFeedback('');
+    const res = await fetch(`/api/superadmin/payments/${payment.id}/verify`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: 'Bearer ' + authToken,
+      },
+      body: JSON.stringify({
+        action,
+        reason:
+          action === 'verify'
+            ? `Verified platform ${payment.payment_type} transfer (${payment.transaction_reference || payment.id})`
+            : `Rejected unverified platform ${payment.payment_type} transfer`,
+      }),
+    });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      setActionError(json.error || 'Could not process platform payment verification.');
+    } else {
+      setActionFeedback(
+        action === 'verify'
+          ? `Verified platform payment for ${payment.business_name || payment.business_id} and activated service.`
+          : `Rejected platform payment for ${payment.business_name || payment.business_id}.`
+      );
+      await fetchOverview();
+      onRefreshBusinesses();
+    }
+  };
+
   const metricCards = [
     {
       label: 'Registered businesses',
@@ -461,6 +493,56 @@ export const SuperAdminConsole: React.FC<SuperAdminProps> = ({
             Dismiss
           </button>
         </div>
+      )}
+
+      {pendingPlatformPayments.length > 0 && (
+        <section className={panelClass + ' p-4 sm:p-5 border-amber-300 dark:border-amber-800'}>
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-3">
+            <div>
+              <h2 className="text-sm font-bold text-slate-950 dark:text-white">
+                Pending Platform Subscription &amp; Add-on Transfers ({pendingPlatformPayments.length})
+              </h2>
+              <p className="text-xs text-slate-500">
+                Verify manual transfer references before activating paid subscriptions or add-on services.
+              </p>
+            </div>
+          </div>
+          <div className="divide-y divide-slate-100 dark:divide-slate-800">
+            {pendingPlatformPayments.map((pmt: any) => (
+              <div key={pmt.id} className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 py-3 text-xs">
+                <div className="space-y-0.5">
+                  <div className="font-bold text-slate-900 dark:text-white">
+                    {pmt.business_name || pmt.business_id} ·{' '}
+                    <span className="uppercase text-indigo-600 dark:text-indigo-400">{pmt.payment_type}</span>
+                  </div>
+                  <div className="text-slate-500">
+                    Amount: <strong>{Number(pmt.amount || 0).toLocaleString()} {pmt.currency || 'ETB'}</strong> · Method:{' '}
+                    <span className="font-semibold">{pmt.method}</span> · Ref:{' '}
+                    <span className="font-mono font-bold text-slate-800 dark:text-slate-200">
+                      {pmt.customer_tx_ref || pmt.transaction_reference || 'N/A'}
+                    </span>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => handleVerifyPlatformPayment(pmt, 'verify')}
+                    className="rounded-xl bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-500"
+                  >
+                    Verify &amp; Activate
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleVerifyPlatformPayment(pmt, 'reject')}
+                    className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-1.5 text-xs font-semibold text-rose-700 hover:bg-rose-100"
+                  >
+                    Reject
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
       )}
 
       <section className="space-y-4">

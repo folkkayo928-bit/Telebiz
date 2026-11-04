@@ -364,6 +364,10 @@ export default function App() {
   const [expandedCatalogBizId, setExpandedCatalogBizId] = useState<string | null>(null);
   const [orderStatusFilter, setOrderStatusFilter] = useState<'all' | 'payment_requests' | 'finished' | 'rejected'>('all');
   const [roleGuideModalOpen, setRoleGuideModalOpen] = useState(false);
+  const [rejectionReasonInput, setRejectionReasonInput] = useState('');
+  const [platformPaymentTxRef, setPlatformPaymentTxRef] = useState('');
+  const [subscriptionNotice, setSubscriptionNotice] = useState('');
+  const [subscriptionError, setSubscriptionError] = useState('');
 
   const t = translations[lang] || translations.en;
 
@@ -1831,7 +1835,9 @@ export default function App() {
   const handleVerifyPayment = async (
     paymentId: string,
     action: 'verify' | 'fail' | 'refund',
-    providerTxId?: string
+    providerTxId?: string,
+    rejectionReason?: string,
+    cancelOrder = false
   ) => {
     if (action === 'verify' && String(providerTxId || '').trim().length < 3) {
       setOrderManagementError('Enter the real transaction reference after confirming the payment was received.');
@@ -1843,7 +1849,12 @@ export default function App() {
       const res = await fetch(`/api/businesses/${selectedBusinessId}/payments/${paymentId}/verify`, {
         method: 'POST',
         headers: headersWithAuth(),
-        body: JSON.stringify({ action, provider_tx_id: providerTxId }),
+        body: JSON.stringify({
+          action,
+          provider_tx_id: providerTxId,
+          rejection_reason: rejectionReason || rejectionReasonInput || 'Payment transfer could not be verified by seller.',
+          cancel_order: cancelOrder,
+        }),
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -1852,13 +1863,14 @@ export default function App() {
       }
       setVerificationPaymentId('');
       setVerificationReference('');
+      setRejectionReasonInput('');
       await loadTenantWorkspace(selectedBusinessId);
       setStatusBanner(
         action === 'verify'
           ? 'Payment verified and order marked as paid.'
           : action === 'refund'
           ? 'Payment refund recorded.'
-          : 'Payment marked as failed.'
+          : 'Payment marked as rejected/failed.'
       );
     } catch (err: any) {
       setOrderManagementError(err.message || 'Network error. Payment status was not changed.');
@@ -2446,30 +2458,69 @@ export default function App() {
   };
 
   const handleChangePlan = async (planId: string, cycle: 'monthly' | 'yearly') => {
+    setSubscriptionError('');
+    setSubscriptionNotice('');
+    if (planId !== 'free' && platformPaymentTxRef.trim().length < 3) {
+      setSubscriptionError('Enter your bank / Telebirr transfer reference above (at least 3 characters) before requesting a paid subscription upgrade.');
+      return;
+    }
     const res = await fetch(`/api/businesses/${selectedBusinessId}/subscription`, {
       method: 'POST',
       headers: headersWithAuth(),
-      body: JSON.stringify({ plan_id: planId, billing_cycle: cycle, payment_method: 'telebirr' }),
+      body: JSON.stringify({
+        plan_id: planId,
+        billing_cycle: cycle,
+        payment_method: 'telebirr',
+        reference_code: platformPaymentTxRef.trim(),
+      }),
     });
-    if (res.ok) {
-      loadTenantWorkspace(selectedBusinessId);
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      setSubscriptionError(data.error || 'Could not submit subscription request.');
+      return;
+    }
+    setPlatformPaymentTxRef('');
+    loadTenantWorkspace(selectedBusinessId);
+    if (data.pendingSubscriptionPayment) {
+      const msg = `Subscription upgrade request (${planId.toUpperCase()} - ${cycle}) submitted with ref "${data.pendingSubscriptionPayment.submittedReference}". Status: Pending Super Admin Verification.`;
+      setSubscriptionNotice(msg);
+      setStatusBanner(msg);
+    } else {
+      setSubscriptionNotice(`Updated subscription plan to ${planId.toUpperCase()} (${cycle}).`);
       setStatusBanner(`Updated subscription plan to ${planId.toUpperCase()} (${cycle}).`);
     }
   };
 
-  const handleToggleAddon = async (addonId: string, isCurrentlyActive: boolean) => {
+  const handleToggleAddon = async (addonId: string, isCurrentlyActive: boolean, monthlyPrice = 0) => {
+    setSubscriptionError('');
+    setSubscriptionNotice('');
+    if (!isCurrentlyActive && monthlyPrice > 0 && platformPaymentTxRef.trim().length < 3) {
+      setSubscriptionError('Enter your bank / Telebirr transfer reference above (at least 3 characters) before requesting activation of a paid add-on.');
+      return;
+    }
     const res = await fetch(`/api/businesses/${selectedBusinessId}/addons/toggle`, {
       method: 'POST',
       headers: headersWithAuth(),
       body: JSON.stringify({
         addon_id: addonId,
         action: isCurrentlyActive ? 'disable' : 'activate',
+        reference_code: platformPaymentTxRef.trim(),
       }),
     });
-    if (res.ok) {
-      loadTenantWorkspace(selectedBusinessId);
-      setStatusBanner(isCurrentlyActive ? 'Disabled add-on.' : 'Activated add-on service.');
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      setSubscriptionError(data.error || 'Could not update add-on status.');
+      return;
     }
+    setPlatformPaymentTxRef('');
+    loadTenantWorkspace(selectedBusinessId);
+    const msg = isCurrentlyActive
+      ? 'Disabled add-on.'
+      : monthlyPrice > 0
+      ? 'Add-on payment proof submitted. Status: Pending Super Admin Verification.'
+      : 'Activated add-on service.';
+    setSubscriptionNotice(msg);
+    setStatusBanner(msg);
   };
 
   const handleExportCsvReport = () => {
@@ -4925,16 +4976,31 @@ export default function App() {
                               <div className="mt-1 text-[11px] text-slate-500">{pay.description}</div>
                               {pay.payment_account_name && <div className="mt-2 text-[11px] text-slate-500">Account holder: {pay.payment_account_name}</div>}
                               {pay.payment_account_number && <div className="mt-0.5 break-all font-mono text-[11px] text-slate-600 dark:text-slate-400">Account: {pay.payment_account_number}</div>}
+                              {(pay.customer_tx_ref || pay.provider_tx_id) && (
+                                <div className="mt-1.5 rounded-lg bg-sky-50 px-2.5 py-1.5 font-mono text-[11px] font-semibold text-sky-900 dark:bg-sky-950/40 dark:text-sky-300">
+                                  Customer/Verified Ref: {pay.provider_tx_id || pay.customer_tx_ref}
+                                </div>
+                              )}
+                              {pay.customer_note && (
+                                <div className="mt-1 text-[11px] text-slate-600 dark:text-slate-400">
+                                  Customer note: “{pay.customer_note}”
+                                </div>
+                              )}
+                              {pay.rejection_reason && (
+                                <div className="mt-1 text-[11px] font-medium text-rose-600 dark:text-rose-400">
+                                  Rejection reason: {pay.rejection_reason}
+                                </div>
+                              )}
                               <span className={`mt-2 inline-flex rounded-full px-2.5 py-1 text-[10px] font-semibold ${pay.status === 'verified' ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300' : pay.status === 'failed' ? 'bg-rose-50 text-rose-700 dark:bg-rose-950/40 dark:text-rose-300' : 'bg-amber-50 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300'}`}>{String(pay.status).toUpperCase()}</span>
                             </div>
                             <div className="flex shrink-0 flex-wrap gap-2">
-                              {pay.status !== 'verified' && (
-                                <button type="button" disabled={verificationSaving} onClick={() => { setVerificationPaymentId(verificationPaymentId === pay.id ? '' : pay.id); setVerificationReference(''); setOrderManagementError(''); }} className="rounded-lg bg-slate-950 px-3 py-2 text-[11px] font-semibold text-white transition hover:bg-slate-800 disabled:opacity-50 dark:bg-white dark:text-slate-950">
+                              {pay.status !== 'verified' && pay.status !== 'refunded' && (
+                                <button type="button" disabled={verificationSaving} onClick={() => { setVerificationPaymentId(verificationPaymentId === pay.id ? '' : pay.id); setVerificationReference(pay.customer_tx_ref || pay.provider_tx_id || ''); setOrderManagementError(''); }} className="rounded-lg bg-slate-950 px-3 py-2 text-[11px] font-semibold text-white transition hover:bg-slate-800 disabled:opacity-50 dark:bg-white dark:text-slate-950">
                                   Verify receipt
                                 </button>
                               )}
-                              {pay.status === 'pending' && (
-                                <button type="button" disabled={verificationSaving} onClick={() => handleVerifyPayment(pay.id, 'fail')} className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-[11px] font-semibold text-rose-700 hover:bg-rose-100 disabled:opacity-50 dark:border-rose-900/50 dark:bg-rose-950/30 dark:text-rose-300">
+                              {['initiated', 'pending', 'pending_verification'].includes(String(pay.status)) && (
+                                <button type="button" disabled={verificationSaving} onClick={() => handleVerifyPayment(pay.id, 'fail', undefined, rejectionReasonInput || 'Payment proof could not be verified by seller.', false)} className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-[11px] font-semibold text-rose-700 hover:bg-rose-100 disabled:opacity-50 dark:border-rose-900/50 dark:bg-rose-950/30 dark:text-rose-300">
                                   Reject request
                                 </button>
                               )}
@@ -6228,6 +6294,36 @@ export default function App() {
             {/* MODULE 10: SUBSCRIPTIONS & ADD-ON MARKETPLACE */}
             {activeModule === 'subscriptions' && workspace && (
               <div className="space-y-6">
+                <div className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900 space-y-3">
+                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                    <div>
+                      <h3 className="text-sm font-display font-bold text-slate-900 dark:text-white">
+                        Manual Platform Billing Transfer Reference
+                      </h3>
+                      <p className="text-xs text-slate-500">
+                        Paid subscriptions and add-ons require a real Telebirr / CBE Birr / bank transfer reference and are activated once verified by a Platform Administrator.
+                      </p>
+                    </div>
+                    <input
+                      type="text"
+                      value={platformPaymentTxRef}
+                      onChange={(e) => setPlatformPaymentTxRef(e.target.value)}
+                      placeholder="Enter transfer ref (e.g. FT26309ABC)"
+                      className="w-full sm:w-72 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 px-3 py-2 text-xs font-mono"
+                    />
+                  </div>
+                  {subscriptionError && (
+                    <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-medium text-rose-700 dark:border-rose-900/50 dark:bg-rose-950/30 dark:text-rose-300">
+                      {subscriptionError}
+                    </div>
+                  )}
+                  {subscriptionNotice && (
+                    <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-medium text-emerald-800 dark:border-emerald-900/50 dark:bg-emerald-950/30 dark:text-emerald-300">
+                      {subscriptionNotice}
+                    </div>
+                  )}
+                </div>
+
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   {[
                     {
@@ -6302,7 +6398,8 @@ export default function App() {
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                     {marketplaceAddons.map((addon: any) => {
                       const activeRecord = workspace.activeAddons?.find((a: any) => a.addon_id === addon.id);
-                      const isActive = Boolean(activeRecord);
+                      const isActive = Boolean(activeRecord && activeRecord.status === 'active');
+                      const isPending = Boolean(activeRecord && activeRecord.status === 'pending_verification');
                       return (
                         <div
                           key={addon.id}
@@ -6321,14 +6418,16 @@ export default function App() {
                             </span>
                             <button
                               type="button"
-                              onClick={() => handleToggleAddon(addon.id, isActive)}
+                              onClick={() => handleToggleAddon(addon.id, isActive || isPending, Number(addon.monthly_price || 0))}
                               className={`px-3 py-1.5 rounded-lg font-semibold ${
                                 isActive
                                   ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
+                                  : isPending
+                                  ? 'bg-amber-50 text-amber-800 border border-amber-200'
                                   : 'bg-sky-600 text-white'
                               }`}
                             >
-                              {isActive ? `Active (${activeRecord.status})` : 'Activate Add-On'}
+                              {isActive ? 'Active (Disable)' : isPending ? 'Pending Verification (Cancel)' : 'Request Add-On'}
                             </button>
                           </div>
                         </div>
@@ -6347,14 +6446,20 @@ export default function App() {
                   loadAccountAndBusinesses();
                   loadTenantWorkspace(selectedBusinessId);
                 }}
-                onPreviewBusiness={(bizId) => {
-                  setSelectedBusinessId(bizId);
-                  setStorefrontCustomerOnly(false);
-                  setFullStorefrontOpen(true);
+                onPreviewBusiness={(bizOrId: any) => {
+                  const resolvedId = typeof bizOrId === 'string' ? bizOrId : bizOrId?.id;
+                  if (resolvedId) {
+                    setSelectedBusinessId(resolvedId);
+                    setStorefrontCustomerOnly(false);
+                    setFullStorefrontOpen(true);
+                  }
                 }}
-                onEditBusinessCatalog={(bizId) => {
-                  setSelectedBusinessId(bizId);
-                  setActiveModule('commerce');
+                onEditBusinessCatalog={(bizOrId: any) => {
+                  const resolvedId = typeof bizOrId === 'string' ? bizOrId : bizOrId?.id;
+                  if (resolvedId) {
+                    setSelectedBusinessId(resolvedId);
+                    setActiveModule('commerce');
+                  }
                 }}
                 onOpenCreateBusiness={() => setNewBizModalOpen(true)}
               />
