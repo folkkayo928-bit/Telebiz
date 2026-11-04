@@ -30,6 +30,7 @@
     "dist",
     "src/db/database.test.ts",
     "src/lib/storeTheme.test.ts",
-    "src/lib/paymentState.test.ts"
+    "src/lib/paymentState.test.ts",
+    "src/lib/employeeAccess.test.ts"
   ]
 }

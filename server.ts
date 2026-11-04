@@ -8,6 +8,7 @@ import path from 'path';
 import { GoogleGenAI, Type } from '@google/genai';
 import { normalizeStoreTheme, validateBuilderPayload } from './src/lib/storeTheme.ts';
 import { paymentActionError } from './src/lib/paymentState.ts';
+import { EMPLOYEE_ROLES, normalizeEmployeePermissions, defaultEmployeePermissions } from './src/lib/employeeAccess.ts';
 import {
   db,
   initDatabase,
@@ -252,14 +253,21 @@ function verifyTenantAccess(user: AuthUser | undefined, businessId: string, requ
     return { allowed: false, error: 'Cross-tenant access denied: Store owners can only view and manage their own stores.' };
   }
 
-  if (requiredPermission) {
-    const perms: string[] = JSON.parse(emp.permissions_json || '[]');
-    if (!perms.includes('all') && !perms.includes(requiredPermission)) {
-      return { allowed: false, error: `Insufficient role permissions: requires '${requiredPermission}'` };
-    }
+  let perms: string[] = [];
+  try {
+    const parsed = JSON.parse(emp.permissions_json || '[]');
+    if (Array.isArray(parsed)) perms = parsed.filter((permission: unknown): permission is string => typeof permission === 'string');
+  } catch {
+    perms = [];
+  }
+  if (requiredPermission && !perms.includes('all') && !perms.includes(requiredPermission)) {
+    return { allowed: false, error: `Insufficient role permissions: requires '${requiredPermission}'` };
   }
 
-  return { allowed: true, business, role: emp.role };
+  // Employee role values are tenant-scoped only. Never let a stored/custom
+  // role string impersonate the platform owner or business owner.
+  const safeEmployeeRole = (EMPLOYEE_ROLES as readonly string[]).includes(emp.role) ? emp.role : 'sales';
+  return { allowed: true, business, role: safeEmployeeRole };
 }
 
 // Public storefront mutations must respect publication and business status.
@@ -3760,83 +3768,67 @@ app.get('/api/businesses/:id/analytics', (req: Request, res: Response) => {
 
 app.post('/api/businesses/:id/employees', (req: Request, res: Response) => {
   const access = verifyTenantAccess(req.user, req.params.id);
-  if (!access.allowed || (access.role !== 'owner' && access.role !== 'admin' && access.role !== 'super_admin')) {
-    res.status(403).json({ error: 'Only Business Owners or Administrators can manage employees.' });
-    return;
-  }
-
-  const { name, email, role, permissions, branch_id, shift } = req.body;
-  if (!name || !email || !role) {
-    res.status(400).json({ error: 'Employee name, email, and role are required' });
-    return;
-  }
-
-  const empId = 'emp_' + crypto.randomBytes(4).toString('hex');
-  db.prepare(`
-    INSERT INTO employees (id, business_id, user_id, name, email, role, permissions_json, branch_id, schedule_json, status, created_at)
-    VALUES (?, ?, null, ?, ?, ?, ?, ?, ?, 'invited', ?)
-  `).run(
-    empId,
-    req.params.id,
-    name,
-    email,
-    role,
-    JSON.stringify(permissions || ['orders.view', 'support.reply']),
-    branch_id || null,
-    JSON.stringify({ shift: shift || 'Mon-Fri 08:30-17:30' }),
-    new Date().toISOString()
+  if (!access.allowed || (access.role !== 'owner' && access.role !== 'admin' && access.role !== 'super_admin')) return res.status(403).json({ error: 'Only Business Owners or Administrators can manage employees.' });
+  const name = String(req.body?.name || '').trim();
+  const email = String(req.body?.email || '').trim().toLowerCase();
+  const role = String(req.body?.role || '').trim();
+  if (name.length < 2 || name.length > 120 || !/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email) || !(EMPLOYEE_ROLES as readonly string[]).includes(role)) return res.status(400).json({ error: 'Enter a valid employee name, email and supported role.' });
+  const defaults = defaultEmployeePermissions(role);
+  const permissions = req.body?.permissions === undefined ? defaults : normalizeEmployeePermissions(req.body.permissions, access.role === 'owner' || access.role === 'super_admin');
+  if (!permissions) return res.status(400).json({ error: 'One or more employee permissions are invalid.' });
+  if (access.role === 'admin' && permissions.includes('all')) return res.status(403).json({ error: 'Only the Business Owner can grant all permissions.' });
+  const branchId = req.body?.branch_id ? String(req.body.branch_id) : '';
+  if (branchId && !db.prepare('SELECT id FROM business_branches WHERE id = ? AND business_id = ?').get(branchId, req.params.id)) return res.status(400).json({ error: 'The selected branch does not belong to this business.' });
+  const duplicate = db.prepare("SELECT id FROM employees WHERE business_id = ? AND LOWER(email) = ? AND status IN ('active', 'invited') LIMIT 1").get(req.params.id, email);
+  if (duplicate) return res.status(409).json({ error: 'An active or pending employee invitation already exists for this email.' });
+  const inviteToken = crypto.randomBytes(32).toString('hex');
+  const inviteHash = crypto.createHash('sha256').update(inviteToken).digest('hex');
+  const expiresAt = new Date(Date.now() + 7 * 86400000).toISOString();
+  const empId = 'emp_' + crypto.randomBytes(8).toString('hex');
+  db.prepare('INSERT INTO employees (id, business_id, user_id, name, email, role, permissions_json, branch_id, schedule_json, status, invite_token_hash, invite_expires_at, created_at) VALUES (?, ?, null, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(
+    empId, req.params.id, name, email, role, JSON.stringify(permissions), branchId || null,
+    JSON.stringify({ shift: String(req.body?.shift || 'Mon-Fri 08:30-17:30').slice(0, 80) }), 'invited', inviteHash, expiresAt, new Date().toISOString()
   );
-
-  recordAuditLog({
-    actorUserId: req.user!.id,
-    actorName: req.user!.name,
-    actorRole: access.role!,
-    businessId: req.params.id,
-    action: 'INVITE_EMPLOYEE',
-    targetType: 'employee',
-    targetId: empId,
-    newValue: `${name} (${email}) as ${role}`,
-  });
-
+  recordAuditLog({ actorUserId: req.user!.id, actorName: req.user!.name, actorRole: access.role!, businessId: req.params.id, action: 'INVITE_EMPLOYEE', targetType: 'employee', targetId: empId, newValue: name + ' (' + email + ') as ' + role });
   const employees = db.prepare('SELECT * FROM employees WHERE business_id = ? ORDER BY created_at ASC').all(req.params.id);
-  res.status(201).json(employees);
+  return res.status(201).json({ employees, inviteToken, expiresAt, inviteEmail: email });
+});
+
+app.post('/api/employee-invitations/accept', (req: Request, res: Response) => {
+  if (!req.user) return res.status(401).json({ error: 'Sign in with the email address invited by the business first.' });
+  const inviteToken = String(req.body?.invite_token || '').trim();
+  if (!/^[a-f0-9]{64}$/i.test(inviteToken)) return res.status(400).json({ error: 'A valid employee invitation link is required.' });
+  const inviteHash = crypto.createHash('sha256').update(inviteToken).digest('hex');
+  const invite = db.prepare("SELECT e.*, b.name AS business_name FROM employees e JOIN businesses b ON b.id = e.business_id WHERE e.invite_token_hash = ? AND e.status = 'invited' AND e.invite_expires_at > ? LIMIT 1").get(inviteHash, new Date().toISOString()) as any;
+  if (!invite) return res.status(404).json({ error: 'This employee invitation is invalid, expired or already used.' });
+  if (String(invite.email).toLowerCase() !== String(req.user.email || '').toLowerCase()) return res.status(403).json({ error: 'Sign in using the exact email address this invitation was sent to.' });
+  const updateInvite = db.transaction(() => {
+    db.prepare("UPDATE employees SET user_id = ?, status = 'active', invite_token_hash = '', invite_expires_at = '' WHERE id = ? AND business_id = ? AND status = 'invited'").run(req.user!.id, invite.id, invite.business_id);
+    recordAuditLog({ actorUserId: req.user!.id, actorName: req.user!.name, actorRole: invite.role, businessId: invite.business_id, action: 'ACCEPT_EMPLOYEE_INVITATION', targetType: 'employee', targetId: invite.id, newValue: invite.business_name + ' (' + invite.role + ')' });
+  });
+  updateInvite();
+  return res.json({ accepted: true, businessId: invite.business_id, businessName: invite.business_name, role: invite.role });
 });
 
 app.patch('/api/businesses/:id/employees/:empId', (req: Request, res: Response) => {
   const access = verifyTenantAccess(req.user, req.params.id);
-  if (!access.allowed || (access.role !== 'owner' && access.role !== 'admin' && access.role !== 'super_admin')) {
-    res.status(403).json({ error: 'Only Business Owners or Administrators can modify employee permissions.' });
-    return;
-  }
-
-  const { role, permissions, status } = req.body;
+  if (!access.allowed || (access.role !== 'owner' && access.role !== 'admin' && access.role !== 'super_admin')) return res.status(403).json({ error: 'Only Business Owners or Administrators can modify employee permissions.' });
   const emp = db.prepare('SELECT * FROM employees WHERE id = ? AND business_id = ?').get(req.params.empId, req.params.id) as any;
-  if (!emp) {
-    res.status(404).json({ error: 'Employee not found' });
-    return;
-  }
-
-  db.prepare('UPDATE employees SET role = ?, permissions_json = ?, status = ? WHERE id = ?').run(
-    role ?? emp.role,
-    permissions ? JSON.stringify(permissions) : emp.permissions_json,
-    status ?? emp.status,
-    emp.id
+  if (!emp) return res.status(404).json({ error: 'Employee not found' });
+  if (emp.role === 'owner' && access.role !== 'owner' && access.role !== 'super_admin') return res.status(403).json({ error: 'Only the Business Owner can modify the owner account.' });
+  const { role, permissions, status } = req.body || {};
+  if (role !== undefined && !(EMPLOYEE_ROLES as readonly string[]).includes(String(role))) return res.status(400).json({ error: 'Unsupported employee role.' });
+  if (status !== undefined && !['invited', 'active', 'revoked'].includes(status)) return res.status(400).json({ error: 'Unsupported employee status.' });
+  if (status === 'active' && !emp.user_id) return res.status(409).json({ error: 'The employee must accept their invitation before access can be activated.' });
+  const nextPermissions = permissions === undefined ? emp.permissions_json : normalizeEmployeePermissions(permissions, access.role === 'owner' || access.role === 'super_admin');
+  if (nextPermissions === null) return res.status(400).json({ error: 'One or more employee permissions are invalid.' });
+  if (access.role === 'admin' && Array.isArray(nextPermissions) && nextPermissions.includes('all')) return res.status(403).json({ error: 'Only the Business Owner can grant all permissions.' });
+  db.prepare('UPDATE employees SET role = ?, permissions_json = ?, status = ?, invite_token_hash = CASE WHEN ? = \'revoked\' THEN \'\' ELSE invite_token_hash END, invite_expires_at = CASE WHEN ? = \'revoked\' THEN \'\' ELSE invite_expires_at END WHERE id = ? AND business_id = ?').run(
+    role ?? emp.role, typeof nextPermissions === 'string' ? nextPermissions : JSON.stringify(nextPermissions), status ?? emp.status, status ?? emp.status, status ?? emp.status, emp.id, req.params.id
   );
-
-  recordAuditLog({
-    actorUserId: req.user!.id,
-    actorName: req.user!.name,
-    actorRole: access.role!,
-    businessId: req.params.id,
-    action: status === 'revoked' ? 'REVOKE_EMPLOYEE_ACCESS' : 'UPDATE_EMPLOYEE_PERMISSIONS',
-    targetType: 'employee',
-    targetId: emp.id,
-    previousValue: `${emp.role} (${emp.status})`,
-    newValue: `${role ?? emp.role} (${status ?? emp.status})`,
-  });
-
+  recordAuditLog({ actorUserId: req.user!.id, actorName: req.user!.name, actorRole: access.role!, businessId: req.params.id, action: status === 'revoked' ? 'REVOKE_EMPLOYEE_ACCESS' : 'UPDATE_EMPLOYEE_PERMISSIONS', targetType: 'employee', targetId: emp.id, previousValue: emp.role + ' (' + emp.status + ')', newValue: (role ?? emp.role) + ' (' + (status ?? emp.status) + ')' });
   const employees = db.prepare('SELECT * FROM employees WHERE business_id = ? ORDER BY created_at ASC').all(req.params.id);
-  res.json(employees);
+  return res.json(employees);
 });
 
 app.post('/api/businesses/:id/promotions', (req: Request, res: Response) => {
