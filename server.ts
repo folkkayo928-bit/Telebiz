@@ -260,6 +260,23 @@ function verifyTenantAccess(user: AuthUser | undefined, businessId: string, requ
   return { allowed: true, business, role: emp.role };
 }
 
+// Public storefront mutations must respect publication and business status.
+// Authenticated owners/admins may still exercise these flows in an unpublished preview.
+function allowStorefrontWrite(req: Request, res: Response, business: any): boolean {
+  if (business.status === 'suspended' || business.status === 'paused') {
+    res.status(423).json({ error: `This business application is currently ${business.status}.` });
+    return false;
+  }
+  if (business.mini_app_published) return true;
+
+  const previewAccess = verifyTenantAccess(req.user, business.id);
+  if (!previewAccess.allowed) {
+    res.status(404).json({ error: 'Business Mini App not found' });
+    return false;
+  }
+  return true;
+}
+
 // ============================================================================
 // 1. AUTHENTICATION & ACCOUNT ROUTES
 // ============================================================================
@@ -4634,6 +4651,8 @@ app.post('/api/storefront/:slug/reviews', (req: Request, res: Response) => {
     return;
   }
 
+  if (!allowStorefrontWrite(req, res, business)) return;
+
   const { customer_name, rating, comment, product_name, order_number } = req.body;
   const cleanName = String(customer_name || '').trim();
   const cleanComment = String(comment || '').trim();
@@ -4714,6 +4733,8 @@ app.post('/api/storefront/:slug/identify', (req: Request, res: Response) => {
     res.status(404).json({ error: 'Business not found' });
     return;
   }
+
+  if (!allowStorefrontWrite(req, res, business)) return;
 
   const ownerRow = db.prepare('SELECT owner_uid FROM users WHERE id = ?').get(business.owner_id) as any;
   const ownerUid = business.owner_uid || ownerRow?.owner_uid || business.id;
@@ -4798,6 +4819,8 @@ app.post('/api/storefront/:slug/event', (req: Request, res: Response) => {
     return;
   }
 
+  if (!allowStorefrontWrite(req, res, business)) return;
+
   const { event_type, page_name, product_id, source, device_type, session_id } = req.body;
   db.prepare(`
     INSERT INTO analytics_events (id, business_id, customer_id, session_id, event_type, page_name, product_id, source, device_type, duration_secs, created_at)
@@ -4831,6 +4854,8 @@ app.post('/api/storefront/:slug/checkout', (req: Request, res: Response) => {
     res.status(404).json({ error: 'Business not found' });
     return;
   }
+
+  if (!allowStorefrontWrite(req, res, business)) return;
 
   const {
     customer_name,
@@ -5088,6 +5113,8 @@ app.post('/api/storefront/:slug/book', (req: Request, res: Response) => {
     return;
   }
 
+  if (!allowStorefrontWrite(req, res, business)) return;
+
   const { service_id, customer_name, customer_phone, booking_date, booking_time, guests, notes } = req.body;
   const service = db.prepare('SELECT * FROM services_listings WHERE id = ? AND business_id = ?').get(service_id, business.id) as any;
   if (!service) {
@@ -5153,6 +5180,8 @@ app.post('/api/storefront/:slug/support', (req: Request, res: Response) => {
     res.status(404).json({ error: 'Business not found' });
     return;
   }
+
+  if (!allowStorefrontWrite(req, res, business)) return;
 
   const { customer_name, subject, message, channel } = req.body;
   if (!customer_name || !message) {
