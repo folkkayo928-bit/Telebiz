@@ -7547,7 +7547,7 @@ export default function App() {
                     )}
 
                     {/* Real-Time Check Result based on what the user writes down */}
-                    {loginVerifyStatus?.checked && loginVerifyStatus.exists && loginVerifyStatus.account && (
+                    {loginVerifyStatus?.checked && loginVerifyStatus.exists && (
                       <div className="mt-2 p-2.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 flex items-center justify-between gap-2 text-[11px]">
                         <div className="flex items-center gap-2 min-w-0">
                           <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
@@ -7556,7 +7556,7 @@ export default function App() {
                               Existing Account Verified:
                             </span>{' '}
                             <span className="font-semibold text-emerald-800 dark:text-emerald-300">
-                              {loginVerifyStatus.account.name} ({loginVerifyStatus.account.owner_uid})
+                              Your account is registered
                             </span>
                           </div>
                         </div>
@@ -8160,16 +8160,16 @@ export default function App() {
                             : 'bg-indigo-50/80 dark:bg-indigo-950/30 border-indigo-200 dark:border-indigo-800 text-indigo-900 dark:text-indigo-200'
                         }`}
                       >
-                        {tgVerifyStatus.exists && tgVerifyStatus.account ? (
+                        {tgVerifyStatus.exists ? (
                           <div>
                             <div className="font-extrabold flex items-center gap-1">
                               <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
                               <span>
-                                Existing Account Found: {tgVerifyStatus.account.name} ({tgVerifyStatus.account.owner_uid})
+                                Existing account found for this Telegram handle
                               </span>
                             </div>
                             <p className="text-[10px] mt-0.5 opacity-90">
-                              Enter your <strong>Secondary Passcode</strong> in Field 3 below to log in. (Store Owner Name is already saved.)
+                              Enter your <strong>Secondary Passcode</strong> in Field 3 below to log in.
                             </p>
                           </div>
                         ) : (
@@ -8234,8 +8234,8 @@ export default function App() {
                           }
                         }}
                         placeholder={
-                          tgVerifyStatus?.checked && tgVerifyStatus.exists && tgVerifyStatus.account
-                            ? tgVerifyStatus.account.name
+                          tgVerifyStatus?.checked && tgVerifyStatus.exists
+                            ? 'Existing account'
                             : 'Write Store Owner Name (Required if new)'
                         }
                         className={`w-full px-3.5 py-2.5 rounded-xl border bg-white dark:bg-slate-950 text-xs ${

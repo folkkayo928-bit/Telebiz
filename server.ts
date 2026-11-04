@@ -554,15 +554,17 @@ async function verifyGoogleIdToken(credential: string): Promise<any | null> {
 }
 
 // Real-Time Account & Username Checker (Verifies Telegram @handle, Google email, or Owner ID)
-app.get('/api/auth/check-account', (req: Request, res: Response) => {
+app.get('/api/auth/check-account', authRateLimit, (req: Request, res: Response) => {
   const rawIdentifier = String(req.query.identifier || '').trim();
   const checkType = String(req.query.type || 'any').trim().toLowerCase();
 
-  if (!rawIdentifier) {
-    res.json({
+  // This endpoint is used for live form validation. Bound input size and never
+  // return names, email addresses, owner IDs, or other account profile details.
+  if (!rawIdentifier || rawIdentifier.length > 254) {
+    res.status(rawIdentifier ? 400 : 200).json({
       exists: false,
       validFormat: false,
-      formatError: 'Please enter a username or email to verify.',
+      formatError: rawIdentifier ? 'Identifier is too long.' : 'Please enter a username or email to verify.',
     });
     return;
   }
@@ -581,23 +583,9 @@ app.get('/api/auth/check-account', (req: Request, res: Response) => {
     }
 
     const user = findUserByTelegramHandle(cleanNoAt);
-    if (user) {
-      res.json({
-        exists: true,
-        validFormat: true,
-        normalizedHandle: user.telegram_username || `@${cleanNoAt}`,
-        account: {
-          name: user.name,
-          owner_uid: user.owner_uid,
-          telegram_username: user.telegram_username || `@${cleanNoAt}`,
-          has_passcode: Boolean(user.recovery_passcode_hash || user.passcode),
-        },
-      });
-      return;
-    }
-
+    res.setHeader('Cache-Control', 'no-store');
     res.json({
-      exists: false,
+      exists: Boolean(user),
       validFormat: true,
       normalizedHandle: `@${cleanNoAt}`,
     });
@@ -616,42 +604,15 @@ app.get('/api/auth/check-account', (req: Request, res: Response) => {
       return;
     }
 
-    const user = db.prepare('SELECT * FROM users WHERE LOWER(email) = ? LIMIT 1').get(cleanEmail) as any;
-    if (user) {
-      res.json({
-        exists: true,
-        validFormat: true,
-        account: {
-          name: user.name,
-          email: user.email,
-          owner_uid: user.owner_uid,
-          telegram_username: user.telegram_username || '',
-          auth_provider: user.auth_provider || 'email',
-        },
-      });
-      return;
-    }
-
-    res.json({
-      exists: false,
-      validFormat: true,
-    });
+    const user = db.prepare('SELECT 1 FROM users WHERE LOWER(email) = ? LIMIT 1').get(cleanEmail);
+    res.setHeader('Cache-Control', 'no-store');
+    res.json({ exists: Boolean(user), validFormat: true });
     return;
   }
 
   const user = findUserByIdentifier(rawIdentifier);
-  res.json({
-    exists: Boolean(user),
-    validFormat: true,
-    account: user
-      ? {
-          name: user.name,
-          email: user.email,
-          owner_uid: user.owner_uid,
-          telegram_username: user.telegram_username || '',
-        }
-      : null,
-  });
+  res.setHeader('Cache-Control', 'no-store');
+  res.json({ exists: Boolean(user), validFormat: true });
 });
 
 app.post('/api/auth/login', authRateLimit, (req: Request, res: Response) => {
