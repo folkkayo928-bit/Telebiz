@@ -7,6 +7,7 @@ import fs from 'fs';
 import path from 'path';
 import { GoogleGenAI, Type } from '@google/genai';
 import { normalizeStoreTheme, validateBuilderPayload } from './src/lib/storeTheme.ts';
+import { paymentActionError } from './src/lib/paymentState.ts';
 import {
   db,
   initDatabase,
@@ -3396,138 +3397,105 @@ app.post('/api/businesses/:id/services', (req: Request, res: Response) => {
 // Order Status, Delivery Status, Employee Assignment & Refund Management
 app.patch('/api/businesses/:id/orders/:orderId', (req: Request, res: Response) => {
   const access = verifyTenantAccess(req.user, req.params.id, 'orders.manage');
-  if (!access.allowed) {
-    res.status(403).json({ error: access.error });
-    return;
-  }
-
+  if (!access.allowed) return res.status(403).json({ error: access.error });
   const order = db.prepare('SELECT * FROM orders WHERE id = ? AND business_id = ?').get(req.params.orderId, req.params.id) as any;
-  if (!order) {
-    res.status(404).json({ error: 'Order not found' });
-    return;
+  if (!order) return res.status(404).json({ error: 'Order not found' });
+  const { status, delivery_status, assigned_employee_id } = req.body || {};
+  const allowedStatuses = ['pending', 'confirmed', 'preparing', 'out_for_delivery', 'completed', 'cancelled', 'refunded'];
+  const allowedDeliveryStatuses = ['awaiting_dispatch', 'preparing_package', 'courier_en_route', 'delivered'];
+  if (status !== undefined && !allowedStatuses.includes(status)) return res.status(400).json({ error: 'Invalid order status.' });
+  if (delivery_status !== undefined && !allowedDeliveryStatuses.includes(delivery_status)) return res.status(400).json({ error: 'Invalid delivery status.' });
+  if (assigned_employee_id !== undefined && assigned_employee_id !== null && assigned_employee_id !== '') {
+    const employee = db.prepare("SELECT id FROM employees WHERE id = ? AND business_id = ? AND status = 'active'").get(assigned_employee_id, req.params.id);
+    if (!employee) return res.status(400).json({ error: 'The assigned employee must belong to this business and be active.' });
   }
-
-  const { status, delivery_status, assigned_employee_id } = req.body;
-  let newPaymentStatus = order.payment_status;
+  if (status === 'cancelled' && order.payment_status === 'paid') return res.status(409).json({ error: 'This order is already paid. Record a manual refund before changing it to refunded.' });
+  if (status === 'refunded' && order.payment_status !== 'paid') return res.status(409).json({ error: 'Only paid orders can be refunded. Reject an unpaid payment request instead.' });
   if (status === 'refunded') {
-    newPaymentStatus = 'refunded';
-    db.prepare('UPDATE payments SET status = ? WHERE order_id = ? AND business_id = ?').run('refunded', order.id, req.params.id);
+    const verifiedPayment = db.prepare("SELECT id FROM payments WHERE order_id = ? AND business_id = ? AND status = 'verified' LIMIT 1").get(order.id, req.params.id);
+    if (!verifiedPayment) return res.status(409).json({ error: 'A verified manual payment record is required before refunding this order.' });
   }
-
+  const nextPaymentStatus = status === 'refunded' ? 'refunded' : status === 'cancelled' && order.payment_status !== 'paid' ? 'failed' : order.payment_status;
   const updateOrder = db.transaction(() => {
-    if (status === 'cancelled' && order.status !== 'cancelled' && order.payment_status !== 'paid') {
+    if (status === 'cancelled' && order.payment_status !== 'paid') {
       restoreReservedOrderStock(order, req.params.id);
+      db.prepare("UPDATE payments SET status = 'failed' WHERE order_id = ? AND business_id = ? AND status IN ('initiated', 'pending', 'pending_verification')").run(order.id, req.params.id);
     }
-    db.prepare(`
-      UPDATE orders SET status = ?, delivery_status = ?, assigned_employee_id = ?, payment_status = ?
-      WHERE id = ? AND business_id = ?
-    `).run(
-      status ?? order.status,
-      delivery_status ?? order.delivery_status,
+    if (status === 'refunded') db.prepare("UPDATE payments SET status = 'refunded' WHERE order_id = ? AND business_id = ? AND status = 'verified'").run(order.id, req.params.id);
+    db.prepare('UPDATE orders SET status = ?, delivery_status = ?, assigned_employee_id = ?, payment_status = ? WHERE id = ? AND business_id = ?').run(
+      status ?? order.status, delivery_status ?? order.delivery_status,
       assigned_employee_id !== undefined ? assigned_employee_id : order.assigned_employee_id,
-      newPaymentStatus,
-      order.id,
-      req.params.id
+      nextPaymentStatus, order.id, req.params.id
     );
   });
   updateOrder();
-
   const orders = db.prepare('SELECT * FROM orders WHERE business_id = ? ORDER BY created_at DESC').all(req.params.id);
-  res.json(orders);
+  return res.json(orders);
 });
 
-// Manual payment verification: a business user must enter the real bank/provider reference after checking receipt.
+// Manual payment verification: business staff confirm receipt against the real bank/provider record.
 app.post('/api/businesses/:id/payments/:paymentId/verify', (req: Request, res: Response) => {
   const access = verifyTenantAccess(req.user, req.params.id, 'orders.manage');
-  if (!access.allowed) {
-    res.status(403).json({ error: access.error });
-    return;
-  }
-
-  const { provider_tx_id, action } = req.body;
-  if (!['verify', 'fail', 'refund'].includes(action)) {
-    res.status(400).json({ error: 'Unsupported payment action.' });
-    return;
-  }
-
+  if (!access.allowed) return res.status(403).json({ error: access.error });
+  const { provider_tx_id, action } = req.body || {};
+  if (!['verify', 'fail', 'refund'].includes(action)) return res.status(400).json({ error: 'Unsupported payment action.' });
   const payment = db.prepare('SELECT * FROM payments WHERE id = ? AND business_id = ?').get(req.params.paymentId, req.params.id) as any;
-  if (!payment) {
-    res.status(404).json({ error: 'Payment record not found' });
-    return;
+  if (!payment) return res.status(404).json({ error: 'Payment record not found' });
+  const transitionError = paymentActionError(payment.status, action);
+  if (transitionError) return res.status(409).json({ error: transitionError });
+  const ordersNow = () => db.prepare('SELECT * FROM orders WHERE business_id = ? ORDER BY created_at DESC').all(req.params.id);
+  const paymentsNow = () => db.prepare('SELECT * FROM payments WHERE business_id = ? ORDER BY created_at DESC').all(req.params.id);
+  if ((action === 'verify' && payment.status === 'verified') || (action === 'fail' && payment.status === 'failed') || (action === 'refund' && payment.status === 'refunded')) {
+    return res.json({ payments: paymentsNow(), orders: ordersNow(), alreadyProcessed: true });
   }
-
+  const linkedOrder = payment.order_id ? db.prepare('SELECT * FROM orders WHERE id = ? AND business_id = ?').get(payment.order_id, req.params.id) as any : null;
+  const linkedBooking = payment.booking_id ? db.prepare('SELECT * FROM bookings WHERE id = ? AND business_id = ?').get(payment.booking_id, req.params.id) as any : null;
+  if (payment.order_id && !linkedOrder) return res.status(409).json({ error: 'The linked order no longer exists.' });
+  if (payment.booking_id && !linkedBooking) return res.status(409).json({ error: 'The linked booking no longer exists.' });
+  if (action === 'fail' && linkedBooking?.payment_status === 'paid') return res.status(409).json({ error: 'A paid booking cannot be marked as failed. Use the refund action.' });
+  if (action === 'refund' && linkedOrder && linkedOrder.payment_status !== 'paid') return res.status(409).json({ error: 'Only paid orders can be refunded.' });
+  if (action === 'refund' && linkedBooking && linkedBooking.payment_status !== 'paid') return res.status(409).json({ error: 'Only paid bookings can be refunded.' });
+  if (action === 'fail' && linkedOrder?.payment_status === 'paid') return res.status(409).json({ error: 'A paid order cannot be marked as failed. Use the refund action.' });
+  if (action === 'verify' && (linkedOrder?.status === 'cancelled' || linkedOrder?.status === 'refunded' || linkedBooking?.status === 'cancelled' || linkedBooking?.status === 'refunded')) return res.status(409).json({ error: 'A cancelled or refunded order/booking cannot be paid.' });
+  let transactionReference = '';
   if (action === 'verify') {
-    const transactionReference = String(provider_tx_id || '').trim();
-    if (transactionReference.length < 3) {
-      res.status(400).json({ error: 'Enter the real transaction reference after confirming the money was received.' });
-      return;
-    }
-    const duplicate = db.prepare(
-      'SELECT id FROM payments WHERE business_id = ? AND provider_tx_id = ? AND status = ? AND id <> ?'
-    ).get(req.params.id, transactionReference, 'verified', payment.id);
-    if (duplicate) {
-      res.status(409).json({ error: 'This transaction reference has already been used for another verified payment.' });
-      return;
-    }
-    if (payment.status === 'verified') {
-      const payments = db.prepare('SELECT * FROM payments WHERE business_id = ? ORDER BY created_at DESC').all(req.params.id);
-      const orders = db.prepare('SELECT * FROM orders WHERE business_id = ? ORDER BY created_at DESC').all(req.params.id);
-      res.json({ payments, orders, alreadyVerified: true });
-      return;
-    }
+    transactionReference = String(provider_tx_id || '').trim();
+    if (transactionReference.length < 3 || transactionReference.length > 160) return res.status(400).json({ error: 'Enter a valid transaction reference (3–160 characters) after confirming receipt.' });
+    const duplicate = db.prepare("SELECT id FROM payments WHERE business_id = ? AND provider_tx_id = ? AND status = 'verified' AND id <> ?").get(req.params.id, transactionReference, payment.id);
+    if (duplicate) return res.status(409).json({ error: 'This transaction reference has already been used for another verified payment.' });
   }
-
   const now = new Date().toISOString();
   const updatePayment = db.transaction(() => {
     if (action === 'fail') {
-      db.prepare('UPDATE payments SET status = ? WHERE id = ? AND business_id = ?').run('failed', payment.id, req.params.id);
-      if (payment.order_id) {
-        const order = db.prepare('SELECT * FROM orders WHERE id = ? AND business_id = ?').get(payment.order_id, req.params.id) as any;
-        if (order) restoreReservedOrderStock(order, req.params.id);
-        db.prepare('UPDATE orders SET payment_status = ?, status = ? WHERE id = ? AND business_id = ?').run('failed', 'cancelled', payment.order_id, req.params.id);
+      db.prepare("UPDATE payments SET status = 'failed' WHERE id = ? AND business_id = ?").run(payment.id, req.params.id);
+      if (linkedOrder) {
+        restoreReservedOrderStock(linkedOrder, req.params.id);
+        db.prepare("UPDATE orders SET payment_status = 'failed', status = 'cancelled' WHERE id = ? AND business_id = ? AND payment_status <> 'paid'").run(linkedOrder.id, req.params.id);
       }
+      if (linkedBooking) db.prepare("UPDATE bookings SET payment_status = 'failed', status = 'cancelled' WHERE id = ? AND business_id = ? AND payment_status <> 'paid'").run(linkedBooking.id, req.params.id);
     } else if (action === 'refund') {
-      db.prepare('UPDATE payments SET status = ? WHERE id = ? AND business_id = ?').run('refunded', payment.id, req.params.id);
-      if (payment.order_id) {
-        db.prepare('UPDATE orders SET payment_status = ?, status = ? WHERE id = ? AND business_id = ?').run('refunded', 'refunded', payment.order_id, req.params.id);
-      }
+      db.prepare("UPDATE payments SET status = 'refunded' WHERE id = ? AND business_id = ?").run(payment.id, req.params.id);
+      if (linkedOrder) db.prepare("UPDATE orders SET payment_status = 'refunded', status = 'refunded' WHERE id = ? AND business_id = ?").run(linkedOrder.id, req.params.id);
+      if (linkedBooking) db.prepare("UPDATE bookings SET payment_status = 'refunded', status = 'refunded' WHERE id = ? AND business_id = ?").run(linkedBooking.id, req.params.id);
     } else {
-      db.prepare('UPDATE payments SET status = ?, provider_tx_id = ?, verified_at = ?, verified_by = ? WHERE id = ? AND business_id = ?').run(
-        'verified',
-        String(provider_tx_id).trim(),
-        now,
-        req.user!.name,
-        payment.id,
-        req.params.id
-      );
-
-      if (payment.order_id) {
-        db.prepare('UPDATE orders SET payment_status = ?, status = CASE WHEN status = "pending" THEN "confirmed" ELSE status END WHERE id = ? AND business_id = ?').run('paid', payment.order_id, req.params.id);
-        const order = db.prepare('SELECT * FROM orders WHERE id = ? AND business_id = ?').get(payment.order_id, req.params.id) as any;
-        if (order && order.customer_id) {
-          const pointsEarned = Math.floor(Number(order.total) / 25);
-          db.prepare('UPDATE customers SET total_spent = total_spent + ?, loyalty_points = loyalty_points + ? WHERE id = ? AND business_id = ?').run(
-            order.total, pointsEarned, order.customer_id, req.params.id
-          );
+      db.prepare('UPDATE payments SET status = ?, provider_tx_id = ?, verified_at = ?, verified_by = ? WHERE id = ? AND business_id = ?').run('verified', transactionReference, now, req.user!.name, payment.id, req.params.id);
+      if (linkedOrder) {
+        db.prepare("UPDATE orders SET payment_status = 'paid', status = CASE WHEN status = 'pending' THEN 'confirmed' ELSE status END WHERE id = ? AND business_id = ?").run(linkedOrder.id, req.params.id);
+        if (linkedOrder.customer_id) {
+          const pointsEarned = Math.floor(Number(linkedOrder.total) / 25);
+          db.prepare('UPDATE customers SET total_spent = total_spent + ?, loyalty_points = loyalty_points + ? WHERE id = ? AND business_id = ?').run(linkedOrder.total, pointsEarned, linkedOrder.customer_id, req.params.id);
         }
-        const insertEvent = db.prepare(`
-          INSERT INTO analytics_events (id, business_id, customer_id, session_id, event_type, page_name, product_id, source, device_type, duration_secs, created_at)
-          VALUES (?, ?, ?, ?, ?, 'checkout', null, 'telegram', 'mobile_tg', 90, ?)
-        `);
-        insertEvent.run('ev_' + crypto.randomBytes(4).toString('hex'), req.params.id, order?.customer_id || null, 'sess_ver_' + payment.id, 'payment_confirmed', now);
-        insertEvent.run('ev_' + crypto.randomBytes(4).toString('hex'), req.params.id, order?.customer_id || null, 'sess_ver_' + payment.id, 'purchase_complete', now);
+        const eventSource = linkedOrder.source === 'web' ? 'web' : 'telegram';
+        const deviceType = eventSource === 'web' ? 'mobile_web' : 'mobile_tg';
+        const insertEvent = db.prepare("INSERT INTO analytics_events (id, business_id, customer_id, session_id, event_type, page_name, product_id, source, device_type, duration_secs, created_at) VALUES (?, ?, ?, ?, ?, 'checkout', null, ?, ?, 0, ?)");
+        insertEvent.run('ev_' + crypto.randomBytes(4).toString('hex'), req.params.id, linkedOrder.customer_id || null, 'sess_ver_' + payment.id, 'payment_confirmed', eventSource, deviceType, now);
+        insertEvent.run('ev_' + crypto.randomBytes(4).toString('hex'), req.params.id, linkedOrder.customer_id || null, 'sess_ver_' + payment.id, 'purchase_complete', eventSource, deviceType, now);
       }
-
-      if (payment.booking_id) {
-        db.prepare('UPDATE bookings SET payment_status = ?, status = "confirmed" WHERE id = ? AND business_id = ?').run('paid', payment.booking_id, req.params.id);
-      }
+      if (linkedBooking) db.prepare("UPDATE bookings SET payment_status = 'paid', status = 'confirmed' WHERE id = ? AND business_id = ?").run(linkedBooking.id, req.params.id);
     }
   });
   updatePayment();
-
-  const payments = db.prepare('SELECT * FROM payments WHERE business_id = ? ORDER BY created_at DESC').all(req.params.id);
-  const orders = db.prepare('SELECT * FROM orders WHERE business_id = ? ORDER BY created_at DESC').all(req.params.id);
-  res.json({ payments, orders });
+  return res.json({ payments: paymentsNow(), orders: ordersNow() });
 });
 
 // Bookings Management
