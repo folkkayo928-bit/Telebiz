@@ -914,11 +914,11 @@ export const MiniAppStorefront: React.FC<StorefrontProps> = ({
   };
 
   const handleSaveQuickEditInPreview = async () => {
-    if (!authToken || !business?.id) return;
+    if (!authToken || !business?.id || quickSaving) return;
     setQuickSaving(true);
     setQuickNotice('');
     try {
-      await fetch(`/api/businesses/${business.id}/settings`, {
+      const settingsRes = await fetch(`/api/businesses/${business.id}/settings`, {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',
@@ -930,8 +930,11 @@ export const MiniAppStorefront: React.FC<StorefrontProps> = ({
           font_family: storeFontFamily,
         }),
       });
+      const settingsJson = await settingsRes.json().catch(() => ({}));
+      if (!settingsRes.ok) throw new Error(settingsJson.error || 'Store appearance could not be saved.');
+
       if (quickAddCat.trim()) {
-        await fetch(`/api/businesses/${business.id}/categories`, {
+        const categoryRes = await fetch(`/api/businesses/${business.id}/categories`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -939,13 +942,15 @@ export const MiniAppStorefront: React.FC<StorefrontProps> = ({
           },
           body: JSON.stringify({ category_name: quickAddCat.trim() }),
         });
+        const categoryJson = await categoryRes.json().catch(() => ({}));
+        if (!categoryRes.ok) throw new Error(categoryJson.error || 'The new category could not be saved.');
         setQuickAddCat('');
       }
-      setQuickNotice('Saved live store appearance & category changes!');
       await loadStorefront();
+      setQuickNotice('Store appearance saved successfully.');
       if (onOrderCreated) onOrderCreated();
-    } catch {
-      setQuickNotice('Could not save quick edits.');
+    } catch (err: any) {
+      setQuickNotice(err?.message || 'Could not save quick edits.');
     } finally {
       setQuickSaving(false);
     }

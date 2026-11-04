@@ -2504,6 +2504,9 @@ app.patch('/api/businesses/:id/settings', (req: Request, res: Response) => {
   } = req.body;
 
   const b = access.business;
+  if (primary_color !== undefined && (typeof primary_color !== 'string' || !/^#[0-9a-fA-F]{6}$/.test(primary_color))) { res.status(400).json({ error: 'Primary color must be a six-digit hex color.' }); return; }
+  if (accent_color !== undefined && (typeof accent_color !== 'string' || !/^#[0-9a-fA-F]{6}$/.test(accent_color))) { res.status(400).json({ error: 'Accent color must be a six-digit hex color.' }); return; }
+  if (font_family !== undefined && (typeof font_family !== 'string' || !font_family.trim() || font_family.trim().length > 80)) { res.status(400).json({ error: 'Font family must be between 1 and 80 characters.' }); return; }
   db.prepare(`
     UPDATE businesses SET
       name = ?, description = ?, about_text = ?, contact_phone = ?, contact_email = ?,
@@ -2529,7 +2532,7 @@ app.patch('/api/businesses/:id/settings', (req: Request, res: Response) => {
   );
 
   if (primary_color || accent_color || font_family) {
-    const latestVer = db.prepare('SELECT id, theme_json FROM mini_app_versions WHERE business_id = ? ORDER BY version_number DESC LIMIT 1').get(req.params.id) as any;
+    const latestVer = db.prepare("SELECT id, theme_json FROM mini_app_versions WHERE business_id = ? AND status = 'published' ORDER BY version_number DESC LIMIT 1").get(req.params.id) as any;
     if (latestVer) {
       try {
         const parsed = JSON.parse(latestVer.theme_json || '{}');

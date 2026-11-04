@@ -8,6 +8,7 @@ describe('store theme persistence', () => {
     expect(theme.accentColor).toBe('#ABCDEF');
     expect(theme.fontFamily).toBe('Fraunces');
   });
+  test('falls back safely when a custom color is malformed', () => { const theme = normalizeStoreTheme({ primaryColor: 'invalid' }); expect(theme.primaryColor).toBe('#09090B'); });
   test('uses business theme as a fallback for partial versions', () => {
     const theme = normalizeStoreTheme({ fontFamily: 'Cinzel' }, { primaryColor: '#445566' });
     expect(theme.primaryColor).toBe('#445566');
