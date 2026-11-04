@@ -25,6 +25,28 @@ if (!fs.existsSync(uploadsDir)) {
 }
 
 const app = express();
+
+// Public liveness/readiness probe for Render and external uptime monitors.
+// It deliberately returns no environment variables, filesystem paths, or secrets.
+app.get('/healthz', (_req: Request, res: Response) => {
+  try {
+    db.prepare('SELECT 1 AS ok').get();
+    res.setHeader('Cache-Control', 'no-store');
+    res.status(200).json({
+      status: 'ok',
+      database: 'ok',
+      timestamp: new Date().toISOString(),
+    });
+  } catch (error) {
+    console.error('Health check database probe failed:', error);
+    res.setHeader('Cache-Control', 'no-store');
+    res.status(503).json({
+      status: 'unavailable',
+      database: 'unavailable',
+      timestamp: new Date().toISOString(),
+    });
+  }
+});
 app.use(express.json({ limit: '18mb' }));
 
 // Serve deduplicated & compressed product images with 1-year immutable cache headers
