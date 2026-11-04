@@ -4,7 +4,7 @@ export function normalizeStoreTheme(input: unknown, fallback: Record<string, unk
   const source = input && typeof input === 'object' && !Array.isArray(input) ? input as Record<string, unknown> : {};
   const result: StoreTheme = { ...DEFAULTS };
   const keys = ['primaryColor','accentColor','backgroundColor','fontFamily','tastePreset','backgroundType','backgroundPattern','pageDarkness','headingTransform','productCardStyle','productGridColumns','productAspectRatio','cardRadius','cardBackgroundStyle','headerStyle','buttonStyle'];
-  for (const key of keys) { const v = source[key] ?? fallback[key]; if (typeof v === 'string' && v.trim() && v.length <= 80) result[key] = v.trim(); }
+  for (const key of keys) { const v = source[key] ?? fallback[key]; if (typeof v !== 'string' || !v.trim() || v.length > 80) continue; const clean = v.trim(); if (['primaryColor', 'accentColor', 'backgroundColor'].includes(key)) { if (/^#[0-9a-fA-F]{6}$/.test(clean)) result[key] = clean.toUpperCase(); } else { result[key] = clean; } }
   for (const key of ['showStockBadges','showStarRatings']) { const v = source[key] ?? fallback[key]; if (typeof v === 'boolean') result[key] = v; }
   return result;
 }
