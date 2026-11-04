@@ -104,6 +104,45 @@ declare global {
   }
 }
 
+// Restore inventory reserved by a newly-created order exactly once.
+// Older orders have no stock_reserved_at marker and are deliberately left untouched.
+function restoreReservedOrderStock(order: any, businessId: string): boolean {
+  if (!order || !order.stock_reserved_at || order.stock_restored_at) return false;
+
+  let items: any[];
+  try {
+    items = JSON.parse(String(order.items_json || '[]'));
+  } catch {
+    throw new Error('Cannot restore inventory: order items are unreadable.');
+  }
+  if (!Array.isArray(items)) {
+    throw new Error('Cannot restore inventory: order items are invalid.');
+  }
+
+  const quantities = new Map<string, number>();
+  for (const item of items) {
+    const productId = String(item?.productId || '');
+    const quantity = Number(item?.qty);
+    if (!productId || !Number.isInteger(quantity) || quantity < 1) {
+      throw new Error('Cannot restore inventory: an order item is invalid.');
+    }
+    quantities.set(productId, (quantities.get(productId) || 0) + quantity);
+  }
+
+  for (const [productId, quantity] of quantities.entries()) {
+    // If a product was already removed by an administrator, keep cancellation
+    // possible; there is no remaining catalog row to receive its stock.
+    db.prepare(
+      'UPDATE products SET stock = stock + ?, purchases_count = MAX(0, COALESCE(purchases_count, 0) - ?) WHERE id = ? AND business_id = ?'
+    ).run(quantity, quantity, productId, businessId);
+  }
+
+  const marked = db.prepare(
+    'UPDATE orders SET stock_restored_at = ? WHERE id = ? AND business_id = ? AND stock_restored_at = "" AND stock_reserved_at != ""'
+  ).run(new Date().toISOString(), order.id, businessId);
+  return marked.changes === 1;
+}
+
 function recordAuditLog(params: {
   actorUserId: string;
   actorName: string;
@@ -3416,17 +3455,23 @@ app.patch('/api/businesses/:id/orders/:orderId', (req: Request, res: Response) =
     db.prepare('UPDATE payments SET status = ? WHERE order_id = ? AND business_id = ?').run('refunded', order.id, req.params.id);
   }
 
-  db.prepare(`
-    UPDATE orders SET status = ?, delivery_status = ?, assigned_employee_id = ?, payment_status = ?
-    WHERE id = ? AND business_id = ?
-  `).run(
-    status ?? order.status,
-    delivery_status ?? order.delivery_status,
-    assigned_employee_id !== undefined ? assigned_employee_id : order.assigned_employee_id,
-    newPaymentStatus,
-    order.id,
-    req.params.id
-  );
+  const updateOrder = db.transaction(() => {
+    if (status === 'cancelled' && order.status !== 'cancelled' && order.payment_status !== 'paid') {
+      restoreReservedOrderStock(order, req.params.id);
+    }
+    db.prepare(`
+      UPDATE orders SET status = ?, delivery_status = ?, assigned_employee_id = ?, payment_status = ?
+      WHERE id = ? AND business_id = ?
+    `).run(
+      status ?? order.status,
+      delivery_status ?? order.delivery_status,
+      assigned_employee_id !== undefined ? assigned_employee_id : order.assigned_employee_id,
+      newPaymentStatus,
+      order.id,
+      req.params.id
+    );
+  });
+  updateOrder();
 
   const orders = db.prepare('SELECT * FROM orders WHERE business_id = ? ORDER BY created_at DESC').all(req.params.id);
   res.json(orders);
@@ -3478,6 +3523,8 @@ app.post('/api/businesses/:id/payments/:paymentId/verify', (req: Request, res: R
     if (action === 'fail') {
       db.prepare('UPDATE payments SET status = ? WHERE id = ? AND business_id = ?').run('failed', payment.id, req.params.id);
       if (payment.order_id) {
+        const order = db.prepare('SELECT * FROM orders WHERE id = ? AND business_id = ?').get(payment.order_id, req.params.id) as any;
+        if (order) restoreReservedOrderStock(order, req.params.id);
         db.prepare('UPDATE orders SET payment_status = ?, status = ? WHERE id = ? AND business_id = ?').run('failed', 'cancelled', payment.order_id, req.params.id);
       }
     } else if (action === 'refund') {
@@ -4936,6 +4983,9 @@ app.post('/api/storefront/:slug/checkout', (req: Request, res: Response) => {
         paymentMethod.method_name,
         now
       );
+
+      // Mark only new checkout reservations; pre-existing orders are not auto-restocked.
+      db.prepare('UPDATE orders SET stock_reserved_at = ? WHERE id = ?').run(now, orderId);
 
       const paymentId = 'pay_' + crypto.randomBytes(4).toString('hex');
       const refCode = 'TX-' + crypto.randomBytes(3).toString('hex').toUpperCase();
