@@ -4580,12 +4580,13 @@ app.get('/api/storefront/:slug', (req: Request, res: Response) => {
     'SELECT * FROM store_reviews WHERE business_id = ? ORDER BY created_at DESC LIMIT 60'
   ).all(business.id) as any[];
   const totalReviews = reviews.length;
+  // A store with no reviews has no rating yet; never present an invented 5-star score.
   const averageRating = totalReviews > 0
-    ? Number((reviews.reduce((sum, r) => sum + Number(r.rating || 5), 0) / totalReviews).toFixed(1))
-    : 5.0;
+    ? Number((reviews.reduce((sum, r) => sum + Number(r.rating || 0), 0) / totalReviews).toFixed(1))
+    : 0;
 
-  const ownerUser = db.prepare('SELECT owner_uid, name FROM users WHERE id = ?').get(business.owner_id) as any;
-  const resolvedOwnerUid = business.owner_uid || ownerUser?.owner_uid || 'OWN-HAN-204881';
+  const ownerUser = db.prepare('SELECT owner_uid FROM users WHERE id = ?').get(business.owner_id) as any;
+  const resolvedOwnerUid = business.owner_uid || ownerUser?.owner_uid || '';
 
   res.json({
     business: {
@@ -4955,7 +4956,10 @@ app.post('/api/storefront/:slug/checkout', (req: Request, res: Response) => {
       }
 
       const orderId = 'ord_' + crypto.randomBytes(4).toString('hex');
-      const orderNumber = 'ORD-' + new Date().getFullYear() + '-' + Math.floor(1000 + Math.random() * 9000);
+      let orderNumber = '';
+      do {
+        orderNumber = `ORD-${new Date().getFullYear()}-${crypto.randomBytes(4).toString('hex').toUpperCase()}`;
+      } while (db.prepare('SELECT 1 FROM orders WHERE business_id = ? AND order_number = ? LIMIT 1').get(business.id, orderNumber));
       const orderPaymentStatus = 'pending_verification';
       const initialOrderStatus = 'pending';
       db.prepare(`
@@ -5092,7 +5096,10 @@ app.post('/api/storefront/:slug/book', (req: Request, res: Response) => {
   }
 
   const bookingId = 'bkg_' + crypto.randomBytes(4).toString('hex');
-  const bookingNumber = 'BKG-2026-' + Math.floor(100 + Math.random() * 900);
+  let bookingNumber = '';
+  do {
+    bookingNumber = `BKG-${new Date().getFullYear()}-${crypto.randomBytes(4).toString('hex').toUpperCase()}`;
+  } while (db.prepare('SELECT 1 FROM bookings WHERE business_id = ? AND booking_number = ? LIMIT 1').get(business.id, bookingNumber));
   const now = new Date().toISOString();
 
   db.prepare(`
