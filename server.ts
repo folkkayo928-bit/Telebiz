@@ -3046,45 +3046,34 @@ app.post('/api/businesses/:id/media/upload', (req: Request, res: Response) => {
 
   const sha256Hash = crypto.createHash('sha256').update(buffer).digest('hex');
   const ext = isWebp ? 'webp' : isPng ? 'png' : 'jpg';
-  const fileName = `img_${sha256Hash.slice(0, 24)}.${ext}`;
-  const filePath = path.join(uploadsDir, fileName);
-  const publicUrl = `/uploads/media/${fileName}`;
-
+  const shard = sha256Hash.slice(0, 2);
+  const fileName = `img_${sha256Hash}.${ext}`;
+  const shardDir = path.join(uploadsDir, shard);
+  const filePath = path.join(shardDir, fileName);
+  const publicUrl = `/uploads/media/${shard}/${fileName}`;
+  fs.mkdirSync(shardDir, { recursive: true });
   if (!fs.existsSync(filePath)) {
-    fs.writeFileSync(filePath, buffer, { flag: 'wx' });
+    try { fs.writeFileSync(filePath, buffer, { flag: 'wx' }); }
+    catch (error: any) { if (error?.code !== 'EEXIST') throw error; }
   }
 
   const ratio = Number((byteSize / origBytes).toFixed(2));
-  const mediaId = 'med_' + crypto.randomBytes(5).toString('hex');
 
-  db.prepare(`
-    INSERT INTO media_assets (
-      id, business_id, owner_id, sha256_hash, file_path, public_url,
-      mime_type, width, height, byte_size, original_size, compression_ratio, created_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(
-    mediaId,
-    req.params.id,
-    req.user?.id || null,
-    sha256Hash,
-    filePath,
-    publicUrl,
-    mimeType,
-    imageWidth,
-    imageHeight,
-    byteSize,
-    origBytes,
-    ratio,
-    new Date().toISOString()
-  );
-
+  const persistMediaAsset = db.transaction(() => {
+    const existing = db.prepare('SELECT id, public_url, byte_size, original_size FROM media_assets WHERE business_id = ? AND sha256_hash = ? LIMIT 1').get(req.params.id, sha256Hash) as any;
+    if (existing) return existing;
+    const mediaId = 'med_' + crypto.randomBytes(8).toString('hex');
+    db.prepare('INSERT INTO media_assets (id, business_id, owner_id, sha256_hash, file_path, public_url, mime_type, width, height, byte_size, original_size, compression_ratio, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(mediaId, req.params.id, req.user?.id || null, sha256Hash, filePath, publicUrl, mimeType, imageWidth, imageHeight, byteSize, origBytes, ratio, new Date().toISOString());
+    return { id: mediaId, public_url: publicUrl, byte_size: byteSize, original_size: origBytes };
+  });
+  const savedAsset = persistMediaAsset();
   res.status(201).json({
-    id: mediaId,
-    url: publicUrl,
-    sha256: sha256Hash,
-    byteSize,
-    originalSize: origBytes,
-    savedPercent: origBytes > byteSize ? Math.round((1 - byteSize / origBytes) * 100) : 0,
+    id: savedAsset.id, url: savedAsset.public_url, sha256: sha256Hash,
+    byteSize: Number(savedAsset.byte_size || byteSize),
+    originalSize: Number(savedAsset.original_size || origBytes),
+    savedPercent: Number(savedAsset.original_size || origBytes) > Number(savedAsset.byte_size || byteSize)
+      ? Math.round((1 - Number(savedAsset.byte_size || byteSize) / Number(savedAsset.original_size || origBytes)) * 100)
+      : 0,
   });
 });
 

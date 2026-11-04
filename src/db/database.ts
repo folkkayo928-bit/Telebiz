@@ -567,6 +567,7 @@ export function initDatabase() {
     CREATE INDEX IF NOT EXISTS idx_customers_fingerprint ON customers(business_id, device_fingerprint);
     CREATE INDEX IF NOT EXISTS idx_media_hash ON media_assets(sha256_hash);
     CREATE INDEX IF NOT EXISTS idx_media_business ON media_assets(business_id, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_media_business_hash ON media_assets(business_id, sha256_hash);
     CREATE INDEX IF NOT EXISTS idx_events_business_type ON analytics_events(business_id, event_type);
   `);
 
